@@ -140,6 +140,7 @@
       },
       'deck.cue': { down: () => player.cueDown(), up: () => player.cueUp() },
       'deck.loopIn': () => player.setLoopIn(),
+      'deck.quantise': () => player.setQuantise(!player.quantise),
       'deck.seekBack': () => player.seek(player.position - 2),
       'deck.seekForward': () => player.seek(player.position + 2),
       'deck.seekBackFar': () => player.seek(player.position - 10),
