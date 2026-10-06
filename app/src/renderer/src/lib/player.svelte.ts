@@ -45,6 +45,8 @@ export class Player {
   private sent: number | null = null
   /** Seek made before the element knew its duration. */
   private pending: number | null = null
+  /** Playhead to restore if starting playback resets the element to 0. */
+  private resume: number | null = null
 
   constructor() {
     this.audio.preload = 'auto'
@@ -52,10 +54,19 @@ export class Player {
       this.playing = true
       this.tick()
     })
+    this.audio.addEventListener('playing', () => {
+      const resume = this.resume
+      this.resume = null
+      if (resume == null || this.scrubbing) return
+      if (Math.abs(this.audio.currentTime - resume) < 0.05) return
+      this.position = resume
+      this.sent = null
+      this.apply(resume)
+    })
     this.audio.addEventListener('pause', () => {
       this.playing = false
       cancelAnimationFrame(this.raf)
-      if (!this.scrubbing) this.position = this.audio.currentTime
+      if (!this.scrubbing && this.sent == null && this.resume == null) this.position = this.audio.currentTime
     })
     this.audio.addEventListener('ended', () => (this.playing = false))
     this.audio.addEventListener('seeked', () => {
@@ -83,7 +94,7 @@ export class Player {
   }
 
   private tick = (): void => {
-    if (!this.scrubbing) this.position = this.audio.currentTime
+    if (!this.scrubbing && this.sent == null && this.resume == null) this.position = this.audio.currentTime
     if (!this.audio.paused) this.raf = requestAnimationFrame(this.tick)
   }
 
@@ -106,16 +117,9 @@ export class Player {
     this.apply(seconds)
   }
 
-  private mediaEnd(): number {
-    const ranges = this.audio.seekable
-    if (ranges.length > 0) return ranges.end(ranges.length - 1)
-    if (Number.isFinite(this.audio.duration) && this.audio.duration > 0) return this.audio.duration
-    return this.duration
-  }
-
-  /** The byte at `duration` is past the last sample, so stay just inside the file. */
+  /** The sample at `duration` is past the end of the file, so stay just inside it. */
   private playable(seconds: number): number {
-    const end = this.mediaEnd()
+    const end = Number.isFinite(this.audio.duration) && this.audio.duration > 0 ? this.audio.duration : this.duration
     const max = Number.isFinite(end) && end > 0.05 ? end - 0.001 : Math.max(0, end)
     return Math.max(0, Math.min(seconds, max || seconds))
   }
@@ -143,6 +147,7 @@ export class Player {
     this.scrubbing = false
     this.sent = null
     this.pending = null
+    this.resume = null
     this.track = track
     this.detail = null
     this.waveform = null
@@ -167,7 +172,14 @@ export class Player {
 
   play(): void {
     if (!this.track) return
-    this.audio.play().catch(() => {})
+    this.resume = this.position
+    if (Math.abs(this.audio.currentTime - this.position) >= 0.05) {
+      this.sent = null
+      this.apply(this.position)
+    }
+    void this.audio.play().catch(() => {
+      this.resume = null
+    })
   }
 
   toggle(): void {

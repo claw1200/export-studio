@@ -72,8 +72,10 @@ def decode_rgb(ext: Tags | None) -> dict | None:
 
 
 def decode_three_band(ex2: Tags | None, kind: str = "PWV7") -> dict | None:
-    """PWV7 (detail) / PWV6 (1200-column preview): three bytes per entry, ordered
-    mid, high, low. Returned as low, mid, high."""
+    """PWV7 (detail) / PWV6 (preview): three bytes per entry, low, mid, high.
+
+    Returned in that order. Stored values are 0–127 and scaled to 0–255.
+    """
     tag = _first(ex2, kind)
     if tag is None:
         return None
@@ -81,7 +83,7 @@ def decode_three_band(ex2: Tags | None, kind: str = "PWV7") -> dict | None:
     if not n:
         return None
     raw = np.frombuffer(body, dtype=np.uint8, count=n * 3).reshape(-1, 3)
-    bands = raw[:, [2, 0, 1]].astype(np.float32) * 2
+    bands = raw.astype(np.float32) * 2
     return {"length": int(n), "bands": _b64(np.clip(bands, 0, 255).round().reshape(-1))}
 
 
