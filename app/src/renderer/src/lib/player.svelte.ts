@@ -1,4 +1,5 @@
 import { api, audioUrl } from './api'
+import { cachedWaveSamples, loadWaveSamples, type WaveSamples } from './peaks'
 import type { Track, TrackDetail } from './types'
 import { decodeWaveform, type Waveform, type WaveformMode } from './waveform'
 
@@ -33,6 +34,8 @@ export class Player {
   track = $state.raw<Track | null>(null)
   detail = $state.raw<TrackDetail | null>(null)
   waveform = $state.raw<Waveform | null>(null)
+  /** PCM for the RGB detail view. Null until the audio has been decoded. */
+  wave = $state.raw<WaveSamples | null>(null)
   loading = $state(false)
   playing = $state(false)
   position = $state(0)
@@ -56,6 +59,7 @@ export class Player {
   private pending: number | null = null
   /** Playhead to restore if starting playback resets the element to 0. */
   private resume: number | null = null
+  private waveAbort: AbortController | null = null
 
   constructor() {
     this.level = this.volume > 0 ? this.volume : 1
@@ -163,6 +167,7 @@ export class Player {
     this.track = track
     this.detail = null
     this.waveform = null
+    this.beginWave(token, track.id)
     this.position = 0
     this.duration = track.duration
     this.audioError = null
@@ -205,8 +210,22 @@ export class Player {
   }
 
   setZoom(zoom: number): void {
-    this.zoom = Math.max(0.25, Math.min(8, zoom))
+    this.zoom = Math.max(0.25, Math.min(64, zoom))
     localStorage.setItem('waveformZoom', String(this.zoom))
+  }
+
+  /** Starts decoding PCM for the RGB wave. Cached tracks show up immediately. */
+  private beginWave(token: number, id: string): void {
+    this.waveAbort?.abort()
+    const ctrl = new AbortController()
+    this.waveAbort = ctrl
+    const url = audioUrl(id)
+    const cached = cachedWaveSamples(url)
+    this.wave = cached
+    if (cached) return
+    void loadWaveSamples(url, ctrl.signal).then((samples) => {
+      if (token === this.token) this.wave = samples
+    })
   }
 
   setVolume(volume: number): void {

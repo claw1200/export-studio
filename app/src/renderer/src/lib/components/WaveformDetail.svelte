@@ -28,7 +28,8 @@
       },
       canvas.width,
       canvas.height,
-      window.devicePixelRatio || 1
+      window.devicePixelRatio || 1,
+      player.wave
     )
   }
 

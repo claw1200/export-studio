@@ -1,3 +1,4 @@
+import type { WaveSamples } from './peaks'
 import type { Beatgrid, Cue, TrackDetail } from './types'
 import { HOT_CUE_DEFAULT, LOOP_DEFAULT, MEMORY_CUE_DEFAULT, TRACK_COLORS, hotCueLetter } from './format'
 
@@ -204,6 +205,103 @@ export interface DetailView {
   beatgrid: Beatgrid | null
 }
 
+let envUpper = new Float32Array(0)
+let envLower = new Float32Array(0)
+
+/**
+ * Bipolar trace of the decoded audio, coloured by the RGB analysis.
+ * Columns are locked to a grid anchored at sample 0 and drawn on whole pixels,
+ * so playback scrolls the picture instead of resampling every frame.
+ */
+function drawSampleWave(
+  ctx: CanvasRenderingContext2D,
+  wf: Waveform,
+  samples: WaveSamples,
+  from: number,
+  to: number,
+  pw: number,
+  ph: number
+): void {
+  const span = to - from
+  const data = samples.data
+  const len = data.length
+  if (span <= 0 || pw < 1 || ph < 1 || len < 2) return
+  if (envUpper.length < pw) {
+    envUpper = new Float32Array(pw)
+    envLower = new Float32Array(pw)
+  }
+  const upper = envUpper
+  const lower = envLower
+  const sample0 = (from / wf.rate) * samples.rate
+  const per = (span / wf.rate) * (samples.rate / pw)
+  if (!(per > 0)) return
+  const first = Math.floor(sample0 / per)
+  const mid = ph / 2
+  const scale = (ph * 0.46) / samples.peak
+
+  const at = (t: number): number => {
+    if (t <= 0) return data[0]
+    if (t >= len - 1) return data[len - 1]
+    const i = t | 0
+    return data[i] + (data[i + 1] - data[i]) * (t - i)
+  }
+
+  for (let x = 0; x < pw; x++) {
+    const a = (first + x) * per
+    const b = a + per
+    if (b <= 0 || a >= len - 1) {
+      upper[x] = NaN
+      continue
+    }
+    const left = a < 0 ? 0 : a
+    const right = b > len - 1 ? len - 1 : b
+    let lo = at(left)
+    let hi = lo
+    const endSample = at(right)
+    if (endSample < lo) lo = endSample
+    else if (endSample > hi) hi = endSample
+    for (let i = Math.ceil(left); i <= Math.floor(right); i++) {
+      const s = data[i]
+      if (s < lo) lo = s
+      else if (s > hi) hi = s
+    }
+    let top = Math.round(mid - hi * scale)
+    let bot = Math.round(mid - lo * scale)
+    if (bot - top < 1) {
+      const y = Math.round(mid - ((lo + hi) / 2) * scale)
+      top = y
+      bot = y + 1
+    }
+    upper[x] = top
+    lower[x] = bot
+  }
+
+  const colors = wf.rgbColors
+  const colorAt = (x: number): number => {
+    if (!colors || colors.length < 3) return -1
+    const seconds = ((first + x + 0.5) * per) / samples.rate
+    const entry = Math.floor(seconds * wf.rate)
+    return Math.min(colors.length / 3 - 1, Math.max(0, entry))
+  }
+
+  let x = 0
+  while (x < pw) {
+    if (Number.isNaN(upper[x])) {
+      x++
+      continue
+    }
+    const colorIndex = colorAt(x)
+    let end = x + 1
+    while (end < pw && !Number.isNaN(upper[end]) && colorAt(end) === colorIndex) end++
+    if (colors && colorIndex >= 0) {
+      const o = colorIndex * 3
+      ctx.fillStyle = `rgb(${colors[o]},${colors[o + 1]},${colors[o + 2]})`
+    } else ctx.fillStyle = 'rgb(90,150,255)'
+    for (let i = x; i < end; i++) ctx.fillRect(i, upper[i], 1, lower[i] - upper[i])
+    x = end
+  }
+}
+
 export function visibleRange(wf: Waveform, view: DetailView, cssWidth: number): [number, number] {
   const center = view.position * wf.rate
   const halfEntries = cssWidth / 2 / view.zoom
@@ -217,7 +315,8 @@ export function drawDetail(
   view: DetailView,
   pw: number,
   ph: number,
-  dpr: number
+  dpr: number,
+  samples?: WaveSamples | null
 ): void {
   ctx.clearRect(0, 0, pw, ph)
   const [from, to] = visibleRange(wf, view, pw / dpr)
@@ -236,7 +335,8 @@ export function drawDetail(
   const waveH = ph - 18 * dpr
   ctx.save()
   ctx.translate(0, 9 * dpr)
-  drawColumns(ctx, wf, mode, from, to, pw, waveH, 'center')
+  if (mode === 'rgb' && samples) drawSampleWave(ctx, wf, samples, from, to, pw, waveH)
+  else drawColumns(ctx, wf, mode, from, to, pw, waveH, 'center')
   ctx.restore()
 
   // beat grid

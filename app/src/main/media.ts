@@ -21,7 +21,10 @@ const MIME: Record<string, string> = {
 
 export function registerMediaScheme(): void {
   protocol.registerSchemesAsPrivileged([
-    { scheme: 'media', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }
+    {
+      scheme: 'media',
+      privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true }
+    }
   ])
 }
 
@@ -108,7 +111,8 @@ export function handleMediaProtocol(engine: Engine): void {
       const headers: Record<string, string> = {
         'content-type': type,
         'accept-ranges': 'bytes',
-        'content-length': String(size)
+        'content-length': String(size),
+        'access-control-allow-origin': '*'
       }
 
       if (request.method === 'HEAD') return new Response(null, { status: 200, headers })
