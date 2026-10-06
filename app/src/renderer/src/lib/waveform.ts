@@ -316,7 +316,10 @@ export interface DetailView {
   zoom: number
   cues: Cue[]
   beatgrid: Beatgrid | null
+  cuePoint: number | null
 }
+
+export const CUE_POINT_COLOR = '#ff8a1f'
 
 let envUpper = new Float32Array(0)
 let envLower = new Float32Array(0)
@@ -511,6 +514,24 @@ function paintCues(frame: Frame): void {
   }
 }
 
+function paintCuePoint(frame: Frame): void {
+  const { ctx, view, pw, ph, dpr, toX } = frame
+  if (view.cuePoint == null) return
+  const x = Math.round(toX(view.cuePoint))
+  const size = 7 * dpr
+  if (x < -size || x > pw + size) return
+  const stem = Math.max(1, dpr)
+  const tip = x + stem / 2
+  ctx.fillStyle = CUE_POINT_COLOR
+  ctx.fillRect(x, 0, stem, ph)
+  ctx.beginPath()
+  ctx.moveTo(tip - size, 0)
+  ctx.lineTo(tip + size, 0)
+  ctx.lineTo(tip, Math.round(size * 1.2))
+  ctx.closePath()
+  ctx.fill()
+}
+
 function paintPlayhead(frame: Frame): void {
   const { ctx, pw, ph, dpr } = frame
   const x = Math.round(pw / 2)
@@ -547,5 +568,6 @@ export function drawDetail(
   paintWave(frame, mode, samples)
   paintBeatGrid(frame)
   paintCues(frame)
+  paintCuePoint(frame)
   paintPlayhead(frame)
 }

@@ -24,7 +24,8 @@
         position: player.position,
         zoom: player.zoom,
         cues: player.detail?.cues ?? [],
-        beatgrid: player.detail?.beatgrid ?? null
+        beatgrid: player.detail?.beatgrid ?? null,
+        cuePoint: player.track ? player.cuePoint : null
       },
       canvas.width,
       canvas.height,

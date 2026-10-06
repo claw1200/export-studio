@@ -8,6 +8,7 @@ import { decodeWaveform, type Waveform, type WaveformMode } from './waveform'
 type DetailEntry = { detail: TrackDetail; waveform: Waveform | null }
 const detailCache = new Lru<string, Promise<DetailEntry>>(24)
 const SEEK_TOLERANCE = 0.05
+const CUE_TOLERANCE = 0.001
 const FILE_MISSING = 'Audio file not found'
 
 function storedVolume(): number {
@@ -60,18 +61,19 @@ export class Player {
   quantise = $state(storedFlag('quantise'))
   editing = $state(false)
   editError = $state<string | null>(null)
+  cuePoint = $state(0)
+  cueHeld = $state(false)
+  private cueLatched = false
   private unmuteVolume = 1
 
   private audio = new Audio()
   private raf = 0
   private token = 0
-  private scrubbing = false
-  private resumeAfterScrub = false
-  private parked = false
+  private scrubState: { resume: boolean; parked: boolean } | null = null
   private holdTimer = 0
-  private seekTarget: number | null = null
-  private seekBeforeMetadata: number | null = null
-  private playheadBeforePlay: number | null = null
+  private sent: number | null = null
+  private deferred = false
+  private starting = false
   private waveAbort: AbortController | null = null
 
   constructor() {
@@ -80,42 +82,41 @@ export class Player {
     this.audio.muted = this.muted
     this.audio.preload = 'auto'
     this.audio.addEventListener('play', () => {
+      if (this.audio.paused) return
       this.playing = true
+      cancelAnimationFrame(this.raf)
       this.tick()
     })
     this.audio.addEventListener('playing', () => {
-      const playhead = this.playheadBeforePlay
-      this.playheadBeforePlay = null
-      if (playhead == null || this.near(playhead)) return
-      if (!this.scrubbing) this.position = playhead
-      this.seekTarget = null
-      this.apply(playhead)
+      if (!this.starting) return
+      this.starting = false
+      if (!this.scrubState && this.sent == null && !this.deferred && !this.near(this.position)) this.syncElement()
     })
     this.audio.addEventListener('pause', () => {
       cancelAnimationFrame(this.raf)
-      if (this.scrubbing) return
+      if (!this.playing || this.scrubState?.parked) return
       this.playing = false
-      if (this.seekTarget == null && this.playheadBeforePlay == null) this.position = this.audio.currentTime
+      if (this.elementOwnsPosition) this.position = this.audio.currentTime
     })
     this.audio.addEventListener('ended', () => (this.playing = false))
     this.audio.addEventListener('seeked', () => {
-      const sent = this.seekTarget
-      this.seekTarget = null
-      if (sent != null && Math.abs(this.position - sent) >= SEEK_TOLERANCE) this.apply(this.position)
+      const sent = this.sent
+      this.sent = null
+      if (sent != null && sent !== this.position) this.syncElement()
     })
     this.audio.addEventListener('loadedmetadata', () => {
       if (Number.isFinite(this.audio.duration)) this.duration = this.audio.duration
-      if (this.seekBeforeMetadata != null && !this.scrubbing) {
-        const t = this.seekBeforeMetadata
-        this.seekBeforeMetadata = null
-        this.apply(t)
-      }
+      if (this.deferred) this.syncElement()
     })
     api.onEvent((event) => {
       if (event === 'library.locked') void this.refreshDetail()
     })
     this.audio.addEventListener('error', () => {
       if (this.sourceWasReplaced()) return
+      this.sent = null
+      this.deferred = false
+      this.starting = false
+      this.playing = false
       const ext = this.track?.fileType ?? ''
       this.audioError =
         this.detail && !this.detail.fileExists ? FILE_MISSING : `Preview not supported for ${ext || 'this file type'}`
@@ -130,62 +131,53 @@ export class Player {
     return this.audio.error?.code === MediaError.MEDIA_ERR_ABORTED
   }
 
+  private get elementOwnsPosition(): boolean {
+    return !this.scrubState && this.sent == null && !this.deferred && !this.starting
+  }
+
   private tick = (): void => {
-    if (!this.scrubbing && this.seekTarget == null && this.playheadBeforePlay == null)
-      this.position = this.audio.currentTime
+    if (this.elementOwnsPosition) this.position = this.audio.currentTime
     if (!this.audio.paused) this.raf = requestAnimationFrame(this.tick)
   }
 
   scrub(seconds: number): void {
     window.clearTimeout(this.holdTimer)
-    if (!this.scrubbing) this.resumeAfterScrub = !this.audio.paused
-    const moved = this.scrubbing && Math.abs(seconds - this.position) > 0
-    this.scrubbing = true
-    this.parked = false
-    this.apply(seconds)
-    if (moved && this.resumeAfterScrub && this.audio.paused) {
-      this.playheadBeforePlay = this.position
+    const moved = !!this.scrubState && this.insideFile(seconds) !== this.position
+    const scrub = (this.scrubState ??= { resume: this.playing, parked: false })
+    this.moveTo(seconds)
+    if (!scrub.resume) return
+    if (moved && scrub.parked) {
+      scrub.parked = false
       void this.audio.play().then(
         () => {
-          if (this.parked) this.audio.pause()
+          if (this.scrubState?.parked) this.audio.pause()
         },
-        () => {
-          this.playheadBeforePlay = null
-        }
+        () => {}
       )
     }
     this.holdTimer = window.setTimeout(() => this.holdStill(), 120)
   }
 
   private holdStill(): void {
-    if (!this.scrubbing) return
-    this.parked = true
-    if (!this.near(this.position)) {
-      this.seekTarget = null
-      this.apply(this.position)
-    }
+    const scrub = this.scrubState
+    if (!scrub) return
+    scrub.parked = true
     if (!this.audio.paused) this.audio.pause()
+    this.syncElement()
   }
 
   endScrub(): void {
     window.clearTimeout(this.holdTimer)
-    if (!this.scrubbing) return
-    this.parked = false
-    this.apply(this.position)
-    const resume = this.resumeAfterScrub
-    this.resumeAfterScrub = false
-    this.scrubbing = false
-    if (resume && this.audio.paused) this.play()
+    const scrub = this.scrubState
+    if (!scrub) return
+    this.scrubState = null
+    this.syncElement()
+    if (scrub.resume && this.audio.paused) this.play()
   }
 
   seek(seconds: number): void {
-    const resume = this.scrubbing && this.resumeAfterScrub
-    window.clearTimeout(this.holdTimer)
-    this.parked = false
-    this.resumeAfterScrub = false
-    this.scrubbing = false
-    this.apply(seconds)
-    if (resume) this.play()
+    this.moveTo(seconds)
+    this.endScrub()
   }
 
   private insideFile(seconds: number): number {
@@ -194,17 +186,29 @@ export class Player {
     return Math.max(0, Math.min(seconds, max || seconds))
   }
 
-  private apply(seconds: number): void {
-    const t = this.insideFile(seconds)
-    this.position = t
+  private moveTo(seconds: number): void {
+    this.position = this.insideFile(seconds)
+    this.syncElement()
+  }
+
+  private syncElement(): void {
     if (this.audio.readyState < HTMLMediaElement.HAVE_METADATA) {
-      this.seekBeforeMetadata = t
+      this.deferred = true
       return
     }
-    this.seekBeforeMetadata = null
-    if (this.seekTarget != null || this.near(t)) return
-    this.seekTarget = t
-    this.audio.currentTime = t
+    this.deferred = false
+    if (this.sent != null) return
+    this.sent = this.position
+    this.audio.currentTime = this.position
+  }
+
+  private stopAt(seconds: number): void {
+    window.clearTimeout(this.holdTimer)
+    this.scrubState = null
+    this.playing = false
+    this.starting = false
+    this.audio.pause()
+    this.moveTo(seconds)
   }
 
   async load(track: Track, autoplay = false): Promise<void> {
@@ -214,13 +218,15 @@ export class Player {
     }
     const token = ++this.token
     window.clearTimeout(this.holdTimer)
-    this.parked = false
-    this.resumeAfterScrub = false
-    this.scrubbing = false
+    this.scrubState = null
+    this.playing = false
+    this.starting = false
     this.audio.pause()
-    this.seekTarget = null
-    this.seekBeforeMetadata = null
-    this.playheadBeforePlay = null
+    this.sent = null
+    this.deferred = false
+    this.cuePoint = 0
+    this.cueHeld = false
+    this.cueLatched = false
     this.track = track
     this.detail = null
     this.waveform = null
@@ -247,19 +253,62 @@ export class Player {
 
   play(): void {
     if (!this.track) return
-    this.playheadBeforePlay = this.position
-    if (!this.near(this.position)) {
-      this.seekTarget = null
-      this.apply(this.position)
-    }
+    this.playing = true
+    if (!this.audio.paused) return
+    this.starting = true
+    const token = this.token
     void this.audio.play().catch(() => {
-      this.playheadBeforePlay = null
+      if (token !== this.token || !this.audio.paused) return
+      this.starting = false
+      if (!this.scrubState) this.playing = false
     })
   }
 
+  pause(): void {
+    if (this.scrubState) this.scrubState.resume = false
+    const owned = this.elementOwnsPosition
+    this.playing = false
+    this.starting = false
+    this.audio.pause()
+    if (owned) this.position = this.audio.currentTime
+  }
+
   toggle(): void {
-    if (this.audio.paused) this.play()
-    else this.audio.pause()
+    if (this.cueHeld) this.cueLatched = true
+    else if (this.playing) this.pause()
+    else this.play()
+  }
+
+  get atCue(): boolean {
+    return Math.abs(this.position - this.cuePoint) < CUE_TOLERANCE
+  }
+
+  cueDown(): void {
+    if (!this.track || this.cueHeld || this.audioError) return
+    if (this.playing) {
+      this.stopAt(this.cuePoint)
+      return
+    }
+    const here = this.insideFile(this.quantised(this.position))
+    if (Math.abs(here - this.cuePoint) >= CUE_TOLERANCE) {
+      this.cuePoint = here
+      this.moveTo(here)
+      return
+    }
+    this.cueHeld = true
+    this.cueLatched = false
+    if (this.position !== this.cuePoint) this.moveTo(this.cuePoint)
+    this.play()
+  }
+
+  cueUp(): void {
+    if (!this.cueHeld) return
+    this.cueHeld = false
+    if (this.cueLatched) {
+      this.cueLatched = false
+      return
+    }
+    this.stopAt(this.cuePoint)
   }
 
   async refreshDetail(): Promise<void> {

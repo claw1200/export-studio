@@ -21,6 +21,7 @@
   --color-select-strong: oklch(0.6 0.15 240 / 0.48);
   --color-danger: oklch(0.68 0.2 20);
   --color-warn: oklch(0.82 0.15 80);
+  --color-cue: #ff8a1f;
 }
 
 @layer base {

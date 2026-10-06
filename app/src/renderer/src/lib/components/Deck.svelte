@@ -44,6 +44,14 @@
     void player.setCueColor(cue, colorIndex)
   }
   const memoryCount = $derived((player.detail?.cues ?? []).filter((c) => c.kind === 'memory').length)
+  const cueLit = $derived(player.cueHeld || (!player.playing && !!track && player.atCue))
+  const cueTitle = $derived(
+    player.playing
+      ? 'Return to the cue point and stop'
+      : player.atCue
+        ? 'Hold to play from the cue point'
+        : `Set the cue point here${player.quantise ? ', on the nearest beat' : ''}`
+  )
   const currentBpm = $derived(bpmAt(player.position, player.detail?.beatgrid ?? null, track?.bpm ?? 0))
 </script>
 
@@ -135,18 +143,49 @@
       <div class="text-[11px] text-faint">−{formatClock((player.duration - player.position) * 1000)}</div>
     </div>
 
-    <button
-      class="grid size-11 shrink-0 place-items-center rounded-full bg-accent text-bg transition hover:brightness-110 disabled:opacity-30"
-      disabled={!track || !!player.audioError}
-      onclick={() => player.toggle()}
-      aria-label={player.playing ? 'Pause' : 'Play'}
-    >
-      {#if player.playing}
-        <Pause class="size-5 fill-current" />
-      {:else}
-        <Play class="ml-0.5 size-5 fill-current" />
-      {/if}
-    </button>
+    <div class="flex shrink-0 flex-col items-center gap-1.5">
+      <button
+        class="grid size-11 place-items-center rounded-full bg-accent text-bg transition hover:brightness-110 disabled:opacity-30"
+        disabled={!track || !!player.audioError}
+        onclick={() => player.toggle()}
+        aria-label={player.playing ? 'Pause' : 'Play'}
+      >
+        {#if player.playing}
+          <Pause class="size-5 fill-current" />
+        {:else}
+          <Play class="ml-0.5 size-5 fill-current" />
+        {/if}
+      </button>
+      <button
+        class={[
+          'h-6 w-11 touch-none rounded-full border text-[10.5px] font-bold tracking-wide transition select-none disabled:opacity-30',
+          cueLit
+            ? 'border-transparent bg-cue text-bg shadow-[0_0_10px] shadow-cue/50'
+            : 'border-cue/60 text-cue hover:bg-cue/15'
+        ]}
+        disabled={!track || !!player.audioError}
+        onpointerdown={(e) => {
+          if (e.button !== 0) return
+          e.currentTarget.setPointerCapture(e.pointerId)
+          player.cueDown()
+        }}
+        onpointerup={() => player.cueUp()}
+        onpointercancel={() => player.cueUp()}
+        onlostpointercapture={() => player.cueUp()}
+        onkeydown={(e) => {
+          if (e.key !== 'Enter') return
+          e.preventDefault()
+          if (!e.repeat) player.cueDown()
+        }}
+        onkeyup={(e) => {
+          if (e.key === 'Enter') player.cueUp()
+        }}
+        aria-label="Cue"
+        title={cueTitle}
+      >
+        CUE
+      </button>
+    </div>
   </div>
 
   <div class="flex items-center gap-1.5 px-4 pb-3">

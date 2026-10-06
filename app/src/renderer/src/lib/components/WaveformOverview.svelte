@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getApp } from '$lib/context'
   import { formatClock, hotCueLetter } from '$lib/format'
-  import { cueColor, drawOverview, setupCanvas } from '$lib/waveform'
+  import { CUE_POINT_COLOR, cueColor, drawOverview, setupCanvas } from '$lib/waveform'
   import type { Cue } from '$lib/types'
 
   const { player } = getApp()
@@ -110,6 +110,15 @@
       {/if}
     </button>
   {/each}
+
+  {#if player.track}
+    <span
+      class="pointer-events-none absolute top-0 z-10 h-[7px] w-[9px] -translate-x-1/2"
+      style:left="{pct(player.cuePoint)}%"
+      style:background={CUE_POINT_COLOR}
+      style:clip-path="polygon(0 0, 100% 0, 50% 100%)"
+    ></span>
+  {/if}
 
   <div
     class="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-white shadow-[0_0_6px_rgba(255,255,255,0.6)]"
