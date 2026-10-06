@@ -65,7 +65,8 @@ function openFile(path: string, signal: AbortSignal, range?: ByteRange): Readabl
     node.once('close', () => signal.removeEventListener('abort', abort))
   }
   node.on('error', (err: NodeJS.ErrnoException) => {
-    if (signal.aborted || err.code === 'ERR_STREAM_PREMATURE_CLOSE') return
+    if (signal.aborted || err.name === 'AbortError' || err.code === 'ABORT_ERR' || err.code === 'ERR_STREAM_PREMATURE_CLOSE')
+      return
     console.error('[media] read failed', path, err)
   })
   return Readable.toWeb(node) as ReadableStream<Uint8Array>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { RefreshCw, Search, X, PanelRight, Lock } from '@lucide/svelte'
+  import { RefreshCw, Search, X, PanelRight, Lock, Volume1, Volume2, VolumeX } from '@lucide/svelte'
   import { getApp } from '$lib/context'
 
   let {
@@ -10,7 +10,8 @@
     searchInput?: HTMLInputElement
   } = $props()
 
-  const { library } = getApp()
+  const { library, player } = getApp()
+  const silent = $derived(player.muted || player.volume === 0)
   const isMac = window.api.platform === 'darwin'
 
   const snapshotLabel = $derived(
@@ -78,6 +79,35 @@
         <RefreshCw class={['size-3', library.status === 'loading' && 'animate-spin']} />
       </button>
     {/if}
+
+    <div class="no-drag flex h-7 items-center rounded-md pr-1.5">
+      <button
+        class="grid size-6 place-items-center rounded text-faint hover:bg-hover hover:text-fg"
+        onclick={() => player.toggleMute()}
+        aria-label={silent ? 'Unmute' : 'Mute'}
+        aria-pressed={silent}
+        title={silent ? 'Unmute' : 'Mute'}
+      >
+        {#if silent}
+          <VolumeX class="size-3.5" />
+        {:else if player.volume < 0.5}
+          <Volume1 class="size-3.5" />
+        {:else}
+          <Volume2 class="size-3.5" />
+        {/if}
+      </button>
+      <input
+        class="h-4 w-16 cursor-pointer accent-accent"
+        type="range"
+        min="0"
+        max="1"
+        step="0.01"
+        aria-label="Volume"
+        aria-valuetext="{Math.round(player.volume * 100)}%"
+        title="Volume {Math.round(player.volume * 100)}%"
+        bind:value={() => player.volume, (v) => player.setVolume(v)}
+      />
+    </div>
 
     <button
       class={[

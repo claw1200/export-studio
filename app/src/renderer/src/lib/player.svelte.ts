@@ -6,6 +6,11 @@ type DetailEntry = { detail: TrackDetail; waveform: Waveform | null }
 const detailCache = new Map<string, Promise<DetailEntry>>()
 const CACHE_SIZE = 24
 
+function storedVolume(): number {
+  const n = Number(localStorage.getItem('volume'))
+  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1
+}
+
 export function loadDetail(id: string): Promise<DetailEntry> {
   const hit = detailCache.get(id)
   if (hit) {
@@ -35,6 +40,10 @@ export class Player {
   audioError = $state<string | null>(null)
   mode = $state<WaveformMode>((localStorage.getItem('waveformMode') as WaveformMode) || 'rgb')
   zoom = $state(Number(localStorage.getItem('waveformZoom')) || 1)
+  volume = $state(storedVolume())
+  muted = $state(localStorage.getItem('muted') === '1')
+  /** Level restored by unmute. */
+  private level = 1
 
   private audio = new Audio()
   private raf = 0
@@ -49,6 +58,9 @@ export class Player {
   private resume: number | null = null
 
   constructor() {
+    this.level = this.volume > 0 ? this.volume : 1
+    this.audio.volume = this.volume
+    this.audio.muted = this.muted
     this.audio.preload = 'auto'
     this.audio.addEventListener('play', () => {
       this.playing = true
@@ -195,5 +207,30 @@ export class Player {
   setZoom(zoom: number): void {
     this.zoom = Math.max(0.25, Math.min(8, zoom))
     localStorage.setItem('waveformZoom', String(this.zoom))
+  }
+
+  setVolume(volume: number): void {
+    const v = Math.min(1, Math.max(0, volume))
+    this.volume = v
+    this.audio.volume = v
+    if (v > 0) {
+      this.level = v
+      this.muted = false
+      this.audio.muted = false
+    }
+    localStorage.setItem('volume', String(v))
+    localStorage.setItem('muted', this.muted ? '1' : '0')
+  }
+
+  toggleMute(): void {
+    if (this.muted || this.volume === 0) {
+      this.muted = false
+      this.audio.muted = false
+      this.setVolume(this.level > 0 ? this.level : 1)
+      return
+    }
+    this.muted = true
+    this.audio.muted = true
+    localStorage.setItem('muted', '1')
   }
 }
