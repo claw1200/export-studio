@@ -1,6 +1,8 @@
 <script lang="ts">
   import { getApp } from '$lib/context'
+  import { formatClock, hotCueLetter } from '$lib/format'
   import { cueColor, drawOverview, setupCanvas } from '$lib/waveform'
+  import type { Cue } from '$lib/types'
 
   const { player } = getApp()
 
@@ -25,6 +27,12 @@
     player.scrub((x / rect.width) * span)
   }
 
+  function cueLabel(cue: Cue): string {
+    const name = cue.kind === 'hot' ? `Hot cue ${hotCueLetter(cue.slot)}` : 'Memory cue'
+    const time = formatClock(cue.start)
+    return cue.comment ? `${name}, ${time}, ${cue.comment}` : `${name}, ${time}`
+  }
+
   function onwheel(e: WheelEvent): void {
     if (!player.waveform || !width) return
     e.preventDefault()
@@ -36,7 +44,7 @@
 </script>
 
 <div
-  class="relative h-full w-full cursor-pointer overflow-hidden rounded-md bg-black/30"
+  class="relative h-full w-full cursor-ew-resize overflow-hidden rounded-md bg-black/30"
   bind:clientWidth={width}
   bind:clientHeight={height}
   role="slider"
@@ -68,17 +76,26 @@
         style:background={cueColor(cue)}
       ></div>
     {/if}
-    <span
+    <button
+      type="button"
       class={[
-        'pointer-events-none absolute h-[7px] w-[9px] -translate-x-1/2',
-        cue.kind === 'hot' ? 'bottom-0' : 'top-0'
+        'absolute z-10 flex w-4 -translate-x-1/2 cursor-pointer border-0 bg-transparent p-0 hover:brightness-125',
+        cue.kind === 'hot' ? 'bottom-0 h-4 items-end justify-center' : 'top-0 h-4 items-start justify-center'
       ]}
       style:left="{pct(cue.start / 1000)}%"
-      style:background={cueColor(cue)}
-      style:clip-path={cue.kind === 'hot'
-        ? 'polygon(50% 0, 0 100%, 100% 100%)'
-        : 'polygon(0 0, 100% 0, 50% 100%)'}
-    ></span>
+      title={cueLabel(cue)}
+      aria-label={cueLabel(cue)}
+      onpointerdown={(e) => e.stopPropagation()}
+      onclick={() => player.seek(cue.start / 1000)}
+    >
+      <span
+        class="pointer-events-none h-[7px] w-[9px]"
+        style:background={cueColor(cue)}
+        style:clip-path={cue.kind === 'hot'
+          ? 'polygon(50% 0, 0 100%, 100% 100%)'
+          : 'polygon(0 0, 100% 0, 50% 100%)'}
+      ></span>
+    </button>
   {/each}
 
   <div
