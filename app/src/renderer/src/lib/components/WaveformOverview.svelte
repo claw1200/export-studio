@@ -68,16 +68,17 @@
         style:background={cueColor(cue)}
       ></div>
     {/if}
-    <div
-      class={['pointer-events-none absolute w-px', cue.kind === 'hot' ? 'top-0 h-2' : 'bottom-0 h-2']}
+    <span
+      class={[
+        'pointer-events-none absolute h-[7px] w-[9px] -translate-x-1/2',
+        cue.kind === 'hot' ? 'bottom-0' : 'top-0'
+      ]}
       style:left="{pct(cue.start / 1000)}%"
       style:background={cueColor(cue)}
-    >
-      <span
-        class={['absolute -left-[3px] size-[7px] rounded-full', cue.kind === 'hot' ? 'top-0' : 'bottom-0']}
-        style:background={cueColor(cue)}
-      ></span>
-    </div>
+      style:clip-path={cue.kind === 'hot'
+        ? 'polygon(50% 0, 0 100%, 100% 100%)'
+        : 'polygon(0 0, 100% 0, 50% 100%)'}
+    ></span>
   {/each}
 
   <div

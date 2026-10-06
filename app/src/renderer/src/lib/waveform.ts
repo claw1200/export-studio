@@ -1,6 +1,6 @@
 import type { WaveSamples } from './peaks'
 import type { Beatgrid, Cue, TrackDetail } from './types'
-import { HOT_CUE_DEFAULT, LOOP_DEFAULT, MEMORY_CUE_DEFAULT, TRACK_COLORS, hotCueLetter } from './format'
+import { HOT_CUE_DEFAULT, LOOP_DEFAULT, MEMORY_CUE_DEFAULT, TRACK_COLORS } from './format'
 
 export type WaveformMode = 'rgb' | '3band'
 
@@ -488,32 +488,30 @@ export function drawDetail(
     }
   }
 
-  // cue markers
-  ctx.font = `600 ${10 * dpr}px ui-sans-serif, system-ui, sans-serif`
-  ctx.textBaseline = 'middle'
+  // cue markers: memory cues hang from the top, hot cues sit on the bottom.
+  // The stem is `mark` device pixels wide starting at `x`; the tip sits on its center
+  // so it stays locked to the beat grid instead of riding the stem's left edge.
+  const s = 6 * dpr
+  const mark = Math.max(1, dpr)
+  const tipH = Math.round(s * 1.2)
   for (const cue of view.cues) {
     const x = Math.round(toX(cue.start / 1000))
     if (x < -40 * dpr || x > pw + 40 * dpr) continue
-    const color = cueColor(cue)
-    ctx.fillStyle = color
-    ctx.fillRect(x, 0, Math.max(1, dpr), ph)
+    const tip = x + mark / 2
+    ctx.fillStyle = cueColor(cue)
+    ctx.fillRect(x, 0, mark, ph)
+    ctx.beginPath()
     if (cue.kind === 'hot') {
-      const w = 16 * dpr
-      const h = 15 * dpr
-      ctx.beginPath()
-      ctx.roundRect(x, 0, w, h, [0, 3 * dpr, 3 * dpr, 0])
-      ctx.fill()
-      ctx.fillStyle = '#0b0c0f'
-      ctx.fillText(hotCueLetter(cue.slot), x + 4.5 * dpr, h / 2 + 0.5 * dpr)
+      ctx.moveTo(tip - s, ph)
+      ctx.lineTo(tip + s, ph)
+      ctx.lineTo(tip, ph - tipH)
     } else {
-      const s = 6 * dpr
-      ctx.beginPath()
-      ctx.moveTo(x - s, ph)
-      ctx.lineTo(x + s, ph)
-      ctx.lineTo(x, ph - s * 1.2)
-      ctx.closePath()
-      ctx.fill()
+      ctx.moveTo(tip - s, 0)
+      ctx.lineTo(tip + s, 0)
+      ctx.lineTo(tip, tipH)
     }
+    ctx.closePath()
+    ctx.fill()
   }
 
   // playhead

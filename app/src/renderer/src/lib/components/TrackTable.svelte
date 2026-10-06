@@ -385,7 +385,7 @@
       }}
     ></button>
     <div
-      class="fixed z-50 max-h-[min(440px,calc(100vh-16px))] w-48 overflow-y-auto rounded-lg border border-line bg-surface p-1 shadow-2xl shadow-black/60"
+      class="fixed z-50 max-h-[min(440px,calc(100vh-16px))] w-48 overflow-y-auto rounded-lg border border-line bg-surface p-1"
       style:left="{menu.x}px"
       style:top="{menu.y}px"
       role="menu"
