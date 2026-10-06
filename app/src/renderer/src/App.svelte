@@ -15,7 +15,58 @@
   const player = new Player()
   setApp({ library, player })
 
+  const SIDEBAR = { min: 180, max: 400, fallback: 240 }
+  const INSPECTOR = { min: 260, max: 480, fallback: 320 }
+
+  function readWidth(key: string, min: number, max: number, fallback: number): number {
+    const n = Number(localStorage.getItem(key))
+    return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback
+  }
+
   let inspectorOpen = $state(localStorage.getItem('inspectorOpen') !== 'false')
+  let sidebarWidth = $state(readWidth('sidebarWidth', SIDEBAR.min, SIDEBAR.max, SIDEBAR.fallback))
+  let inspectorWidth = $state(readWidth('inspectorWidth', INSPECTOR.min, INSPECTOR.max, INSPECTOR.fallback))
+  let panelDrag = $state<{ side: 'sidebar' | 'inspector'; startX: number; startW: number } | null>(null)
+
+  function clampWidth(side: 'sidebar' | 'inspector', width: number): number {
+    const spec = side === 'sidebar' ? SIDEBAR : INSPECTOR
+    return Math.min(spec.max, Math.max(spec.min, Math.round(width)))
+  }
+
+  function startPanelResize(e: PointerEvent, side: 'sidebar' | 'inspector'): void {
+    if (e.button !== 0 || e.detail > 1) return
+    e.preventDefault()
+    e.stopPropagation()
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    panelDrag = { side, startX: e.clientX, startW: side === 'sidebar' ? sidebarWidth : inspectorWidth }
+  }
+
+  function onPanelMove(e: PointerEvent): void {
+    const drag = panelDrag
+    if (!drag) return
+    const delta = e.clientX - drag.startX
+    const next = drag.side === 'sidebar' ? drag.startW + delta : drag.startW - delta
+    if (drag.side === 'sidebar') sidebarWidth = clampWidth('sidebar', next)
+    else inspectorWidth = clampWidth('inspector', next)
+  }
+
+  function endPanelResize(): void {
+    const drag = panelDrag
+    if (!drag) return
+    panelDrag = null
+    const key = drag.side === 'sidebar' ? 'sidebarWidth' : 'inspectorWidth'
+    const width = drag.side === 'sidebar' ? sidebarWidth : inspectorWidth
+    localStorage.setItem(key, String(width))
+  }
+
+  function resetPanel(side: 'sidebar' | 'inspector'): void {
+    if (side === 'sidebar') sidebarWidth = SIDEBAR.fallback
+    else inspectorWidth = INSPECTOR.fallback
+    const key = side === 'sidebar' ? 'sidebarWidth' : 'inspectorWidth'
+    const width = side === 'sidebar' ? sidebarWidth : inspectorWidth
+    localStorage.setItem(key, String(width))
+  }
+
   let searchInput = $state<HTMLInputElement>()
   let table = $state<ReturnType<typeof TrackTable>>()
   let previewTimer: ReturnType<typeof setTimeout> | undefined
@@ -126,7 +177,39 @@
   }
 </script>
 
-<svelte:window {onkeydown} {onkeyup} {onmousedown} />
+<svelte:window
+  {onkeydown}
+  {onkeyup}
+  {onmousedown}
+  onpointermove={onPanelMove}
+  onpointerup={endPanelResize}
+  onpointercancel={endPanelResize}
+/>
+
+{#snippet panelHandle(side: 'sidebar' | 'inspector', edge: 'left' | 'right')}
+  <div
+    class={[
+      'group/resize absolute inset-y-0 z-20 w-2 cursor-col-resize touch-none',
+      edge === 'right' ? '-right-1' : '-left-1'
+    ]}
+    role="separator"
+    aria-orientation="vertical"
+    aria-valuenow={side === 'sidebar' ? sidebarWidth : inspectorWidth}
+    aria-valuemin={side === 'sidebar' ? SIDEBAR.min : INSPECTOR.min}
+    aria-valuemax={side === 'sidebar' ? SIDEBAR.max : INSPECTOR.max}
+    aria-label={side === 'sidebar' ? 'Resize playlists' : 'Resize info'}
+    title="Drag to resize. Double-click to reset."
+    onpointerdown={(e) => startPanelResize(e, side)}
+    ondblclick={() => resetPanel(side)}
+  >
+    <span
+      class={[
+        'pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2',
+        panelDrag?.side === side ? 'bg-accent' : 'bg-line opacity-0 group-hover/resize:opacity-100'
+      ]}
+    ></span>
+  </div>
+{/snippet}
 
 <div class="flex h-full flex-col">
   <TitleBar
@@ -161,18 +244,28 @@
   {:else}
     <Deck />
     <div class="flex min-h-0 flex-1">
-      <Sidebar
-        onsource={() => {
-          table?.scrollToTop()
-        }}
-      />
+      <div class="relative h-full shrink-0" style:width="{sidebarWidth}px">
+        <Sidebar
+          onsource={() => {
+            table?.scrollToTop()
+          }}
+        />
+        {@render panelHandle('sidebar', 'right')}
+      </div>
       <main class="min-w-0 flex-1 bg-bg">
         <TrackTable bind:this={table} onselect={select} onactivate={activate} />
       </main>
       {#if inspectorOpen}
-        <Inspector onjump={(s) => player.seek(s)} />
+        <div class="relative h-full shrink-0" style:width="{inspectorWidth}px">
+          {@render panelHandle('inspector', 'left')}
+          <Inspector onjump={(s) => player.seek(s)} />
+        </div>
       {/if}
     </div>
     <StatusBar />
+  {/if}
+
+  {#if panelDrag}
+    <div class="fixed inset-0 z-50 cursor-col-resize"></div>
   {/if}
 </div>

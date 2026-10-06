@@ -46,7 +46,7 @@
   const tags = $derived(track ? track.myTags.map((id) => library.tagNames.get(id)).filter(Boolean) : [])
 </script>
 
-<aside class="flex h-full w-80 shrink-0 flex-col overflow-y-auto border-l border-line-soft bg-bg">
+<aside class="flex h-full w-full flex-col overflow-y-auto border-l border-line-soft bg-bg">
   {#if track}
     <div class="p-4">
       <div class="aspect-square w-full overflow-hidden rounded-lg bg-raised shadow-xl shadow-black/40">

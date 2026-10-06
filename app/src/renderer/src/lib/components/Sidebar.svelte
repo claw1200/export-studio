@@ -108,7 +108,7 @@
   {/if}
 {/snippet}
 
-<nav class="flex h-full w-60 shrink-0 flex-col overflow-y-auto border-r border-line-soft bg-bg px-2 py-3">
+<nav class="flex h-full w-full flex-col overflow-y-auto border-r border-line-soft bg-bg px-2 py-3">
   <button
     class={[
       'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] font-medium',
