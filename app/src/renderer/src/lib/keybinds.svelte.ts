@@ -29,6 +29,10 @@ function storedOverrides(): Overrides {
   }
 }
 
+function sameChords(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((c) => b.includes(c))
+}
+
 function fieldKind(target: EventTarget | null): 'text' | 'control' | null {
   if (!(target instanceof HTMLElement)) return null
   if (target.isContentEditable || target.tagName === 'TEXTAREA') return 'text'
@@ -56,6 +60,7 @@ export class Keybinds {
   private handlers = new Map<ActionId, ActionHandler>()
   private held = new Map<string, ActionId>()
   private swallowed = new Set<string>()
+  private suspended = 0
 
   register(handlers: Partial<Record<ActionId, ActionHandler>>): () => void {
     const entries = Object.entries(handlers) as [ActionId, ActionHandler][]
@@ -69,20 +74,42 @@ export class Keybinds {
     return this.actionByChord.get(chord)
   }
 
-  setBinding(id: ActionId, chords: string[]): void {
+  isCustomised(id: ActionId): boolean {
+    return !sameChords(this.bindings[id], DEFAULT_BINDINGS[id])
+  }
+
+  get customised(): boolean {
+    return ACTION_IDS.some((id) => this.isCustomised(id))
+  }
+
+  /** Returns the action the chord was taken from, if any. */
+  addChord(id: ActionId, chord: string): ActionId | undefined {
+    const owner = this.actionFor(chord)
+    if (owner === id) return undefined
+    this.setBinding(id, [...this.bindings[id], chord])
+    return owner
+  }
+
+  removeChord(id: ActionId, chord: string): void {
+    this.setBinding(
+      id,
+      this.bindings[id].filter((c) => c !== chord)
+    )
+  }
+
+  setBinding(id: ActionId, chords: readonly string[]): void {
     const next = [...new Set(chords)]
     for (const other of ACTION_IDS) {
       if (other === id) continue
       const kept = this.bindings[other].filter((c) => !next.includes(c))
-      if (kept.length !== this.bindings[other].length) this.overrides[other] = kept
+      if (kept.length !== this.bindings[other].length) this.override(other, kept)
     }
-    this.overrides[id] = next
+    this.override(id, next)
     this.save()
   }
 
   resetBinding(id: ActionId): void {
-    delete this.overrides[id]
-    this.save()
+    this.setBinding(id, DEFAULT_BINDINGS[id])
   }
 
   resetAll(): void {
@@ -90,12 +117,28 @@ export class Keybinds {
     this.save()
   }
 
+  private override(id: ActionId, chords: string[]): void {
+    if (sameChords(chords, DEFAULT_BINDINGS[id])) delete this.overrides[id]
+    else this.overrides[id] = chords
+  }
+
+  suspend(): () => void {
+    this.suspended++
+    this.releaseAll()
+    let resumed = false
+    return () => {
+      if (resumed) return
+      resumed = true
+      this.suspended--
+    }
+  }
+
   private save(): void {
     localStorage.setItem(STORAGE_KEY, JSON.stringify($state.snapshot(this.overrides)))
   }
 
   keydown = (e: KeyboardEvent): void => {
-    if (e.defaultPrevented || e.isComposing) return
+    if (this.suspended || e.defaultPrevented || e.isComposing) return
     const chord = chordFromEvent(e)
     const id = chord ? this.actionFor(chord) : undefined
     const handler = id && this.handlers.get(id)

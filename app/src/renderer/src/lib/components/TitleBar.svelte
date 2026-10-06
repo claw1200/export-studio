@@ -1,7 +1,7 @@
 <script lang="ts">
   import { RefreshCw, Search, X, PanelRight, Lock, LockOpen, Settings, Volume1, Volume2, VolumeX } from '@lucide/svelte'
   import { getApp } from '$lib/context'
-  import SettingsMenu from './SettingsMenu.svelte'
+  import SettingsDialog from './SettingsDialog.svelte'
 
   let {
     inspectorOpen = $bindable(true),
@@ -16,11 +16,7 @@
   const isMac = window.api.platform === 'darwin'
   let settingsOpen = $state(false)
 
-  $effect(() => keybinds.register({ 'app.settings': () => (settingsOpen = !settingsOpen) }))
-
-  function onWindowKeydown(e: KeyboardEvent): void {
-    if (e.key === 'Escape' && settingsOpen) settingsOpen = false
-  }
+  $effect(() => keybinds.register({ 'app.settings': () => (settingsOpen = true) }))
 
   const snapshotLabel = $derived(
     library.info?.snapshotTime
@@ -46,7 +42,9 @@
   }
 </script>
 
-<svelte:window onkeydown={onWindowKeydown} />
+{#if settingsOpen}
+  <SettingsDialog onclose={() => (settingsOpen = false)} />
+{/if}
 
 <header
   class={[
@@ -154,29 +152,19 @@
       />
     </div>
 
-    <div class="no-drag relative">
-      <button
-        class={[
-          'relative z-50 grid size-7 place-items-center rounded-md hover:bg-hover',
-          settingsOpen ? 'text-fg' : 'text-faint'
-        ]}
-        onclick={() => (settingsOpen = !settingsOpen)}
-        aria-label="Settings"
-        aria-expanded={settingsOpen}
-        aria-haspopup="dialog"
-        title="Settings"
-      >
-        <Settings class="size-4" />
-      </button>
-      {#if settingsOpen}
-        <button
-          class="fixed inset-0 z-40 cursor-default"
-          aria-label="Close settings"
-          onclick={() => (settingsOpen = false)}
-        ></button>
-        <SettingsMenu />
-      {/if}
-    </div>
+    <button
+      class={[
+        'no-drag grid size-7 place-items-center rounded-md hover:bg-hover',
+        settingsOpen ? 'text-fg' : 'text-faint'
+      ]}
+      onclick={() => (settingsOpen = true)}
+      aria-label="Settings"
+      aria-expanded={settingsOpen}
+      aria-haspopup="dialog"
+      title="Settings"
+    >
+      <Settings class="size-4" />
+    </button>
 
     <button
       class={[
