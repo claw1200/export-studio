@@ -286,33 +286,35 @@ export function drawOverview(
 }
 
 /**
- * 3-band overview: column averages from the baseline, sharing one vertical scale.
- * Highs are painted first and bass last, so blue sits at the bottom, then mids, then highs.
+ * Full-track 3-band strip. Each column stacks lows, then mids, then highs,
+ * so blue sits on the baseline and the other bands sit above it.
  */
 function drawOverviewBands(ctx: CanvasRenderingContext2D, bands: Uint8Array, pw: number, ph: number): void {
   const length = bands.length / 3
-  const avg = [new Float32Array(pw), new Float32Array(pw), new Float32Array(pw)]
+  const level = [new Float32Array(pw), new Float32Array(pw), new Float32Array(pw)]
+  const floor0 = new Float32Array(pw)
   let peak = 1
   for (let x = 0; x < pw; x++) {
     const a = Math.floor((x * length) / pw)
     const b = Math.max(a + 1, Math.floor(((x + 1) * length) / pw))
+    let sum = 0
     for (let band = 0; band < 3; band++) {
-      let sum = 0
-      for (let i = a; i < b; i++) sum += bands[i * 3 + band]
-      avg[band][x] = sum / (b - a)
-      if (avg[band][x] > peak) peak = avg[band][x]
+      let bandSum = 0
+      for (let i = a; i < b; i++) bandSum += bands[i * 3 + band]
+      sum += bandSum / (b - a)
+      level[band][x] = sum
     }
+    if (sum > peak) peak = sum
   }
   const scale = (ph - 1) / peak
-  const layers: [Float32Array, string][] = [...BAND_LAYERS]
-    .reverse()
-    .map((layer) => [avg[layer.band], layer.color])
-  for (const [values, color] of layers) {
-    ctx.fillStyle = color
+  for (let band = 0; band < 3; band++) {
+    const floor = band === 0 ? floor0 : level[band - 1]
+    const ceil = level[band]
+    ctx.fillStyle = BAND_LAYERS[band].color
     ctx.beginPath()
-    ctx.moveTo(0, ph)
-    for (let x = 0; x < pw; x++) ctx.lineTo(x + 0.5, ph - values[x] * scale)
-    ctx.lineTo(pw, ph)
+    ctx.moveTo(0, ph - floor[0] * scale)
+    for (let x = 0; x < pw; x++) ctx.lineTo(x + 0.5, ph - ceil[x] * scale)
+    for (let x = pw - 1; x >= 0; x--) ctx.lineTo(x + 0.5, ph - floor[x] * scale)
     ctx.closePath()
     ctx.fill()
   }
