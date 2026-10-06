@@ -66,6 +66,9 @@ export class Player {
   private raf = 0
   private token = 0
   private scrubbing = false
+  private resumeAfterScrub = false
+  private parked = false
+  private holdTimer = 0
   private seekTarget: number | null = null
   private seekBeforeMetadata: number | null = null
   private playheadBeforePlay: number | null = null
@@ -83,17 +86,16 @@ export class Player {
     this.audio.addEventListener('playing', () => {
       const playhead = this.playheadBeforePlay
       this.playheadBeforePlay = null
-      if (playhead == null || this.scrubbing) return
-      if (this.near(playhead)) return
-      this.position = playhead
+      if (playhead == null || this.near(playhead)) return
+      if (!this.scrubbing) this.position = playhead
       this.seekTarget = null
       this.apply(playhead)
     })
     this.audio.addEventListener('pause', () => {
-      this.playing = false
       cancelAnimationFrame(this.raf)
-      if (!this.scrubbing && this.seekTarget == null && this.playheadBeforePlay == null)
-        this.position = this.audio.currentTime
+      if (this.scrubbing) return
+      this.playing = false
+      if (this.seekTarget == null && this.playheadBeforePlay == null) this.position = this.audio.currentTime
     })
     this.audio.addEventListener('ended', () => (this.playing = false))
     this.audio.addEventListener('seeked', () => {
@@ -135,19 +137,55 @@ export class Player {
   }
 
   scrub(seconds: number): void {
+    window.clearTimeout(this.holdTimer)
+    if (!this.scrubbing) this.resumeAfterScrub = !this.audio.paused
+    const moved = this.scrubbing && Math.abs(seconds - this.position) > 0
     this.scrubbing = true
+    this.parked = false
     this.apply(seconds)
+    if (moved && this.resumeAfterScrub && this.audio.paused) {
+      this.playheadBeforePlay = this.position
+      void this.audio.play().then(
+        () => {
+          if (this.parked) this.audio.pause()
+        },
+        () => {
+          this.playheadBeforePlay = null
+        }
+      )
+    }
+    this.holdTimer = window.setTimeout(() => this.holdStill(), 120)
+  }
+
+  private holdStill(): void {
+    if (!this.scrubbing) return
+    this.parked = true
+    if (!this.near(this.position)) {
+      this.seekTarget = null
+      this.apply(this.position)
+    }
+    if (!this.audio.paused) this.audio.pause()
   }
 
   endScrub(): void {
+    window.clearTimeout(this.holdTimer)
     if (!this.scrubbing) return
-    this.scrubbing = false
+    this.parked = false
     this.apply(this.position)
+    const resume = this.resumeAfterScrub
+    this.resumeAfterScrub = false
+    this.scrubbing = false
+    if (resume && this.audio.paused) this.play()
   }
 
   seek(seconds: number): void {
+    const resume = this.scrubbing && this.resumeAfterScrub
+    window.clearTimeout(this.holdTimer)
+    this.parked = false
+    this.resumeAfterScrub = false
     this.scrubbing = false
     this.apply(seconds)
+    if (resume) this.play()
   }
 
   private insideFile(seconds: number): number {
@@ -175,8 +213,11 @@ export class Player {
       return
     }
     const token = ++this.token
-    this.audio.pause()
+    window.clearTimeout(this.holdTimer)
+    this.parked = false
+    this.resumeAfterScrub = false
     this.scrubbing = false
+    this.audio.pause()
     this.seekTarget = null
     this.seekBeforeMetadata = null
     this.playheadBeforePlay = null

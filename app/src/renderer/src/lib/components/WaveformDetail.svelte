@@ -41,6 +41,12 @@
     const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
     player.setZoom(player.zoom * Math.exp(-delta * 0.01))
   }
+
+  function release(): void {
+    if (!drag) return
+    drag = null
+    player.endScrub()
+  }
 </script>
 
 <div
@@ -53,23 +59,18 @@
   aria-valuenow={Math.round(player.position)}
   {onwheel}
   onpointerdown={(e) => {
-    if (!player.waveform) return
+    if (!player.waveform || e.button !== 0) return
     e.currentTarget.setPointerCapture(e.pointerId)
     drag = { x: e.clientX, position: player.position }
+    player.scrub(drag.position)
   }}
   onpointermove={(e) => {
     if (!drag) return
     player.scrub(drag.position - (e.clientX - drag.x) * secondsPerPixel())
   }}
-  onpointerup={() => {
-    if (!drag) return
-    player.endScrub()
-    drag = null
-  }}
-  onpointercancel={() => {
-    if (drag) player.endScrub()
-    drag = null
-  }}
+  onpointerup={release}
+  onpointercancel={release}
+  onlostpointercapture={release}
 >
   <canvas {@attach paint} class="absolute inset-0 size-full"></canvas>
 </div>
