@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Play, Pause, Minus, Plus, Music, AlertTriangle, LoaderCircle, Pencil, X } from '@lucide/svelte'
+  import { Play, Pause, Minus, Plus, Music, LoaderCircle, Pencil, X } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import { artworkUrl } from '$lib/api'
   import {
@@ -13,12 +13,13 @@
     keyColor
   } from '$lib/format'
   import { bpmAt } from '$lib/beat'
+  import { chordLabel } from '$lib/keymap'
   import type { Cue } from '$lib/types'
   import { cueColor, type WaveformMode } from '$lib/waveform'
   import WaveformDetail from './WaveformDetail.svelte'
   import WaveformOverview from './WaveformOverview.svelte'
 
-  const { library, player } = getApp()
+  const { library, player, keybinds } = getApp()
 
   const MODES: { id: WaveformMode; label: string }[] = [
     { id: 'rgb', label: 'RGB' },
@@ -45,12 +46,15 @@
   }
   const memoryCount = $derived((player.detail?.cues ?? []).filter((c) => c.kind === 'memory').length)
   const cueLit = $derived(player.cueHeld || (!player.playing && !!track && player.atCue))
+  const placementLabel = $derived(player.cuePlacement === 'cuePoint' ? 'cue point' : 'playhead')
+  const cueShortcut = $derived(keybinds.bindings['deck.cue'][0])
   const cueTitle = $derived(
-    player.playing
+    (player.playing
       ? 'Return to the cue point and stop'
       : player.atCue
         ? 'Hold to play from the cue point'
-        : `Set the cue point here${player.quantise ? ', on the nearest beat' : ''}`
+        : `Set the cue point here${player.quantise ? ', on the nearest beat' : ''}`) +
+      (cueShortcut ? ` (${chordLabel(cueShortcut)})` : '')
   )
   const currentBpm = $derived(bpmAt(player.position, player.detail?.beatgrid ?? null, track?.bpm ?? 0))
 </script>
@@ -172,14 +176,6 @@
         onpointerup={() => player.cueUp()}
         onpointercancel={() => player.cueUp()}
         onlostpointercapture={() => player.cueUp()}
-        onkeydown={(e) => {
-          if (e.key !== 'Enter') return
-          e.preventDefault()
-          if (!e.repeat) player.cueDown()
-        }}
-        onkeyup={(e) => {
-          if (e.key === 'Enter') player.cueUp()
-        }}
         aria-label="Cue"
         title={cueTitle}
       >
@@ -277,8 +273,8 @@
           class="group flex h-7 w-[72px] items-center gap-1.5 rounded-md border border-dashed border-line px-2 text-[11px] font-semibold text-faint transition hover:border-accent/60 hover:bg-accent-soft hover:text-accent disabled:pointer-events-none disabled:opacity-50"
           disabled={player.editing}
           onclick={() => player.setHotCue(kind)}
-          aria-label="Set hot cue {letter} at the playhead"
-          title="Set hot cue {letter} at the playhead{player.quantise ? ', on the nearest beat' : ''}"
+          aria-label="Set hot cue {letter} at the {placementLabel}"
+          title="Set hot cue {letter} at the {placementLabel}{player.quantise ? ', on the nearest beat' : ''}"
         >
           {letter}
           <Plus class="ml-auto size-3 opacity-0 group-hover:opacity-100" />
@@ -295,12 +291,6 @@
     <span class="ml-3 text-[11px] text-faint">{memoryCount} memory cues</span>
 
     <div class="ml-auto flex items-center gap-3">
-      {#if player.editError || player.audioError}
-        <span class="flex items-center gap-1.5 text-[11px] text-warn">
-          <AlertTriangle class="size-3.5" />
-          {player.editError ?? player.audioError}
-        </span>
-      {/if}
       <button
         class={[
           'flex h-7 items-center rounded-md border px-2 text-[11px] font-semibold transition',

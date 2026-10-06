@@ -84,6 +84,30 @@ def _commit(db: Rekordbox6Database, change) -> None:
         raise
 
 
+def _clamp_msec(content: t.DjmdContent, msec: int) -> int:
+    msec = max(0, int(round(msec)))
+    return min(msec, content.Length * 1000) if content.Length else msec
+
+
+def _new_cue(db: Rekordbox6Database, content: t.DjmdContent, kind: int, msec: int) -> t.DjmdCue:
+    return t.DjmdCue.create(
+        ID=str(db.generate_unused_id(t.DjmdCue, is_28_bit=False)),
+        UUID=str(uuid4()),
+        ContentID=content.ID,
+        ContentUUID=content.UUID,
+        Kind=kind,
+        InMsec=msec,
+        InFrame=msec * CDJ_FRAMES_PER_SECOND // 1000,
+        InMpegFrame=0,
+        InMpegAbs=0,
+        OutMsec=-1,
+        OutFrame=0,
+        OutMpegFrame=0,
+        OutMpegAbs=0,
+        Color=-1,
+    )
+
+
 class Library:
     def __init__(self, db_path: Path | None = None):
         self.src = Path(db_path) if db_path else _rekordbox_db_path()
@@ -392,32 +416,30 @@ class Library:
             raise ValueError(f"Not a hot cue slot: {kind}")
         db = self._writable_db()
         content = self._content(content_id)
-        msec = max(0, int(round(msec)))
-        if content.Length:
-            msec = min(msec, content.Length * 1000)
+        msec = _clamp_msec(content, msec)
 
         def place() -> None:
             for cue in list(content.Cues):
                 if cue.Kind == kind and not cue.rb_local_deleted:
                     db.delete(cue)
-            db.add(t.DjmdCue.create(
-                ID=str(db.generate_unused_id(t.DjmdCue, is_28_bit=False)),
-                UUID=str(uuid4()),
-                ContentID=content.ID,
-                ContentUUID=content.UUID,
-                Kind=kind,
-                InMsec=msec,
-                InFrame=msec * CDJ_FRAMES_PER_SECOND // 1000,
-                InMpegFrame=0,
-                InMpegAbs=0,
-                OutMsec=-1,
-                OutFrame=0,
-                OutMpegFrame=0,
-                OutMpegAbs=0,
-                Color=-1,
-            ))
+            db.add(_new_cue(db, content, kind, msec))
 
         _commit(db, place)
+        return self.cues(content_id)
+
+    def add_memory_cue(self, content_id: str, msec: int) -> list[dict]:
+        db = self._writable_db()
+        content = self._content(content_id)
+        msec = _clamp_msec(content, msec)
+        duplicate = any(
+            not cue.Kind
+            and not cue.rb_local_deleted
+            and cue.InMsec == msec
+            and (cue.OutMsec is None or cue.OutMsec < 0)
+            for cue in content.Cues
+        )
+        if not duplicate:
+            _commit(db, lambda: db.add(_new_cue(db, content, 0, msec)))
         return self.cues(content_id)
 
     def delete_cue(self, content_id: str, cue_id: str) -> list[dict]:

@@ -1,5 +1,5 @@
 import { api, audioUrl } from './api'
-import { nearestBeat } from './beat'
+import { bpmAt, nearestBeat } from './beat'
 import { Lru } from './lru'
 import { cachedWaveSamples, loadWaveSamples, type WaveSamples } from './peaks'
 import type { Cue, Track, TrackDetail } from './types'
@@ -9,6 +9,9 @@ type DetailEntry = { detail: TrackDetail; waveform: Waveform | null }
 const detailCache = new Lru<string, Promise<DetailEntry>>(24)
 const SEEK_TOLERANCE = 0.05
 const CUE_TOLERANCE = 0.001
+const CUE_HIT_TOLERANCE = 0.05
+
+export type CuePlacement = 'playhead' | 'cuePoint'
 const FILE_MISSING = 'Audio file not found'
 
 function storedVolume(): number {
@@ -59,9 +62,11 @@ export class Player {
   volume = $state(storedVolume())
   muted = $state(storedFlag('muted'))
   quantise = $state(storedFlag('quantise'))
+  cuePlacement = $state<CuePlacement>(localStorage.getItem('cuePlacement') === 'cuePoint' ? 'cuePoint' : 'playhead')
   editing = $state(false)
   editError = $state<string | null>(null)
   cuePoint = $state(0)
+  loopIn = $state<number | null>(null)
   cueHeld = $state(false)
   private cueLatched = false
   private unmuteVolume = 1
@@ -225,6 +230,7 @@ export class Player {
     this.sent = null
     this.deferred = false
     this.cuePoint = 0
+    this.loopIn = null
     this.cueHeld = false
     this.cueLatched = false
     this.track = track
@@ -285,6 +291,10 @@ export class Player {
 
   cueDown(): void {
     if (!this.track || this.cueHeld || this.audioError) return
+    if (this.scrubState) {
+      this.cuePoint = this.insideFile(this.quantised(this.position))
+      return
+    }
     if (this.playing) {
       this.stopAt(this.cuePoint)
       return
@@ -299,6 +309,14 @@ export class Player {
     this.cueLatched = false
     if (this.position !== this.cuePoint) this.moveTo(this.cuePoint)
     this.play()
+  }
+
+  setLoopIn(): void {
+    if (!this.track || this.audioError) return
+    const here = this.insideFile(this.quantised(this.position))
+    this.loopIn = here
+    this.cuePoint = here
+    if (!this.playing && !this.scrubState) this.moveTo(here)
   }
 
   cueUp(): void {
@@ -326,9 +344,68 @@ export class Player {
     }
   }
 
+  setCuePlacement(placement: CuePlacement): void {
+    this.cuePlacement = placement
+    localStorage.setItem('cuePlacement', placement)
+  }
+
+  private placementMs(): number {
+    const seconds = this.cuePlacement === 'cuePoint' ? this.cuePoint : this.position
+    return Math.round(this.quantised(seconds) * 1000)
+  }
+
   setHotCue(kind: number): Promise<void> {
-    const ms = Math.round(this.quantised(this.position) * 1000)
+    const ms = this.placementMs()
     return this.editCues((id) => api.setHotCue(id, kind, ms))
+  }
+
+  triggerHotCue(kind: number): void {
+    const cue = this.detail?.cues.find((c) => c.kind === 'hot' && c.slot === kind)
+    if (cue) this.seek(cue.start / 1000)
+    else void this.setHotCue(kind)
+  }
+
+  callMemoryCue(direction: -1 | 1): void {
+    const starts = (this.detail?.cues ?? [])
+      .filter((c) => c.kind === 'memory')
+      .map((c) => c.start / 1000)
+      .sort((a, b) => a - b)
+    const from = direction < 0 && this.playing ? this.cuePoint : this.position
+    const target =
+      direction > 0 ? starts.find((s) => s > from + CUE_TOLERANCE) : starts.findLast((s) => s < from - CUE_TOLERANCE)
+    if (target == null) return
+    this.cuePoint = this.insideFile(target)
+    this.seek(target)
+  }
+
+  addMemoryCue(): Promise<void> {
+    const ms = this.placementMs()
+    return this.editCues((id) => api.addMemoryCue(id, ms))
+  }
+
+  cueAtPlayhead(): Cue | null {
+    const tolerance = this.cueHitTolerance()
+    let nearest: Cue | null = null
+    let nearestGap = Infinity
+    for (const cue of this.detail?.cues ?? []) {
+      const gap = Math.abs(cue.start / 1000 - this.position)
+      if (gap <= tolerance && gap < nearestGap) {
+        nearest = cue
+        nearestGap = gap
+      }
+    }
+    return nearest
+  }
+
+  deleteCueAtPlayhead(): Promise<void> {
+    const cue = this.cueAtPlayhead()
+    return cue ? this.deleteCue(cue) : Promise.resolve()
+  }
+
+  private cueHitTolerance(): number {
+    if (!this.quantise) return CUE_HIT_TOLERANCE
+    const bpm = bpmAt(this.position, this.detail?.beatgrid ?? null, this.track?.bpm ?? 0)
+    return bpm > 0 ? 30 / bpm : CUE_HIT_TOLERANCE
   }
 
   deleteCue(cue: Cue): Promise<void> {

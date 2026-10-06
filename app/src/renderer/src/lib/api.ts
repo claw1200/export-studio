@@ -15,6 +15,7 @@ export const api = {
   historyTracks: (id: string) => call<string[]>('history.tracks', { id }),
   trackDetail: (id: string) => call<TrackDetail>('track.detail', { id }),
   setHotCue: (id: string, kind: number, ms: number) => call<Cue[]>('cue.setHot', { id, kind, ms }),
+  addMemoryCue: (id: string, ms: number) => call<Cue[]>('cue.addMemory', { id, ms }),
   deleteCue: (id: string, cueId: string) => call<Cue[]>('cue.delete', { id, cueId }),
   setCueColor: (id: string, cueId: string, colorIndex: number | null) =>
     call<Cue[]>('cue.setColor', { id, cueId, colorIndex }),

@@ -3,6 +3,9 @@
   import { setApp } from '$lib/context'
   import { Library } from '$lib/library.svelte'
   import { Player } from '$lib/player.svelte'
+  import { Keybinds } from '$lib/keybinds.svelte'
+  import { HOT_CUE_ACTIONS } from '$lib/keymap'
+  import { HOT_CUE_KINDS } from '$lib/format'
   import type { Track } from '$lib/types'
   import TitleBar from '$lib/components/TitleBar.svelte'
   import Sidebar from '$lib/components/Sidebar.svelte'
@@ -13,7 +16,8 @@
 
   const library = new Library()
   const player = new Player()
-  setApp({ library, player })
+  const keybinds = new Keybinds()
+  setApp({ library, player, keybinds })
 
   const PANELS = {
     sidebar: { min: 180, max: 400, fallback: 240 },
@@ -123,67 +127,48 @@
     if (e.target.closest('button, a, [tabindex]')) e.preventDefault()
   }
 
-  function onkeyup(e: KeyboardEvent): void {
-    if ((e.key === ' ' || e.code === 'Space') && !isTypingTarget(e.target)) e.preventDefault()
+  function blurFocusedControl(): void {
+    const active = document.activeElement
+    if (active instanceof HTMLElement && active !== document.body && !isTypingTarget(active)) active.blur()
   }
 
-  function onkeydown(e: KeyboardEvent): void {
-    const mod = e.metaKey || e.ctrlKey
-    if (mod && e.key.toLowerCase() === 'f') {
-      e.preventDefault()
-      searchInput?.focus()
-      searchInput?.select()
-      return
-    }
-    if (mod && e.key.toLowerCase() === 'r') {
-      e.preventDefault()
-      reload()
-      return
-    }
-    if (e.key === ' ' || e.code === 'Space') {
-      if (isTypingTarget(e.target)) return
-      e.preventDefault()
-      const active = document.activeElement
-      if (active instanceof HTMLElement && active !== document.body && !isTypingTarget(active)) active.blur()
-      if (!e.repeat) player.toggle()
-      return
-    }
-    const target = e.target as HTMLElement
-    if (
-      (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') &&
-      e.key !== 'ArrowDown' &&
-      e.key !== 'ArrowUp' &&
-      e.key !== 'Enter'
-    )
-      return
-
-    switch (e.key) {
-      case 'ArrowDown':
-        e.preventDefault()
-        moveSelection(e.shiftKey ? 10 : 1)
-        break
-      case 'ArrowUp':
-        e.preventDefault()
-        moveSelection(e.shiftKey ? -10 : -1)
-        break
-      case 'Enter':
+  $effect(() =>
+    keybinds.register({
+      'deck.playPause': () => {
+        blurFocusedControl()
+        player.toggle()
+      },
+      'deck.cue': { down: () => player.cueDown(), up: () => player.cueUp() },
+      'deck.loopIn': () => player.setLoopIn(),
+      'deck.seekBack': () => player.seek(player.position - 2),
+      'deck.seekForward': () => player.seek(player.position + 2),
+      'deck.seekBackFar': () => player.seek(player.position - 10),
+      'deck.seekForwardFar': () => player.seek(player.position + 10),
+      ...Object.fromEntries(HOT_CUE_ACTIONS.map((id, i) => [id, () => player.triggerHotCue(HOT_CUE_KINDS[i])])),
+      'cue.previousMemory': () => player.callMemoryCue(-1),
+      'cue.nextMemory': () => player.callMemoryCue(1),
+      'cue.addMemory': () => void player.addMemoryCue(),
+      'cue.deleteAtPlayhead': () => void player.deleteCueAtPlayhead(),
+      'library.next': () => moveSelection(1),
+      'library.previous': () => moveSelection(-1),
+      'library.nextPage': () => moveSelection(10),
+      'library.previousPage': () => moveSelection(-10),
+      'library.loadSelected': () => {
         if (library.selected) activate(library.selected)
-        break
-      case 'ArrowLeft':
-        e.preventDefault()
-        player.seek(player.position - (e.shiftKey ? 10 : 2))
-        break
-      case 'ArrowRight':
-        e.preventDefault()
-        player.seek(player.position + (e.shiftKey ? 10 : 2))
-        break
-    }
-  }
+      },
+      'library.search': () => {
+        searchInput?.focus()
+        searchInput?.select()
+      },
+      'library.reload': reload
+    })
+  )
 </script>
 
 <svelte:window
-  {onkeydown}
-  {onkeyup}
+  onkeydown={keybinds.keydown}
+  onkeyup={keybinds.keyup}
+  onblur={keybinds.releaseAll}
   {onmousedown}
   onpointermove={onPanelMove}
   onpointerup={endPanelResize}

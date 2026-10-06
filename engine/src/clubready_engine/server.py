@@ -40,6 +40,7 @@ class Engine:
             "history.tracks": lambda id: self.lib.history_tracks(id),
             "track.detail": lambda id: self.lib.track_detail(id),
             "cue.setHot": lambda id, kind, ms: self.lib.set_hot_cue(id, kind, ms),
+            "cue.addMemory": lambda id, ms: self.lib.add_memory_cue(id, ms),
             "cue.delete": lambda id, cueId: self.lib.delete_cue(id, cueId),
             "cue.setColor": lambda id, cueId, colorIndex: self.lib.set_cue_color(id, cueId, colorIndex),
             "media.resolve": lambda kind, id, size="": self.lib.resolve_media(kind, id, size),

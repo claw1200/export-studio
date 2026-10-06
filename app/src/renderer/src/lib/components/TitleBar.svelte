@@ -11,17 +11,14 @@
     searchInput?: HTMLInputElement
   } = $props()
 
-  const { library, player } = getApp()
+  const { library, player, keybinds } = getApp()
   const silent = $derived(player.muted || player.volume === 0)
   const isMac = window.api.platform === 'darwin'
   let settingsOpen = $state(false)
 
+  $effect(() => keybinds.register({ 'app.settings': () => (settingsOpen = !settingsOpen) }))
+
   function onWindowKeydown(e: KeyboardEvent): void {
-    if ((e.metaKey || e.ctrlKey) && e.key === ',') {
-      e.preventDefault()
-      settingsOpen = !settingsOpen
-      return
-    }
     if (e.key === 'Escape' && settingsOpen) settingsOpen = false
   }
 
@@ -57,7 +54,6 @@
     isMac ? 'pl-[84px]' : 'pl-3 pr-[150px]'
   ]}
 >
-
   <div class="no-drag relative ml-4 w-full max-w-md">
     <Search class="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-faint" />
     <input

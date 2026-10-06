@@ -1,7 +1,13 @@
 <script lang="ts">
   import { getApp } from '$lib/context'
+  import type { CuePlacement } from '$lib/player.svelte'
 
   const { player } = getApp()
+
+  const PLACEMENTS: { id: CuePlacement; label: string }[] = [
+    { id: 'playhead', label: 'Playhead' },
+    { id: 'cuePoint', label: 'Cue point' }
+  ]
 </script>
 
 <div
@@ -38,4 +44,26 @@
       ></span>
     </span>
   </button>
+
+  <div class="flex items-start gap-3 px-1.5 py-1.5">
+    <span class="min-w-0 flex-1">
+      <span class="block text-[12.5px] font-medium text-fg">Place new cues at</span>
+      <span class="mt-0.5 block text-[11px] leading-snug text-faint">Where new hot cues and memory cues go.</span>
+    </span>
+    <div class="flex shrink-0 rounded-md border border-line bg-bg p-0.5 text-[10.5px] font-semibold" role="radiogroup">
+      {#each PLACEMENTS as p (p.id)}
+        <button
+          class={[
+            'rounded px-2 py-0.5',
+            player.cuePlacement === p.id ? 'bg-raised text-fg' : 'text-faint hover:text-muted'
+          ]}
+          role="radio"
+          aria-checked={player.cuePlacement === p.id}
+          onclick={() => player.setCuePlacement(p.id)}
+        >
+          {p.label}
+        </button>
+      {/each}
+    </div>
+  </div>
 </div>
