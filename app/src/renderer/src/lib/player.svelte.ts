@@ -42,6 +42,8 @@ export class Player {
   duration = $state(0)
   audioError = $state<string | null>(null)
   mode = $state<WaveformMode>((localStorage.getItem('waveformMode') as WaveformMode) || 'rgb')
+  /** Detail RGB wave drawn from the audio. Off uses the analysis bars. */
+  hqRgb = $state(localStorage.getItem('hqRgb') !== '0')
   zoom = $state(Number(localStorage.getItem('waveformZoom')) || 1)
   volume = $state(storedVolume())
   muted = $state(localStorage.getItem('muted') === '1')
@@ -209,6 +211,18 @@ export class Player {
     localStorage.setItem('waveformMode', mode)
   }
 
+  setHqRgb(on: boolean): void {
+    if (this.hqRgb === on) return
+    this.hqRgb = on
+    localStorage.setItem('hqRgb', on ? '1' : '0')
+    if (this.track) this.beginWave(this.token, this.track.id)
+    else if (!on) {
+      this.waveAbort?.abort()
+      this.waveAbort = null
+      this.wave = null
+    }
+  }
+
   setZoom(zoom: number): void {
     this.zoom = Math.max(0.25, Math.min(64, zoom))
     localStorage.setItem('waveformZoom', String(this.zoom))
@@ -217,6 +231,11 @@ export class Player {
   /** Starts decoding PCM for the RGB wave. Cached tracks show up immediately. */
   private beginWave(token: number, id: string): void {
     this.waveAbort?.abort()
+    if (!this.hqRgb) {
+      this.waveAbort = null
+      this.wave = null
+      return
+    }
     const ctrl = new AbortController()
     this.waveAbort = ctrl
     const url = audioUrl(id)
@@ -224,7 +243,7 @@ export class Player {
     this.wave = cached
     if (cached) return
     void loadWaveSamples(url, ctrl.signal).then((samples) => {
-      if (token === this.token) this.wave = samples
+      if (token === this.token && this.waveAbort === ctrl) this.wave = samples
     })
   }
 

@@ -48,6 +48,30 @@
     table?.ensureVisible(next)
   }
 
+  /** Search and other text fields. Sliders and buttons are not typing. */
+  function isTypingTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false
+    if (target.isContentEditable) return true
+    if (target.tagName === 'TEXTAREA') return true
+    if (!(target instanceof HTMLInputElement)) return false
+    const type = target.type
+    return type === 'text' || type === 'search' || type === 'email' || type === 'password' || type === 'url'
+  }
+
+  function onmousedown(e: MouseEvent): void {
+    if (!(e.target instanceof Element)) return
+    if (e.target.closest('input, textarea, select, [contenteditable]')) return
+    const active = document.activeElement
+    if (active instanceof HTMLElement && isTypingTarget(active)) active.blur()
+    // Keep the click from focusing a button or row. preventDefault also keeps the
+    // current field focused, so the blur above has to happen first.
+    if (e.target.closest('button, a, [tabindex]')) e.preventDefault()
+  }
+
+  function onkeyup(e: KeyboardEvent): void {
+    if ((e.key === ' ' || e.code === 'Space') && !isTypingTarget(e.target)) e.preventDefault()
+  }
+
   function onkeydown(e: KeyboardEvent): void {
     const mod = e.metaKey || e.ctrlKey
     if (mod && e.key.toLowerCase() === 'f') {
@@ -61,14 +85,24 @@
       reload()
       return
     }
+    if (e.key === ' ' || e.code === 'Space') {
+      if (isTypingTarget(e.target)) return
+      e.preventDefault()
+      const active = document.activeElement
+      if (active instanceof HTMLElement && active !== document.body && !isTypingTarget(active)) active.blur()
+      if (!e.repeat) player.toggle()
+      return
+    }
     const target = e.target as HTMLElement
-    if (target.tagName === 'INPUT' && e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return
+    if (
+      (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') &&
+      e.key !== 'ArrowDown' &&
+      e.key !== 'ArrowUp' &&
+      e.key !== 'Enter'
+    )
+      return
 
     switch (e.key) {
-      case ' ':
-        e.preventDefault()
-        player.toggle()
-        break
       case 'ArrowDown':
         e.preventDefault()
         moveSelection(e.shiftKey ? 10 : 1)
@@ -92,7 +126,7 @@
   }
 </script>
 
-<svelte:window {onkeydown} />
+<svelte:window {onkeydown} {onkeyup} {onmousedown} />
 
 <div class="flex h-full flex-col">
   <TitleBar

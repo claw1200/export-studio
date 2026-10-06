@@ -58,11 +58,205 @@ export function cueColor(cue: Cue): string {
   return MEMORY_CUE_DEFAULT
 }
 
-const BAND_COLORS = {
-  low: [32, 92, 255],
-  mid: [255, 166, 43],
-  high: [245, 245, 255]
-} as const
+/** Bass first, then mids, then highs on top. Same scale for every band. */
+const BAND_LAYERS: { band: number; color: string }[] = [
+  { band: 0, color: 'rgb(0,92,224)' },
+  { band: 1, color: 'rgb(232,170,80)' },
+  { band: 2, color: 'rgb(244,236,220)' }
+]
+
+let colAmp = new Float32Array(0)
+let colColor = new Int32Array(0)
+
+function fitColumns(n: number): void {
+  if (colAmp.length >= n) return
+  const size = Math.max(n, colAmp.length * 2)
+  colAmp = new Float32Array(size)
+  colColor = new Int32Array(size)
+}
+
+function packColor(colors: Uint8Array, index: number): number {
+  const o = index * 3
+  return (colors[o] << 16) | (colors[o + 1] << 8) | colors[o + 2]
+}
+
+/**
+ * Pixel columns anchored at entry 0. `first` is an integer, so a moving playhead
+ * scrolls whole pixels instead of resampling the wave every frame.
+ */
+function pixelGrid(from: number, to: number, pw: number): { per: number; first: number } | null {
+  const span = to - from
+  if (!(span > 0) || pw < 1) return null
+  const per = span / pw
+  if (!(per > 0)) return null
+  return { per, first: Math.floor(from / per) }
+}
+
+/**
+ * Join two analysis samples. A rise stays at the quieter sample until the louder
+ * one, so a hit does not fade in ahead of itself. A fall interpolates.
+ */
+function joinAmp(current: number, next: number, fraction: number): number {
+  if (next > current) return current
+  return current + (next - current) * fraction
+}
+
+/**
+ * Loudness for one pixel from the 150 Hz analysis.
+ * A pixel narrower than one entry joins the stored samples.
+ * A wider pixel keeps the peak so transients survive zooming out.
+ */
+function readAmp(get: (i: number) => number, n: number, start: number, end: number): number {
+  if (!(end > start) || end <= 0 || start >= n) return NaN
+  if (end - start <= 1) {
+    const t = Math.min(n - 1, Math.max(0, (start + end) / 2))
+    const i = t | 0
+    const j = Math.min(n - 1, i + 1)
+    return joinAmp(get(i), get(j), t - i)
+  }
+  const i0 = Math.max(0, Math.floor(start))
+  const i1 = Math.min(n, Math.ceil(end))
+  let peak = 0
+  for (let i = i0; i < i1; i++) {
+    const v = get(i)
+    if (v > peak) peak = v
+  }
+  return peak
+}
+
+function readRgbColumn(
+  heights: Uint8Array,
+  colors: Uint8Array,
+  n: number,
+  start: number,
+  end: number
+): { amp: number; color: number } | null {
+  if (!(end > start) || end <= 0 || start >= n) return null
+  if (end - start <= 1) {
+    const t = Math.min(n - 1, Math.max(0, (start + end) / 2))
+    const i = t | 0
+    const j = Math.min(n - 1, i + 1)
+    return { amp: joinAmp(heights[i], heights[j], t - i) / 255, color: packColor(colors, i) }
+  }
+  const i0 = Math.max(0, Math.floor(start))
+  const i1 = Math.min(n, Math.ceil(end))
+  let peak = -1
+  let pi = i0
+  for (let i = i0; i < i1; i++) {
+    if (heights[i] > peak) {
+      peak = heights[i]
+      pi = i
+    }
+  }
+  return { amp: Math.max(0, peak) / 255, color: packColor(colors, pi) }
+}
+
+/** Filled shape. `anchor` center mirrors around the middle; bottom grows up from the baseline. */
+function paintColumns(
+  ctx: CanvasRenderingContext2D,
+  pw: number,
+  ph: number,
+  anchor: 'bottom' | 'center',
+  colorAt: (x: number) => string
+): void {
+  const mid = ph / 2
+  let x = 0
+  while (x < pw) {
+    if (Number.isNaN(colAmp[x]) || colColor[x] < 0) {
+      x++
+      continue
+    }
+    const color = colorAt(x)
+    let end = x + 1
+    while (end < pw && colColor[end] === colColor[x] && !Number.isNaN(colAmp[end])) end++
+    ctx.fillStyle = color
+    const x0 = x
+    const right = end < pw ? end + 0.35 : end
+    if (anchor === 'center') {
+      ctx.beginPath()
+      ctx.moveTo(x0, mid - colAmp[x0])
+      for (let i = x0; i < end; i++) ctx.lineTo(i + 0.5, mid - colAmp[i])
+      ctx.lineTo(right, mid - colAmp[end - 1])
+      ctx.lineTo(right, mid + colAmp[end - 1])
+      for (let i = end - 1; i >= x0; i--) ctx.lineTo(i + 0.5, mid + colAmp[i])
+      ctx.closePath()
+    } else {
+      ctx.beginPath()
+      ctx.moveTo(x0, ph)
+      ctx.lineTo(x0, ph - colAmp[x0])
+      for (let i = x0; i < end; i++) ctx.lineTo(i + 0.5, ph - colAmp[i])
+      ctx.lineTo(right, ph - colAmp[end - 1])
+      ctx.lineTo(right, ph)
+      ctx.closePath()
+    }
+    ctx.fill()
+    x = end
+  }
+}
+
+/**
+ * Color waveform from the stored analysis. Each entry is only a loudness and a color;
+ * neighboring entries are joined so the outline follows the data instead of sitting flat.
+ */
+function drawAnalysisRgb(
+  ctx: CanvasRenderingContext2D,
+  heights: Uint8Array,
+  colors: Uint8Array,
+  from: number,
+  to: number,
+  pw: number,
+  ph: number,
+  anchor: 'bottom' | 'center'
+): void {
+  const n = heights.length
+  const grid = pixelGrid(from, to, pw)
+  if (!grid || n < 1) return
+  fitColumns(pw)
+  const { per, first } = grid
+  const reach = anchor === 'center' ? ph / 2 : ph
+  for (let x = 0; x < pw; x++) {
+    const start = (first + x) * per
+    const col = readRgbColumn(heights, colors, n, start, start + per)
+    if (!col) {
+      colAmp[x] = NaN
+      colColor[x] = -1
+      continue
+    }
+    colAmp[x] = Math.max(1, Math.round(col.amp * reach))
+    colColor[x] = col.color
+  }
+  paintColumns(ctx, pw, ph, anchor, (x) => {
+    const c = colColor[x]
+    return `rgb(${(c >> 16) & 255},${(c >> 8) & 255},${c & 255})`
+  })
+}
+
+/** 3-band waveform from the stored analysis, layered and joined the same way. */
+function drawAnalysisBands(
+  ctx: CanvasRenderingContext2D,
+  bands: Uint8Array,
+  from: number,
+  to: number,
+  pw: number,
+  ph: number,
+  anchor: 'bottom' | 'center'
+): void {
+  const n = bands.length / 3
+  const grid = pixelGrid(from, to, pw)
+  if (!grid || n < 1) return
+  fitColumns(pw)
+  const { per, first } = grid
+  const reach = anchor === 'center' ? ph / 2 : ph
+  for (const layer of BAND_LAYERS) {
+    for (let x = 0; x < pw; x++) {
+      const start = (first + x) * per
+      const amp = readAmp((i) => bands[i * 3 + layer.band] / 255, n, start, start + per)
+      colAmp[x] = Number.isNaN(amp) ? NaN : Math.max(1, Math.round(amp * reach))
+      colColor[x] = Number.isNaN(amp) ? -1 : 1
+    }
+    paintColumns(ctx, pw, ph, anchor, () => layer.color)
+  }
+}
 
 export function setupCanvas(canvas: HTMLCanvasElement, w: number, h: number): CanvasRenderingContext2D {
   const dpr = window.devicePixelRatio || 1
@@ -77,77 +271,6 @@ export function setupCanvas(canvas: HTMLCanvasElement, w: number, h: number): Ca
   return ctx
 }
 
-/**
- * Draws columns for entries [from, to) across `pw` device pixels.
- * `anchor` = 'bottom' for overview bars, 'center' for mirrored detail.
- */
-function drawColumns(
-  ctx: CanvasRenderingContext2D,
-  wf: Waveform,
-  mode: WaveformMode,
-  from: number,
-  to: number,
-  pw: number,
-  ph: number,
-  anchor: 'bottom' | 'center'
-): void {
-  const span = to - from
-  if (span <= 0) return
-  const per = span / pw
-  const useBands = mode === '3band' && wf.bands
-  const half = anchor === 'center'
-  const full = half ? ph / 2 : ph
-  const mid = ph / 2
-
-  const bar = (x: number, height: number, color: string): void => {
-    if (height <= 0) return
-    const hh = Math.max(1, height * full)
-    ctx.fillStyle = color
-    if (half) ctx.fillRect(x, mid - hh, 1, hh * 2)
-    else ctx.fillRect(x, ph - hh, 1, hh)
-  }
-
-  for (let x = 0; x < pw; x++) {
-    const i0 = Math.floor(from + x * per)
-    const i1 = Math.max(i0 + 1, Math.floor(from + (x + 1) * per))
-    if (i1 <= 0 || i0 >= wf.length) continue
-    const a = Math.max(0, i0)
-    const b = Math.min(wf.length, i1)
-
-    if (useBands) {
-      const bands = wf.bands!
-      let lo = 0
-      let mi = 0
-      let hi = 0
-      for (let i = a; i < b; i++) {
-        const o = i * 3
-        if (bands[o] > lo) lo = bands[o]
-        if (bands[o + 1] > mi) mi = bands[o + 1]
-        if (bands[o + 2] > hi) hi = bands[o + 2]
-      }
-      const [lr, lg, lb] = BAND_COLORS.low
-      const [mr, mg, mb] = BAND_COLORS.mid
-      const [hr, hg, hb] = BAND_COLORS.high
-      bar(x, lo / 255, `rgb(${lr},${lg},${lb})`)
-      bar(x, (mi / 255) * 0.85, `rgb(${mr},${mg},${mb})`)
-      bar(x, (hi / 255) * 0.6, `rgb(${hr},${hg},${hb})`)
-    } else if (wf.rgbHeights && wf.rgbColors) {
-      const hs = wf.rgbHeights
-      const cs = wf.rgbColors
-      let peak = 0
-      let pi = a
-      for (let i = a; i < b; i++) {
-        if (hs[i] >= peak) {
-          peak = hs[i]
-          pi = i
-        }
-      }
-      const o = pi * 3
-      bar(x, peak / 255, `rgb(${cs[o]},${cs[o + 1]},${cs[o + 2]})`)
-    }
-  }
-}
-
 export function drawOverview(
   ctx: CanvasRenderingContext2D,
   wf: Waveform,
@@ -158,12 +281,13 @@ export function drawOverview(
   ctx.clearRect(0, 0, pw, ph)
   if (mode === '3band' && wf.previewBands) drawOverviewBands(ctx, wf.previewBands, pw, ph)
   else if (mode === '3band' && wf.bands) drawOverviewBands(ctx, wf.bands, pw, ph)
-  else drawColumns(ctx, wf, mode, 0, wf.length, pw, ph, 'bottom')
+  else if (wf.rgbHeights && wf.rgbColors)
+    drawAnalysisRgb(ctx, wf.rgbHeights, wf.rgbColors, 0, wf.length, pw, ph, 'bottom')
 }
 
 /**
- * rekordbox-style 3-band overview: column averages drawn from the baseline with
- * highs at the back, mids over them and lows in front, sharing one vertical scale.
+ * 3-band overview: column averages from the baseline, sharing one vertical scale.
+ * Highs are painted first and bass last, so blue sits at the bottom, then mids, then highs.
  */
 function drawOverviewBands(ctx: CanvasRenderingContext2D, bands: Uint8Array, pw: number, ph: number): void {
   const length = bands.length / 3
@@ -180,11 +304,9 @@ function drawOverviewBands(ctx: CanvasRenderingContext2D, bands: Uint8Array, pw:
     }
   }
   const scale = (ph - 1) / peak
-  const layers: [Float32Array, string][] = [
-    [avg[2], 'rgb(244,236,220)'],
-    [avg[1], 'rgb(232,170,80)'],
-    [avg[0], 'rgb(0,92,224)']
-  ]
+  const layers: [Float32Array, string][] = [...BAND_LAYERS]
+    .reverse()
+    .map((layer) => [avg[layer.band], layer.color])
   for (const [values, color] of layers) {
     ctx.fillStyle = color
     ctx.beginPath()
@@ -336,7 +458,9 @@ export function drawDetail(
   ctx.save()
   ctx.translate(0, 9 * dpr)
   if (mode === 'rgb' && samples) drawSampleWave(ctx, wf, samples, from, to, pw, waveH)
-  else drawColumns(ctx, wf, mode, from, to, pw, waveH, 'center')
+  else if (mode === '3band' && wf.bands) drawAnalysisBands(ctx, wf.bands, from, to, pw, waveH, 'center')
+  else if (wf.rgbHeights && wf.rgbColors)
+    drawAnalysisRgb(ctx, wf.rgbHeights, wf.rgbColors, from, to, pw, waveH, 'center')
   ctx.restore()
 
   // beat grid

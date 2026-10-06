@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { RefreshCw, Search, X, PanelRight, Lock, Volume1, Volume2, VolumeX } from '@lucide/svelte'
+  import { RefreshCw, Search, X, PanelRight, Lock, Settings, Volume1, Volume2, VolumeX } from '@lucide/svelte'
   import { getApp } from '$lib/context'
+  import SettingsMenu from './SettingsMenu.svelte'
 
   let {
     inspectorOpen = $bindable(true),
@@ -13,6 +14,16 @@
   const { library, player } = getApp()
   const silent = $derived(player.muted || player.volume === 0)
   const isMac = window.api.platform === 'darwin'
+  let settingsOpen = $state(false)
+
+  function onWindowKeydown(e: KeyboardEvent): void {
+    if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+      e.preventDefault()
+      settingsOpen = !settingsOpen
+      return
+    }
+    if (e.key === 'Escape' && settingsOpen) settingsOpen = false
+  }
 
   const snapshotLabel = $derived(
     library.info
@@ -21,16 +32,14 @@
   )
 </script>
 
+<svelte:window onkeydown={onWindowKeydown} />
+
 <header
   class={[
-    'drag flex h-10 shrink-0 items-center gap-3 border-b border-line-soft bg-bg pr-3',
+    'drag relative z-20 flex h-10 shrink-0 items-center gap-3 border-b border-line-soft bg-bg pr-3',
     isMac ? 'pl-[84px]' : 'pl-3 pr-[150px]'
   ]}
 >
-  <div class="flex items-center gap-2 text-[13px] font-semibold tracking-tight">
-    <span class="size-2 rounded-full bg-accent shadow-[0_0_12px] shadow-accent/60"></span>
-    ClubReady
-  </div>
 
   <div class="no-drag relative ml-4 w-full max-w-md">
     <Search class="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-faint" />
@@ -107,6 +116,30 @@
         title="Volume {Math.round(player.volume * 100)}%"
         bind:value={() => player.volume, (v) => player.setVolume(v)}
       />
+    </div>
+
+    <div class="no-drag relative">
+      <button
+        class={[
+          'relative z-50 grid size-7 place-items-center rounded-md hover:bg-hover',
+          settingsOpen ? 'text-fg' : 'text-faint'
+        ]}
+        onclick={() => (settingsOpen = !settingsOpen)}
+        aria-label="Settings"
+        aria-expanded={settingsOpen}
+        aria-haspopup="dialog"
+        title="Settings"
+      >
+        <Settings class="size-4" />
+      </button>
+      {#if settingsOpen}
+        <button
+          class="fixed inset-0 z-40 cursor-default"
+          aria-label="Close settings"
+          onclick={() => (settingsOpen = false)}
+        ></button>
+        <SettingsMenu />
+      {/if}
     </div>
 
     <button

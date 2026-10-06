@@ -29,7 +29,7 @@
       canvas.width,
       canvas.height,
       window.devicePixelRatio || 1,
-      player.wave
+      player.hqRgb ? player.wave : null
     )
   }
 
