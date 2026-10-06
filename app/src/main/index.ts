@@ -54,7 +54,7 @@ app.whenReady().then(() => {
   nativeTheme.themeSource = 'dark'
 
   app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
+    optimizer.watchWindowShortcuts(window, { zoom: true })
   })
 
   engine.start().catch((err) => console.error('[engine] failed to start', err))
