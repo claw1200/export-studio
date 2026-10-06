@@ -1,6 +1,7 @@
 import { api, audioUrl } from './api'
+import { nearestBeat } from './beat'
 import { cachedWaveSamples, loadWaveSamples, type WaveSamples } from './peaks'
-import type { Track, TrackDetail } from './types'
+import type { Cue, Track, TrackDetail } from './types'
 import { decodeWaveform, type Waveform, type WaveformMode } from './waveform'
 
 type DetailEntry = { detail: TrackDetail; waveform: Waveform | null }
@@ -47,6 +48,11 @@ export class Player {
   zoom = $state(Number(localStorage.getItem('waveformZoom')) || 1)
   volume = $state(storedVolume())
   muted = $state(localStorage.getItem('muted') === '1')
+  /** Snap gestures that opt in to the nearest beat. */
+  quantise = $state(localStorage.getItem('quantise') === '1')
+  /** A cue edit is being written. */
+  editing = $state(false)
+  editError = $state<string | null>(null)
   /** Level restored by unmute. */
   private level = 1
 
@@ -99,6 +105,9 @@ export class Player {
         this.pending = null
         this.apply(t)
       }
+    })
+    api.onEvent((event) => {
+      if (event === 'library.locked') void this.refreshDetail()
     })
     this.audio.addEventListener('error', () => {
       // Replacing src aborts the previous load. That is not a failure of the new one.
@@ -173,6 +182,7 @@ export class Player {
     this.position = 0
     this.duration = track.duration
     this.audioError = null
+    this.editError = null
     this.loading = true
     this.audio.src = audioUrl(track.id)
     if (autoplay) this.play()
@@ -204,6 +214,68 @@ export class Player {
   toggle(): void {
     if (this.audio.paused) this.play()
     else this.audio.pause()
+  }
+
+  /** Reload analysis for the open track after the library connection changes. */
+  async refreshDetail(): Promise<void> {
+    const id = this.track?.id
+    if (!id) return
+    const token = this.token
+    clearDetailCache()
+    try {
+      const { detail, waveform } = await loadDetail(id)
+      if (token !== this.token || this.track?.id !== id) return
+      this.detail = detail
+      this.waveform = waveform
+    } catch {
+      // Keep the deck that is already on screen.
+    }
+  }
+
+  /** Set pad `kind` at the playhead, on the beat while quantise is on. */
+  setHotCue(kind: number): Promise<void> {
+    const ms = Math.round(this.quantised(this.position) * 1000)
+    return this.editCues((id) => api.setHotCue(id, kind, ms))
+  }
+
+  deleteCue(cue: Cue): Promise<void> {
+    return this.editCues((id) => api.deleteCue(id, cue.id))
+  }
+
+  /** `colorIndex` is a rekordbox hot cue palette entry. Null clears it. */
+  setCueColor(cue: Cue, colorIndex: number | null): Promise<void> {
+    return this.editCues((id) => api.setCueColor(id, cue.id, colorIndex))
+  }
+
+  private async editCues(write: (id: string) => Promise<Cue[]>): Promise<void> {
+    const id = this.track?.id
+    if (!id || !this.detail || this.editing) return
+    this.editing = true
+    this.editError = null
+    try {
+      const cues = await write(id)
+      if (this.track?.id !== id || !this.detail) {
+        detailCache.delete(id)
+        return
+      }
+      this.detail = { ...this.detail, cues }
+      detailCache.set(id, Promise.resolve({ detail: this.detail, waveform: this.waveform }))
+    } catch (e) {
+      if (this.track?.id === id) this.editError = (e as Error).message
+    } finally {
+      this.editing = false
+    }
+  }
+
+  setQuantise(on: boolean): void {
+    this.quantise = on
+    localStorage.setItem('quantise', on ? '1' : '0')
+  }
+
+  /** `seconds`, snapped to the beat grid while quantise is on. */
+  quantised(seconds: number): number {
+    if (!this.quantise) return seconds
+    return nearestBeat(seconds, this.detail?.beatgrid ?? null)
   }
 
   setMode(mode: WaveformMode): void {

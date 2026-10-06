@@ -28,7 +28,14 @@
   {#if library.sourceLoading}
     <span class="text-accent">Loading…</span>
   {/if}
-  <span class="ml-auto truncate" title={library.info?.dbPath}>
-    {library.info?.rekordboxRunning ? 'rekordbox is running' : 'rekordbox is closed'}
-  </span>
+  {#if library.lockError}
+    <span class="ml-auto truncate text-warn" title={library.lockError}>{library.lockError}</span>
+  {:else}
+    <span class="ml-auto truncate" title={library.info?.dbPath}>
+      {library.info?.rekordboxRunning ? 'rekordbox is running' : 'rekordbox is closed'}
+      {#if library.info}
+        · {library.writable ? 'write' : 'read-only'}
+      {/if}
+    </span>
+  {/if}
 </footer>

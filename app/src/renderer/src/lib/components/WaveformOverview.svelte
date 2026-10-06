@@ -20,11 +20,15 @@
   }
 
   let wheelTimer = 0
+  /** Unsnapped playhead for the wheel gesture, so small ticks can still cross a beat. */
+  let wheelAt: number | null = null
 
   function place(e: PointerEvent): void {
+    clearTimeout(wheelTimer)
+    wheelAt = null
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left))
-    player.scrub((x / rect.width) * span)
+    player.scrub(player.quantised((x / rect.width) * span))
   }
 
   function cueLabel(cue: Cue): string {
@@ -37,9 +41,14 @@
     if (!player.waveform || !width) return
     e.preventDefault()
     const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
-    player.scrub(player.position + delta * (span / width))
+    const at = Math.max(0, Math.min(span, (wheelAt ?? player.position) + delta * (span / width)))
+    wheelAt = at
+    player.scrub(player.quantised(at))
     clearTimeout(wheelTimer)
-    wheelTimer = window.setTimeout(() => player.commit(), 80)
+    wheelTimer = window.setTimeout(() => {
+      wheelAt = null
+      player.commit()
+    }, 80)
   }
 </script>
 
@@ -79,22 +88,27 @@
     <button
       type="button"
       class={[
-        'absolute z-10 flex w-4 -translate-x-1/2 cursor-pointer border-0 bg-transparent p-0 hover:brightness-125',
-        cue.kind === 'hot' ? 'bottom-0 h-4 items-end justify-center' : 'top-0 h-4 items-start justify-center'
+        'absolute cursor-pointer border-0 bg-transparent p-0 hover:brightness-125',
+        cue.kind === 'hot'
+          ? 'bottom-0 z-20 grid size-3 place-items-center text-[8px] leading-none font-bold text-black/85'
+          : 'top-0 z-10 flex h-4 w-4 -translate-x-1/2 items-start justify-center'
       ]}
       style:left="{pct(cue.start / 1000)}%"
+      style:background={cue.kind === 'hot' ? cueColor(cue) : undefined}
       title={cueLabel(cue)}
       aria-label={cueLabel(cue)}
       onpointerdown={(e) => e.stopPropagation()}
       onclick={() => player.seek(cue.start / 1000)}
     >
-      <span
-        class="pointer-events-none h-[7px] w-[9px]"
-        style:background={cueColor(cue)}
-        style:clip-path={cue.kind === 'hot'
-          ? 'polygon(50% 0, 0 100%, 100% 100%)'
-          : 'polygon(0 0, 100% 0, 50% 100%)'}
-      ></span>
+      {#if cue.kind === 'hot'}
+        {hotCueLetter(cue.slot)}
+      {:else}
+        <span
+          class="pointer-events-none h-[7px] w-[9px]"
+          style:background={cueColor(cue)}
+          style:clip-path="polygon(0 0, 100% 0, 50% 100%)"
+        ></span>
+      {/if}
     </button>
   {/each}
 

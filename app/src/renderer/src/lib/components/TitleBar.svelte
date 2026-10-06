@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { RefreshCw, Search, X, PanelRight, Lock, Settings, Volume1, Volume2, VolumeX } from '@lucide/svelte'
+  import { RefreshCw, Search, X, PanelRight, Lock, LockOpen, Settings, Volume1, Volume2, VolumeX } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import SettingsMenu from './SettingsMenu.svelte'
 
@@ -26,10 +26,27 @@
   }
 
   const snapshotLabel = $derived(
-    library.info
+    library.info?.snapshotTime
       ? new Date(library.info.snapshotTime * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : ''
   )
+  const writeBlocked = $derived(!library.writable && !!library.info?.rekordboxRunning)
+  const lockTitle = $derived(
+    library.lockError
+      ? library.lockError
+      : library.writable
+        ? 'Write mode. Lock to return to a read-only snapshot.'
+        : writeBlocked
+          ? 'Close rekordbox to edit the library'
+          : 'Unlock to edit the library'
+  )
+
+  function toggleLock(): void {
+    const on = !library.writable
+    void library.setWritable(on).then((changed) => {
+      if (changed) void player.refreshDetail()
+    })
+  }
 </script>
 
 <svelte:window onkeydown={onWindowKeydown} />
@@ -69,6 +86,30 @@
   </div>
 
   <div class="ml-auto flex items-center gap-2">
+    {#if library.info}
+      <button
+        class={[
+          'no-drag flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium disabled:cursor-not-allowed disabled:opacity-50',
+          library.writable
+            ? 'bg-accent-soft text-accent hover:bg-accent/25'
+            : 'text-faint hover:bg-hover hover:text-muted disabled:hover:bg-transparent disabled:hover:text-faint'
+        ]}
+        onclick={toggleLock}
+        disabled={writeBlocked || library.switching}
+        aria-pressed={library.writable}
+        title={lockTitle}
+      >
+        {#if library.switching}
+          <RefreshCw class="size-3 animate-spin" />
+        {:else if library.writable}
+          <LockOpen class="size-3" />
+        {:else}
+          <Lock class="size-3" />
+        {/if}
+        {library.writable ? 'Write' : 'Read-only'}
+      </button>
+    {/if}
+
     {#if library.changed}
       <button
         class="no-drag flex h-7 items-center gap-1.5 rounded-md bg-warn/15 px-2.5 text-[12px] font-medium text-warn hover:bg-warn/25"
@@ -77,14 +118,13 @@
         <RefreshCw class="size-3.5" />
         Library changed — reload
       </button>
-    {:else if library.info}
+    {:else if library.info && !library.writable}
       <button
         class="no-drag flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] text-faint hover:bg-hover hover:text-muted"
-        title="Viewing a read-only snapshot of {library.info.dbPath}"
+        title="Reload the read-only snapshot of {library.info.dbPath}"
         onclick={() => library.load(true)}
       >
-        <Lock class="size-3" />
-        Read-only · {snapshotLabel}
+        {snapshotLabel}
         <RefreshCw class={['size-3', library.status === 'loading' && 'animate-spin']} />
       </button>
     {/if}

@@ -1,8 +1,8 @@
-"""Read-only access to a rekordbox 6/7 library.
+"""Access to a rekordbox 6/7 library.
 
-The live ``master.db`` (plus its WAL/SHM files) is copied into a private snapshot
-directory and only that copy is ever opened, so the real library is never touched
-and rekordbox can keep running.
+Read-only mode copies ``master.db`` (plus its WAL/SHM files) into a private snapshot
+and opens only that copy, so rekordbox can keep running. Write mode opens the live
+database, and only while rekordbox is closed.
 """
 
 import logging
@@ -11,6 +11,7 @@ import tempfile
 import time
 from collections import defaultdict
 from pathlib import Path
+from uuid import uuid4
 
 from pyrekordbox import Rekordbox6Database
 from pyrekordbox.config import get_config
@@ -26,6 +27,13 @@ log = logging.getLogger(__name__)
 DB_SUFFIXES = ("", "-wal", "-shm")
 FILE_TYPES = {1: "MP3", 4: "M4A", 5: "FLAC", 11: "WAV", 12: "AIFF"}
 HIDDEN_PLAYLISTS = {"100000"}  # Cloud Library Sync
+WRITE_BLOCKED = "Close rekordbox before editing the library"
+# Cue ``Kind`` for pads A-H. 4 is a loop, so D starts at 5.
+HOT_CUE_KINDS = (1, 2, 3, 5, 6, 7, 8, 9)
+# Size of rekordbox's hot cue palette, indexed from 1 in ``ColorTableIndex``.
+HOT_CUE_COLORS = 62
+# Cue positions are also stored in CDJ frames.
+FRAMES_PER_SECOND = 150
 
 
 def _rekordbox_db_path() -> Path:
@@ -56,6 +64,7 @@ class Library:
         self.db_dir = self.src.parent
         self.share_dir = self.db_dir / "share"
         self.db: Rekordbox6Database | None = None
+        self.writable = False
         self._snapshot_dir: Path | None = None
         self.snapshot_signature: tuple | None = None
         self.snapshot_time: float = 0
@@ -64,6 +73,26 @@ class Library:
     # -- lifecycle -------------------------------------------------------------------
 
     def open(self) -> None:
+        self._open_read_only()
+
+    def reopen(self) -> None:
+        """Reopen whichever mode is current. Rekordbox starting forces read-only."""
+        if self.writable and not get_rekordbox_pid():
+            try:
+                self._open_live()
+            except Exception:
+                if self.db is None or self.writable:
+                    raise
+            return
+        self._open_read_only()
+
+    def set_writable(self, writable: bool) -> None:
+        if writable:
+            self._open_live()
+        elif self.writable or self.db is None:
+            self._open_read_only()
+
+    def _open_read_only(self) -> None:
         last_err: Exception | None = None
         for _ in range(3):
             try:
@@ -74,6 +103,35 @@ class Library:
                 log.warning("Snapshot open failed, retrying: %s", e)
                 time.sleep(0.3)
         raise RuntimeError(f"Could not open rekordbox library: {last_err}")
+
+    def _open_live(self) -> None:
+        if get_rekordbox_pid():
+            raise RuntimeError(WRITE_BLOCKED)
+        self.close()
+        db: Rekordbox6Database | None = None
+        try:
+            db = Rekordbox6Database(path=self.src, db_dir=self.db_dir)
+            db.query(t.DjmdProperty).first()
+            if get_rekordbox_pid():
+                raise RuntimeError(WRITE_BLOCKED)
+        except Exception as e:
+            if db is not None:
+                try:
+                    db.close()
+                    db.engine.dispose()
+                except Exception:
+                    pass
+            self.writable = False
+            try:
+                self._open_read_only()
+            except Exception:
+                log.exception("Could not return to the read-only snapshot")
+            raise e
+        self.db = db
+        self.writable = True
+        self.snapshot_signature = None
+        self.snapshot_time = 0
+        self._content_cache.clear()
 
     def _open_snapshot(self) -> None:
         self.close()
@@ -93,6 +151,7 @@ class Library:
         db.query(t.DjmdProperty).first()
 
         self.db = db
+        self.writable = False
         self._snapshot_dir = snap
         self.snapshot_signature = signature
         self.snapshot_time = time.time()
@@ -110,8 +169,14 @@ class Library:
             shutil.rmtree(self._snapshot_dir, ignore_errors=True)
             self._snapshot_dir = None
 
+    def rekordbox_running(self) -> bool:
+        return bool(get_rekordbox_pid())
+
     def source_changed(self) -> bool:
-        return self.snapshot_signature is not None and _source_signature(self.src) != self.snapshot_signature
+        # Write mode is the live database, so its own file is not an external change.
+        if self.writable or self.snapshot_signature is None:
+            return False
+        return _source_signature(self.src) != self.snapshot_signature
 
     def _q(self, *entities):
         assert self.db is not None, "Library not open"
@@ -123,8 +188,9 @@ class Library:
         return {
             "dbPath": str(self.src),
             "snapshotTime": self.snapshot_time,
-            "rekordboxRunning": bool(get_rekordbox_pid()),
+            "rekordboxRunning": self.rekordbox_running(),
             "sourceChanged": self.source_changed(),
+            "writable": self.writable,
         }
 
     def tracks(self) -> list[dict]:
@@ -269,6 +335,23 @@ class Library:
     def track_detail(self, content_id: str) -> dict:
         content = self._content(content_id)
         anlz = self._anlz(content)
+        path = Path(content.FolderPath or "")
+        rgb = waveform.decode_rgb(anlz["EXT"])
+        return {
+            "id": content.ID,
+            "fileExists": path.is_file(),
+            "cues": self._cues(content, anlz["EXT"]),
+            "beatgrid": waveform.decode_beatgrid(anlz["DAT"]),
+            "waveform": {
+                "rate": waveform.DETAIL_RATE,
+                "rgb": rgb,
+                "threeBand": waveform.decode_three_band(anlz["2EX"]),
+                "threeBandPreview": waveform.decode_three_band(anlz["2EX"], "PWV6"),
+                "mono": None if rgb else waveform.decode_mono(anlz["EXT"]),
+            },
+        }
+
+    def _cues(self, content: t.DjmdContent, ext: waveform.Tags | None) -> list[dict]:
         cues = []
         for q in content.Cues:
             if q.rb_local_deleted:
@@ -283,26 +366,89 @@ class Library:
                 "colorIndex": q.ColorTableIndex,
                 "comment": q.Comment or "",
             })
-        anlz_colors = waveform.hot_cue_colors(anlz["EXT"])
+        anlz_colors = waveform.hot_cue_colors(ext)
         for c in cues:
             if c["kind"] == "hot":
                 c["rgb"] = anlz_colors.get((c["slot"], c["start"]))
         cues.sort(key=lambda c: (c["kind"] != "hot", c["slot"], c["start"]))
-        path = Path(content.FolderPath or "")
-        rgb = waveform.decode_rgb(anlz["EXT"])
-        return {
-            "id": content.ID,
-            "fileExists": path.is_file(),
-            "cues": cues,
-            "beatgrid": waveform.decode_beatgrid(anlz["DAT"]),
-            "waveform": {
-                "rate": waveform.DETAIL_RATE,
-                "rgb": rgb,
-                "threeBand": waveform.decode_three_band(anlz["2EX"]),
-                "threeBandPreview": waveform.decode_three_band(anlz["2EX"], "PWV6"),
-                "mono": None if rgb else waveform.decode_mono(anlz["EXT"]),
-            },
-        }
+        return cues
+
+    # -- editing -------------------------------------------------------------------
+
+    def set_hot_cue(self, content_id: str, kind: int, msec: int) -> list[dict]:
+        """Put a hot cue at ``msec``, replacing whatever was in that pad."""
+        if kind not in HOT_CUE_KINDS:
+            raise ValueError(f"Not a hot cue slot: {kind}")
+        db = self._writable_db()
+        content = self._content(content_id)
+        msec = max(0, int(round(msec)))
+        if content.Length:
+            msec = min(msec, content.Length * 1000)
+        try:
+            for q in list(content.Cues):
+                if q.Kind == kind and not q.rb_local_deleted:
+                    db.delete(q)
+            db.add(t.DjmdCue.create(
+                ID=str(db.generate_unused_id(t.DjmdCue, is_28_bit=False)),
+                UUID=str(uuid4()),
+                ContentID=content.ID,
+                ContentUUID=content.UUID,
+                Kind=kind,
+                InMsec=msec,
+                InFrame=msec * FRAMES_PER_SECOND // 1000,
+                InMpegFrame=0,
+                InMpegAbs=0,
+                OutMsec=-1,
+                OutFrame=0,
+                OutMpegFrame=0,
+                OutMpegAbs=0,
+                Color=-1,
+            ))
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        return self.cues(content_id)
+
+    def delete_cue(self, content_id: str, cue_id: str) -> list[dict]:
+        db = self._writable_db()
+        cue = db.query(t.DjmdCue).filter_by(ID=cue_id, ContentID=content_id).one_or_none()
+        if cue is not None:
+            try:
+                db.delete(cue)
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+        return self.cues(content_id)
+
+    def set_cue_color(self, content_id: str, cue_id: str, color_index: int | None) -> list[dict]:
+        """Set a hot cue's rekordbox palette colour. ``None`` clears it."""
+        if color_index is not None and not 1 <= color_index <= HOT_CUE_COLORS:
+            raise ValueError(f"Not a hot cue colour: {color_index}")
+        db = self._writable_db()
+        cue = db.query(t.DjmdCue).filter_by(ID=cue_id, ContentID=content_id).one_or_none()
+        if cue is None or not cue.Kind:
+            raise KeyError(f"Unknown hot cue {cue_id}")
+        if cue.ColorTableIndex != color_index:
+            try:
+                cue.ColorTableIndex = color_index
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+        return self.cues(content_id)
+
+    def cues(self, content_id: str) -> list[dict]:
+        content = self._content(content_id)
+        return self._cues(content, self._anlz(content)["EXT"])
+
+    def _writable_db(self) -> Rekordbox6Database:
+        if not self.writable or self.db is None:
+            raise RuntimeError("Unlock write mode to edit the library")
+        if get_rekordbox_pid():
+            raise RuntimeError(WRITE_BLOCKED)
+        return self.db
 
     def resolve_media(self, kind: str, content_id: str, size: str = "") -> str | None:
         content = self._content(content_id)

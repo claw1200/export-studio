@@ -1,6 +1,13 @@
 import type { WaveSamples } from './peaks'
 import type { Beatgrid, Cue, TrackDetail } from './types'
-import { HOT_CUE_DEFAULT, LOOP_DEFAULT, MEMORY_CUE_DEFAULT, TRACK_COLORS } from './format'
+import {
+  HOT_CUE_DEFAULT,
+  hotCueLetter,
+  hotCuePaletteColor,
+  LOOP_DEFAULT,
+  MEMORY_CUE_DEFAULT,
+  TRACK_COLORS
+} from './format'
 
 export type WaveformMode = 'rgb' | '3band'
 
@@ -53,7 +60,9 @@ export function decodeWaveform(detail: TrackDetail): Waveform | null {
 }
 
 export function cueColor(cue: Cue): string {
-  if (cue.kind === 'hot') return cue.rgb ?? (cue.end != null ? LOOP_DEFAULT : HOT_CUE_DEFAULT)
+  if (cue.kind === 'hot') {
+    return hotCuePaletteColor(cue.colorIndex) ?? cue.rgb ?? (cue.end != null ? LOOP_DEFAULT : HOT_CUE_DEFAULT)
+  }
   if (cue.color != null && TRACK_COLORS[cue.color]) return TRACK_COLORS[cue.color].hex
   return MEMORY_CUE_DEFAULT
 }
@@ -477,8 +486,11 @@ export function drawDetail(
       if (grid.times[m] < t0) lo = m + 1
       else hi = m
     }
+    const cueXs = view.cues.map((cue) => Math.round(toX(cue.start / 1000)))
+    const nearCue = (x: number): boolean => cueXs.some((cx) => Math.abs(cx - x) <= 2 * dpr)
     for (let i = lo; i < grid.times.length && grid.times[i] <= t1; i++) {
       const x = Math.round(toX(grid.times[i] / 1000))
+      if (nearCue(x)) continue
       const down = grid.beats[i] === 1
       ctx.fillStyle = down ? 'rgba(255,72,88,0.9)' : 'rgba(255,255,255,0.28)'
       ctx.fillRect(x, 0, Math.max(1, dpr), down ? 7 * dpr : 4 * dpr)
@@ -490,28 +502,37 @@ export function drawDetail(
     }
   }
 
-  // cue markers: memory cues hang from the top, hot cues sit on the bottom.
-  // The stem is `mark` device pixels wide starting at `x`; the tip sits on its center
-  // so it stays locked to the beat grid instead of riding the stem's left edge.
+  // cue markers: memory cues hang from the top, hot cues are lettered squares on the bottom.
+  // The stem is `mark` device pixels wide starting at `x`; the memory cue tip sits on its
+  // center so it stays locked to the beat grid instead of riding the stem's left edge.
   const s = 6 * dpr
   const mark = Math.max(1, dpr)
+  const hotMark = Math.max(2, Math.round(1.5 * dpr))
   const tipH = Math.round(s * 1.2)
-  for (const cue of view.cues) {
+  const box = Math.round(14 * dpr)
+  ctx.font = `700 ${Math.round(9.5 * dpr)}px "Inter Variable", system-ui, sans-serif`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  // Memory cues first so a hot cue on the same spot stays on top.
+  const ordered = [...view.cues].sort((a, b) => Number(a.kind === 'hot') - Number(b.kind === 'hot'))
+  for (const cue of ordered) {
     const x = Math.round(toX(cue.start / 1000))
     if (x < -40 * dpr || x > pw + 40 * dpr) continue
+    const color = cueColor(cue)
+    ctx.fillStyle = color
+    if (cue.kind === 'hot') {
+      ctx.fillRect(x, 0, hotMark, ph)
+      ctx.fillRect(x, ph - box, box, box)
+      ctx.fillStyle = 'rgba(0,0,0,0.85)'
+      ctx.fillText(hotCueLetter(cue.slot), x + box / 2, ph - box / 2 + 0.5 * dpr)
+      continue
+    }
     const tip = x + mark / 2
-    ctx.fillStyle = cueColor(cue)
     ctx.fillRect(x, 0, mark, ph)
     ctx.beginPath()
-    if (cue.kind === 'hot') {
-      ctx.moveTo(tip - s, ph)
-      ctx.lineTo(tip + s, ph)
-      ctx.lineTo(tip, ph - tipH)
-    } else {
-      ctx.moveTo(tip - s, 0)
-      ctx.lineTo(tip + s, 0)
-      ctx.lineTo(tip, tipH)
-    }
+    ctx.moveTo(tip - s, 0)
+    ctx.lineTo(tip + s, 0)
+    ctx.lineTo(tip, tipH)
     ctx.closePath()
     ctx.fill()
   }

@@ -37,6 +37,7 @@ class Engine:
         self.methods = {
             "library.open": self.open,
             "library.reload": self.reload,
+            "library.setWritable": lambda writable: self.set_writable(writable),
             "library.info": lambda: self.lib.info(),
             "library.tracks": lambda: self.lib.tracks(),
             "library.playlists": lambda: self.lib.playlists(),
@@ -45,6 +46,9 @@ class Engine:
             "playlist.tracks": lambda id: self.lib.playlist_tracks(id),
             "history.tracks": lambda id: self.lib.history_tracks(id),
             "track.detail": lambda id: self.lib.track_detail(id),
+            "cue.setHot": lambda id, kind, ms: self.lib.set_hot_cue(id, kind, ms),
+            "cue.delete": lambda id, cueId: self.lib.delete_cue(id, cueId),
+            "cue.setColor": lambda id, cueId, colorIndex: self.lib.set_cue_color(id, cueId, colorIndex),
             "media.resolve": lambda kind, id, size="": self.lib.resolve_media(kind, id, size),
         }
 
@@ -62,8 +66,12 @@ class Engine:
         return self.library.info()
 
     def reload(self) -> dict:
-        self.lib.open()
+        self.lib.reopen()
         emit("library.reloaded")
+        return self.lib.info()
+
+    def set_writable(self, writable: bool) -> dict:
+        self.lib.set_writable(bool(writable))
         return self.lib.info()
 
     def handle(self, msg: dict) -> None:
@@ -83,14 +91,27 @@ class Engine:
 
     def watch(self, stop: threading.Event) -> None:
         notified = False
+        running: bool | None = None
         while not stop.wait(2.0):
-            lib = self.library
-            if lib is None or lib.db is None:
-                continue
-            changed = lib.source_changed()
-            if changed and not notified:
-                emit("library.changed", {})
-            notified = changed
+            with self._lock:
+                lib = self.library
+                if lib is None or lib.db is None:
+                    continue
+                now = lib.rekordbox_running()
+                if lib.writable and now:
+                    try:
+                        lib.set_writable(False)
+                        emit("library.locked", lib.info())
+                    except Exception:
+                        log.exception("Failed to leave write mode")
+                    notified = False
+                elif running is not None and now != running:
+                    emit("library.rekordbox", {"running": now})
+                running = now
+                changed = lib.source_changed()
+                if changed and not notified:
+                    emit("library.changed", {})
+                notified = changed
 
 
 def main() -> None:

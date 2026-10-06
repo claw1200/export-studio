@@ -79,6 +79,8 @@ export interface LibraryInfo {
   snapshotTime: number
   rekordboxRunning: boolean
   sourceChanged: boolean
+  /** Live database. False is the read-only snapshot. */
+  writable: boolean
 }
 
 export type Source =

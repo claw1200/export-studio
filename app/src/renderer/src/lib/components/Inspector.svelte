@@ -98,7 +98,7 @@
       {@render cues(null)}
       {@render file(null)}
     {:then detail}
-      {@render cues(detail)}
+      {@render cues(player.detail?.id === detail.id ? player.detail : detail)}
       {@render file(detail)}
     {:catch}
       {@render file(null)}

@@ -81,6 +81,12 @@ export class Library {
   status = $state<'idle' | 'loading' | 'ready' | 'error'>('idle')
   error = $state<string | null>(null)
   changed = $state(false)
+  /** Write mode is opening or closing. */
+  switching = $state(false)
+  /** Why the last attempt to unlock was refused. */
+  lockError = $state<string | null>(null)
+
+  writable = $derived(this.info?.writable ?? false)
 
   source = $state.raw<Source>({ type: 'collection' })
   sourceIds = $state.raw<string[] | null>(null)
@@ -154,8 +160,22 @@ export class Library {
   private sourceToken = 0
 
   constructor() {
-    api.onEvent((event) => {
+    api.onEvent((event, data) => {
       if (event === 'library.changed') this.changed = true
+      if (event === 'library.rekordbox') {
+        const running = Boolean((data as { running?: boolean } | undefined)?.running)
+        if (this.info && this.info.rekordboxRunning !== running) {
+          this.info = { ...this.info, rekordboxRunning: running }
+        }
+        if (!running) this.lockError = null
+      }
+      if (event === 'library.locked') {
+        clearDetailCache()
+        this.info = data as LibraryInfo
+        this.changed = false
+        this.lockError = null
+        void this.refreshContents()
+      }
     })
   }
 
@@ -165,23 +185,60 @@ export class Library {
     if (reload) clearDetailCache()
     try {
       this.info = reload ? await api.reload() : await api.open()
-      const [tracks, playlists, histories, myTags] = await Promise.all([
-        api.tracks(),
-        api.playlists(),
-        api.histories(),
-        api.myTags()
-      ])
-      this.tracks = tracks
-      this.playlists = playlists
-      this.histories = histories
-      this.myTags = myTags
-      this.changed = false
+      await this.refreshContents()
       this.status = 'ready'
-      await this.setSource(this.source)
     } catch (e) {
       this.error = (e as Error).message
       this.status = 'error'
     }
+  }
+
+  /** Open the live library, or return to the read-only snapshot. */
+  async setWritable(on: boolean): Promise<boolean> {
+    if (this.switching || on === this.writable) return false
+    if (on && this.info?.rekordboxRunning) {
+      this.lockError = 'Close rekordbox before editing the library'
+      return false
+    }
+    this.switching = true
+    this.lockError = null
+    try {
+      this.info = await api.setWritable(on)
+      clearDetailCache()
+      await this.refreshContents()
+      return this.writable === on
+    } catch (e) {
+      this.lockError = (e as Error).message
+      try {
+        const info = await api.info()
+        const reopened = info.writable !== this.writable || info.snapshotTime !== this.info?.snapshotTime
+        this.info = info
+        if (reopened) {
+          clearDetailCache()
+          await this.refreshContents()
+        }
+      } catch {
+        // The previous view stays up if the library can no longer be read.
+      }
+      return false
+    } finally {
+      this.switching = false
+    }
+  }
+
+  private async refreshContents(): Promise<void> {
+    const [tracks, playlists, histories, myTags] = await Promise.all([
+      api.tracks(),
+      api.playlists(),
+      api.histories(),
+      api.myTags()
+    ])
+    this.tracks = tracks
+    this.playlists = playlists
+    this.histories = histories
+    this.myTags = myTags
+    this.changed = false
+    await this.setSource(this.source)
   }
 
   async setSource(source: Source): Promise<void> {

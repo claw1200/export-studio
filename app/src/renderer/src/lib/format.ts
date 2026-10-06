@@ -61,6 +61,32 @@ export function hotCueLetter(kind: number): string {
   return 'ABCDEFGH'[index] ?? '?'
 }
 
+/** djmdCue.Kind for pads A–H. */
+export const HOT_CUE_KINDS = [1, 2, 3, 5, 6, 7, 8, 9]
+
+/**
+ * rekordbox hot cue palette. djmdCue.ColorTableIndex `n` is entry `n - 1`; 0 and null mean no colour.
+ * Table from Deep Symmetry's beat-link (CueList.findRekordboxColor).
+ */
+// prettier-ignore
+const HOT_CUE_PALETTE = [
+  '#305aff', '#5073ff', '#508cff', '#50a0ff', '#50b4ff', '#50b0f2', '#50aee8', '#45acdb',
+  '#00e0ff', '#19daf0', '#32d2e6', '#21b4b9', '#20aaa0', '#1fa392', '#19a08c', '#14a584',
+  '#14aa7d', '#10b176', '#30d26e', '#37de5a', '#3ceb50', '#28e214', '#7dc13d', '#8cc832',
+  '#9bd723', '#a5e116', '#a5dc0a', '#aad208', '#b4c805', '#b4be04', '#bab404', '#c3af04',
+  '#e1aa00', '#ffa000', '#ff9600', '#ff8c00', '#ff7500', '#e0641b', '#e0461e', '#e0301e',
+  '#e02823', '#e62828', '#ff376f', '#ff2d6f', '#ff127b', '#f51e8c', '#eb2da0', '#e637b4',
+  '#de44cf', '#de448d', '#e630b4', '#e619dc', '#e600ff', '#dc00ff', '#cc00ff', '#b432ff',
+  '#b93cff', '#c542ff', '#aa5aff', '#aa72ff', '#8272ff', '#6473ff'
+]
+
+/** The 16 palette entries rekordbox offers in its hot cue colour picker, as ColorTableIndex values. */
+export const HOT_CUE_PICKER = [1, 5, 9, 14, 18, 22, 26, 30, 32, 38, 42, 45, 49, 56, 60, 62]
+
+export function hotCuePaletteColor(index: number | null): string | null {
+  return index ? (HOT_CUE_PALETTE[index - 1] ?? null) : null
+}
+
 export const HOT_CUE_DEFAULT = '#2be36c'
 export const LOOP_DEFAULT = '#ff9a1f'
 export const MEMORY_CUE_DEFAULT = '#ff3b4e'
