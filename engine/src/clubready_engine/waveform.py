@@ -71,9 +71,10 @@ def decode_rgb(ext: Tags | None) -> dict | None:
     }
 
 
-def decode_three_band(ex2: Tags | None) -> dict | None:
-    """PWV7: three bytes per entry, ordered mid, high, low. Returned as low, mid, high."""
-    tag = _first(ex2, "PWV7")
+def decode_three_band(ex2: Tags | None, kind: str = "PWV7") -> dict | None:
+    """PWV7 (detail) / PWV6 (1200-column preview): three bytes per entry, ordered
+    mid, high, low. Returned as low, mid, high."""
+    tag = _first(ex2, kind)
     if tag is None:
         return None
     body, n = _body(tag)

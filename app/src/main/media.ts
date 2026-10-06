@@ -1,8 +1,6 @@
-import { createReadStream } from 'fs'
-import { stat } from 'fs/promises'
 import { extname } from 'path'
-import { Readable } from 'stream'
-import { protocol } from 'electron'
+import { pathToFileURL } from 'url'
+import { net, protocol } from 'electron'
 import type { Engine } from './engine'
 
 const MIME: Record<string, string> = {
@@ -25,31 +23,10 @@ export function registerMediaScheme(): void {
   ])
 }
 
-async function serveFile(path: string, range: string | null): Promise<Response> {
-  const { size } = await stat(path)
-  const type = MIME[extname(path).toLowerCase()] ?? 'application/octet-stream'
-  const base = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'max-age=3600' }
-
-  const match = range && /bytes=(\d*)-(\d*)/.exec(range)
-  if (match) {
-    const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]))
-    const end = match[1] && match[2] ? Math.min(Number(match[2]), size - 1) : size - 1
-    if (start >= size || start > end) {
-      return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } })
-    }
-    const body = Readable.toWeb(createReadStream(path, { start, end })) as ReadableStream
-    return new Response(body, {
-      status: 206,
-      headers: { ...base, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': String(end - start + 1) }
-    })
-  }
-  const body = Readable.toWeb(createReadStream(path)) as ReadableStream
-  return new Response(body, { status: 200, headers: { ...base, 'Content-Length': String(size) } })
-}
-
 /**
  * media://art/<trackId>?size=s|m  and  media://audio/<trackId>
  * Paths are resolved by the engine, so the renderer can only reach files the library references.
+ * Chromium's file loader owns range reads, cancellation, and end-of-file.
  */
 export function handleMediaProtocol(engine: Engine): void {
   const cache = new Map<string, string | null>()
@@ -70,10 +47,20 @@ export function handleMediaProtocol(engine: Engine): void {
         cache.set(key, path)
       }
       if (!path) return new Response(null, { status: 404 })
-      return await serveFile(path, request.headers.get('range'))
+
+      const headers = new Headers()
+      const range = request.headers.get('range')
+      if (range) headers.set('range', range)
+      const file = await net.fetch(pathToFileURL(path).href, { headers, signal: request.signal })
+      const type = MIME[extname(path).toLowerCase()]
+      if (!type) return file
+      const out = new Headers(file.headers)
+      out.set('content-type', type)
+      return new Response(file.body, { status: file.status, statusText: file.statusText, headers: out })
     } catch (err) {
+      if (request.signal.aborted || (err as Error).name === 'AbortError') return new Response(null, { status: 499 })
       console.error('[media]', key, err)
-      return new Response(null, { status: 500 })
+      return new Response(null, { status: 404 })
     }
   })
 }

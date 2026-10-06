@@ -299,6 +299,7 @@ class Library:
                 "rate": waveform.DETAIL_RATE,
                 "rgb": rgb,
                 "threeBand": waveform.decode_three_band(anlz["2EX"]),
+                "threeBandPreview": waveform.decode_three_band(anlz["2EX"], "PWV6"),
                 "mono": None if rgb else waveform.decode_mono(anlz["EXT"]),
             },
         }

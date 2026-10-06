@@ -39,6 +39,12 @@ export class Player {
   private audio = new Audio()
   private raf = 0
   private token = 0
+  /** Playhead is following a gesture, so playback must not overwrite it. */
+  private scrubbing = false
+  /** Target of the seek the element is currently performing. */
+  private sent: number | null = null
+  /** Seek made before the element knew its duration. */
+  private pending: number | null = null
 
   constructor() {
     this.audio.preload = 'auto'
@@ -49,13 +55,25 @@ export class Player {
     this.audio.addEventListener('pause', () => {
       this.playing = false
       cancelAnimationFrame(this.raf)
-      this.position = this.audio.currentTime
+      if (!this.scrubbing) this.position = this.audio.currentTime
     })
     this.audio.addEventListener('ended', () => (this.playing = false))
+    this.audio.addEventListener('seeked', () => {
+      const sent = this.sent
+      this.sent = null
+      if (sent != null && Math.abs(this.position - sent) >= 0.05) this.apply(this.position)
+    })
     this.audio.addEventListener('loadedmetadata', () => {
       if (Number.isFinite(this.audio.duration)) this.duration = this.audio.duration
+      if (this.pending != null && !this.scrubbing) {
+        const t = this.pending
+        this.pending = null
+        this.apply(t)
+      }
     })
     this.audio.addEventListener('error', () => {
+      // Replacing src aborts the previous load. That is not a failure of the new one.
+      if (this.audio.error?.code === MediaError.MEDIA_ERR_ABORTED) return
       const ext = this.track?.fileType ?? ''
       this.audioError =
         this.detail && !this.detail.fileExists
@@ -65,8 +83,54 @@ export class Player {
   }
 
   private tick = (): void => {
-    this.position = this.audio.currentTime
+    if (!this.scrubbing) this.position = this.audio.currentTime
     if (!this.audio.paused) this.raf = requestAnimationFrame(this.tick)
+  }
+
+  /** Move the playhead. The element follows when it is free. */
+  scrub(seconds: number): void {
+    this.scrubbing = true
+    this.apply(seconds)
+  }
+
+  /** The gesture has ended. Land on the last playhead position. */
+  commit(): void {
+    if (!this.scrubbing) return
+    this.scrubbing = false
+    this.apply(this.position)
+  }
+
+  /** Discrete jump: cue, keyboard, inspector. */
+  seek(seconds: number): void {
+    this.scrubbing = false
+    this.apply(seconds)
+  }
+
+  private mediaEnd(): number {
+    const ranges = this.audio.seekable
+    if (ranges.length > 0) return ranges.end(ranges.length - 1)
+    if (Number.isFinite(this.audio.duration) && this.audio.duration > 0) return this.audio.duration
+    return this.duration
+  }
+
+  /** The byte at `duration` is past the last sample, so stay just inside the file. */
+  private playable(seconds: number): number {
+    const end = this.mediaEnd()
+    const max = Number.isFinite(end) && end > 0.05 ? end - 0.001 : Math.max(0, end)
+    return Math.max(0, Math.min(seconds, max || seconds))
+  }
+
+  private apply(seconds: number): void {
+    const t = this.playable(seconds)
+    this.position = t
+    if (this.audio.readyState < HTMLMediaElement.HAVE_METADATA) {
+      this.pending = t
+      return
+    }
+    this.pending = null
+    if (this.sent != null || Math.abs(this.audio.currentTime - t) < 0.05) return
+    this.sent = t
+    this.audio.currentTime = t
   }
 
   async load(track: Track, autoplay = false): Promise<void> {
@@ -76,19 +140,24 @@ export class Player {
     }
     const token = ++this.token
     this.audio.pause()
+    this.scrubbing = false
+    this.sent = null
+    this.pending = null
     this.track = track
+    this.detail = null
+    this.waveform = null
     this.position = 0
     this.duration = track.duration
     this.audioError = null
     this.loading = true
+    this.audio.src = audioUrl(track.id)
+    if (autoplay) this.play()
     try {
       const { detail, waveform } = await loadDetail(track.id)
       if (token !== this.token) return
       this.detail = detail
       this.waveform = waveform
-      if (waveform) this.duration = Math.max(track.duration, waveform.length / waveform.rate)
-      this.audio.src = audioUrl(track.id)
-      if (autoplay) this.play()
+      if (!detail.fileExists) this.audioError = 'Audio file not found'
     } catch (e) {
       if (token === this.token) this.audioError = (e as Error).message
     } finally {
@@ -104,12 +173,6 @@ export class Player {
   toggle(): void {
     if (this.audio.paused) this.play()
     else this.audio.pause()
-  }
-
-  seek(seconds: number): void {
-    const t = Math.max(0, Math.min(seconds, this.duration || seconds))
-    this.position = t
-    this.audio.currentTime = t
   }
 
   setMode(mode: WaveformMode): void {

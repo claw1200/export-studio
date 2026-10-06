@@ -12,6 +12,8 @@ export interface Waveform {
   rgbColors?: Uint8Array
   /** low,mid,high triplets 0–255 */
   bands?: Uint8Array
+  /** low,mid,high triplets from the fixed-width preview tag */
+  previewBands?: Uint8Array
 }
 
 function b64(data: string): Uint8Array {
@@ -22,7 +24,7 @@ function b64(data: string): Uint8Array {
 }
 
 export function decodeWaveform(detail: TrackDetail): Waveform | null {
-  const { rate, rgb, threeBand, mono } = detail.waveform
+  const { rate, rgb, threeBand, threeBandPreview, mono } = detail.waveform
   const wf: Waveform = { rate, length: 0 }
   if (rgb) {
     wf.rgbHeights = b64(rgb.heights)
@@ -45,6 +47,7 @@ export function decodeWaveform(detail: TrackDetail): Waveform | null {
     wf.bands = b64(threeBand.bands)
     wf.length = Math.max(wf.length, threeBand.length)
   }
+  if (threeBandPreview) wf.previewBands = b64(threeBandPreview.bands)
   return wf.length ? wf : null
 }
 
@@ -152,7 +155,44 @@ export function drawOverview(
   ph: number
 ): void {
   ctx.clearRect(0, 0, pw, ph)
-  drawColumns(ctx, wf, mode, 0, wf.length, pw, ph, 'bottom')
+  if (mode === '3band' && wf.previewBands) drawOverviewBands(ctx, wf.previewBands, pw, ph)
+  else if (mode === '3band' && wf.bands) drawOverviewBands(ctx, wf.bands, pw, ph)
+  else drawColumns(ctx, wf, mode, 0, wf.length, pw, ph, 'bottom')
+}
+
+/**
+ * rekordbox-style 3-band overview: column averages drawn from the baseline with
+ * highs at the back, mids over them and lows in front, sharing one vertical scale.
+ */
+function drawOverviewBands(ctx: CanvasRenderingContext2D, bands: Uint8Array, pw: number, ph: number): void {
+  const length = bands.length / 3
+  const avg = [new Float32Array(pw), new Float32Array(pw), new Float32Array(pw)]
+  let peak = 1
+  for (let x = 0; x < pw; x++) {
+    const a = Math.floor((x * length) / pw)
+    const b = Math.max(a + 1, Math.floor(((x + 1) * length) / pw))
+    for (let band = 0; band < 3; band++) {
+      let sum = 0
+      for (let i = a; i < b; i++) sum += bands[i * 3 + band]
+      avg[band][x] = sum / (b - a)
+      if (avg[band][x] > peak) peak = avg[band][x]
+    }
+  }
+  const scale = (ph - 1) / peak
+  const layers: [Float32Array, string][] = [
+    [avg[2], 'rgb(244,236,220)'],
+    [avg[1], 'rgb(232,170,80)'],
+    [avg[0], 'rgb(0,92,224)']
+  ]
+  for (const [values, color] of layers) {
+    ctx.fillStyle = color
+    ctx.beginPath()
+    ctx.moveTo(0, ph)
+    for (let x = 0; x < pw; x++) ctx.lineTo(x + 0.5, ph - values[x] * scale)
+    ctx.lineTo(pw, ph)
+    ctx.closePath()
+    ctx.fill()
+  }
 }
 
 export interface DetailView {

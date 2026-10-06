@@ -62,6 +62,7 @@ export interface WaveformPayload {
   rate: number
   rgb: { length: number; heights: string; colors: string } | null
   threeBand: { length: number; bands: string } | null
+  threeBandPreview: { length: number; bands: string } | null
   mono: { length: number; heights: string; whiteness: string } | null
 }
 

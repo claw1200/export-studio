@@ -17,10 +17,21 @@
     else ctx.clearRect(0, 0, canvas.width, canvas.height)
   }
 
-  function seekFrom(e: PointerEvent): void {
+  let wheelTimer = 0
+
+  function place(e: PointerEvent): void {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left))
-    player.seek((x / rect.width) * span)
+    player.scrub((x / rect.width) * span)
+  }
+
+  function onwheel(e: WheelEvent): void {
+    if (!player.waveform || !width) return
+    e.preventDefault()
+    const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
+    player.scrub(player.position + delta * (span / width))
+    clearTimeout(wheelTimer)
+    wheelTimer = window.setTimeout(() => player.commit(), 80)
   }
 </script>
 
@@ -34,13 +45,16 @@
   aria-valuemin={0}
   aria-valuemax={Math.round(span)}
   aria-valuenow={Math.round(player.position)}
+  {onwheel}
   onpointerdown={(e) => {
     e.currentTarget.setPointerCapture(e.pointerId)
-    seekFrom(e)
+    place(e)
   }}
   onpointermove={(e) => {
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) seekFrom(e)
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) place(e)
   }}
+  onpointerup={() => player.commit()}
+  onpointercancel={() => player.commit()}
 >
   <canvas {@attach paint} class="absolute inset-0 size-full"></canvas>
   <div class="pointer-events-none absolute inset-y-0 left-0 bg-black/50" style:width="{pct(player.position)}%"></div>

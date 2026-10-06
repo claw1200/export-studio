@@ -6,7 +6,7 @@
 
   let width = $state(0)
   let height = $state(0)
-  let drag: { x: number; position: number; wasPlaying: boolean } | null = null
+  let drag: { x: number; position: number } | null = null
 
   function paint(canvas: HTMLCanvasElement): void {
     if (!width || !height) return
@@ -37,12 +37,8 @@
   function onwheel(e: WheelEvent): void {
     if (!player.waveform) return
     e.preventDefault()
-    if (e.ctrlKey || e.metaKey) {
-      player.setZoom(player.zoom * Math.exp(-e.deltaY * 0.01))
-      return
-    }
     const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
-    player.seek(player.position + delta * secondsPerPixel())
+    player.setZoom(player.zoom * Math.exp(-delta * 0.01))
   }
 </script>
 
@@ -58,18 +54,21 @@
   onpointerdown={(e) => {
     if (!player.waveform) return
     e.currentTarget.setPointerCapture(e.pointerId)
-    drag = { x: e.clientX, position: player.position, wasPlaying: player.playing }
-    if (player.playing) player.toggle()
+    drag = { x: e.clientX, position: player.position }
   }}
   onpointermove={(e) => {
     if (!drag) return
-    player.seek(drag.position - (e.clientX - drag.x) * secondsPerPixel())
+    player.scrub(drag.position - (e.clientX - drag.x) * secondsPerPixel())
   }}
   onpointerup={() => {
-    if (drag?.wasPlaying) player.play()
+    if (!drag) return
+    player.commit()
     drag = null
   }}
-  onpointercancel={() => (drag = null)}
+  onpointercancel={() => {
+    if (drag) player.commit()
+    drag = null
+  }}
 >
   <canvas {@attach paint} class="absolute inset-0 size-full"></canvas>
 </div>
