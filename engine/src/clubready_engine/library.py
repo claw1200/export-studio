@@ -1,10 +1,3 @@
-"""Access to a rekordbox 6/7 library.
-
-Read-only mode copies ``master.db`` (plus its WAL/SHM files) into a private snapshot
-and opens only that copy, so rekordbox can keep running. Write mode opens the live
-database, and only while rekordbox is closed.
-"""
-
 import logging
 import shutil
 import tempfile
@@ -26,14 +19,14 @@ log = logging.getLogger(__name__)
 
 DB_SUFFIXES = ("", "-wal", "-shm")
 FILE_TYPES = {1: "MP3", 4: "M4A", 5: "FLAC", 11: "WAV", 12: "AIFF"}
-HIDDEN_PLAYLISTS = {"100000"}  # Cloud Library Sync
+CLOUD_LIBRARY_SYNC = "100000"
+HIDDEN_PLAYLISTS = {CLOUD_LIBRARY_SYNC}
 WRITE_BLOCKED = "Close rekordbox before editing the library"
-# Cue ``Kind`` for pads A-H. 4 is a loop, so D starts at 5.
-HOT_CUE_KINDS = (1, 2, 3, 5, 6, 7, 8, 9)
-# Size of rekordbox's hot cue palette, indexed from 1 in ``ColorTableIndex``.
-HOT_CUE_COLORS = 62
-# Cue positions are also stored in CDJ frames.
-FRAMES_PER_SECOND = 150
+LOOP_KIND = 4
+HOT_CUE_KINDS = tuple(kind for kind in range(1, 10) if kind != LOOP_KIND)
+HOT_CUE_PALETTE_SIZE = 62
+CDJ_FRAMES_PER_SECOND = 150
+FOLDER = 1
 
 
 def _rekordbox_db_path() -> Path:
@@ -58,6 +51,39 @@ def _source_signature(src: Path) -> tuple:
     return tuple(sig)
 
 
+def _dispose(db: Rekordbox6Database) -> None:
+    try:
+        db.close()
+        db.engine.dispose()
+    except Exception:
+        pass
+
+
+def _node(item_id, name, parent, seq, kind, **fields):
+    node = {
+        "id": item_id,
+        "name": name or "",
+        "parentId": parent or "root",
+        "seq": seq or 0,
+        "kind": kind,
+    }
+    node.update(fields)
+    return node
+
+
+def _leaf_or_folder(attr, leaf: str) -> str:
+    return "folder" if attr == FOLDER else leaf
+
+
+def _commit(db: Rekordbox6Database, change) -> None:
+    try:
+        change()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
 class Library:
     def __init__(self, db_path: Path | None = None):
         self.src = Path(db_path) if db_path else _rekordbox_db_path()
@@ -70,13 +96,10 @@ class Library:
         self.snapshot_time: float = 0
         self._content_cache: dict[str, dict] = {}
 
-    # -- lifecycle -------------------------------------------------------------------
-
     def open(self) -> None:
         self._open_read_only()
 
     def reopen(self) -> None:
-        """Reopen whichever mode is current. Rekordbox starting forces read-only."""
         if self.writable and not get_rekordbox_pid():
             try:
                 self._open_live()
@@ -98,7 +121,7 @@ class Library:
             try:
                 self._open_snapshot()
                 return
-            except Exception as e:  # torn copy while rekordbox was writing; retry
+            except Exception as e:
                 last_err = e
                 log.warning("Snapshot open failed, retrying: %s", e)
                 time.sleep(0.3)
@@ -116,11 +139,7 @@ class Library:
                 raise RuntimeError(WRITE_BLOCKED)
         except Exception as e:
             if db is not None:
-                try:
-                    db.close()
-                    db.engine.dispose()
-                except Exception:
-                    pass
+                _dispose(db)
             self.writable = False
             try:
                 self._open_read_only()
@@ -159,11 +178,7 @@ class Library:
 
     def close(self) -> None:
         if self.db is not None:
-            try:
-                self.db.close()
-                self.db.engine.dispose()
-            except Exception:
-                pass
+            _dispose(self.db)
             self.db = None
         if self._snapshot_dir is not None:
             shutil.rmtree(self._snapshot_dir, ignore_errors=True)
@@ -173,7 +188,6 @@ class Library:
         return bool(get_rekordbox_pid())
 
     def source_changed(self) -> bool:
-        # Write mode is the live database, so its own file is not an external change.
         if self.writable or self.snapshot_signature is None:
             return False
         return _source_signature(self.src) != self.snapshot_signature
@@ -182,7 +196,11 @@ class Library:
         assert self.db is not None, "Library not open"
         return self.db.session.execute(select(*entities))
 
-    # -- queries -------------------------------------------------------------------
+    def _counts(self, column) -> dict[str, int]:
+        counts: dict[str, int] = defaultdict(int)
+        for (key,) in self._q(column):
+            counts[key] += 1
+        return counts
 
     def info(self) -> dict:
         return {
@@ -260,18 +278,16 @@ class Library:
 
     def playlists(self) -> list[dict]:
         P, SP = t.DjmdPlaylist, t.DjmdSongPlaylist
-        counts: dict[str, int] = defaultdict(int)
-        for (pid,) in self._q(SP.PlaylistID):
-            counts[pid] += 1
+        counts = self._counts(SP.PlaylistID)
         out = []
         for pid, name, parent, seq, attr in self._q(P.ID, P.Name, P.ParentID, P.Seq, P.Attribute).all():
             if pid in HIDDEN_PLAYLISTS:
                 continue
-            kind = {0: "playlist", 1: "folder", 4: "smart"}.get(attr, "playlist")
-            out.append({
-                "id": pid, "name": name or "", "parentId": parent or "root", "seq": seq or 0,
-                "kind": kind, "count": counts.get(pid, 0) if kind == "playlist" else None,
-            })
+            kind = {0: "playlist", FOLDER: "folder", 4: "smart"}.get(attr, "playlist")
+            out.append(_node(
+                pid, name, parent, seq, kind,
+                count=counts.get(pid, 0) if kind == "playlist" else None,
+            ))
         return out
 
     def playlist_tracks(self, playlist_id: str) -> list[str]:
@@ -286,13 +302,13 @@ class Library:
 
     def histories(self) -> list[dict]:
         H, SH = t.DjmdHistory, t.DjmdSongHistory
-        counts: dict[str, int] = defaultdict(int)
-        for (hid,) in self._q(SH.HistoryID):
-            counts[hid] += 1
+        counts = self._counts(SH.HistoryID)
         return [
-            {"id": hid, "name": name or "", "parentId": parent or "root", "seq": seq or 0,
-             "kind": "folder" if attr == 1 else "playlist", "date": created or "",
-             "count": counts.get(hid, 0) if attr != 1 else None}
+            _node(
+                hid, name, parent, seq, _leaf_or_folder(attr, "playlist"),
+                date=created or "",
+                count=None if attr == FOLDER else counts.get(hid, 0),
+            )
             for hid, name, parent, seq, attr, created
             in self._q(H.ID, H.Name, H.ParentID, H.Seq, H.Attribute, H.DateCreated).all()
         ]
@@ -305,12 +321,10 @@ class Library:
     def my_tags(self) -> list[dict]:
         M = t.DjmdMyTag
         return [
-            {"id": mid, "name": name or "", "parentId": parent or "root", "seq": seq or 0,
-             "kind": "folder" if attr == 1 else "tag"}
+            _node(mid, name, parent, seq, _leaf_or_folder(attr, "tag"))
             for mid, name, parent, seq, attr in self._q(M.ID, M.Name, M.ParentID, M.Seq, M.Attribute).all()
         ]
 
-    # -- per-track detail ----------------------------------------------------------
 
     def _content(self, content_id: str) -> t.DjmdContent:
         content = self.db.get_content(ID=content_id)
@@ -346,7 +360,7 @@ class Library:
                 "rate": waveform.DETAIL_RATE,
                 "rgb": rgb,
                 "threeBand": waveform.decode_three_band(anlz["2EX"]),
-                "threeBandPreview": waveform.decode_three_band(anlz["2EX"], "PWV6"),
+                "threeBandPreview": waveform.decode_three_band(anlz["2EX"], waveform.PREVIEW_BANDS_TAG),
                 "mono": None if rgb else waveform.decode_mono(anlz["EXT"]),
             },
         }
@@ -373,10 +387,7 @@ class Library:
         cues.sort(key=lambda c: (c["kind"] != "hot", c["slot"], c["start"]))
         return cues
 
-    # -- editing -------------------------------------------------------------------
-
     def set_hot_cue(self, content_id: str, kind: int, msec: int) -> list[dict]:
-        """Put a hot cue at ``msec``, replacing whatever was in that pad."""
         if kind not in HOT_CUE_KINDS:
             raise ValueError(f"Not a hot cue slot: {kind}")
         db = self._writable_db()
@@ -384,10 +395,11 @@ class Library:
         msec = max(0, int(round(msec)))
         if content.Length:
             msec = min(msec, content.Length * 1000)
-        try:
-            for q in list(content.Cues):
-                if q.Kind == kind and not q.rb_local_deleted:
-                    db.delete(q)
+
+        def place() -> None:
+            for cue in list(content.Cues):
+                if cue.Kind == kind and not cue.rb_local_deleted:
+                    db.delete(cue)
             db.add(t.DjmdCue.create(
                 ID=str(db.generate_unused_id(t.DjmdCue, is_28_bit=False)),
                 UUID=str(uuid4()),
@@ -395,7 +407,7 @@ class Library:
                 ContentUUID=content.UUID,
                 Kind=kind,
                 InMsec=msec,
-                InFrame=msec * FRAMES_PER_SECOND // 1000,
+                InFrame=msec * CDJ_FRAMES_PER_SECOND // 1000,
                 InMpegFrame=0,
                 InMpegAbs=0,
                 OutMsec=-1,
@@ -404,39 +416,29 @@ class Library:
                 OutMpegAbs=0,
                 Color=-1,
             ))
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
+
+        _commit(db, place)
         return self.cues(content_id)
 
     def delete_cue(self, content_id: str, cue_id: str) -> list[dict]:
         db = self._writable_db()
         cue = db.query(t.DjmdCue).filter_by(ID=cue_id, ContentID=content_id).one_or_none()
         if cue is not None:
-            try:
-                db.delete(cue)
-                db.commit()
-            except Exception:
-                db.rollback()
-                raise
+            _commit(db, lambda: db.delete(cue))
         return self.cues(content_id)
 
     def set_cue_color(self, content_id: str, cue_id: str, color_index: int | None) -> list[dict]:
-        """Set a hot cue's rekordbox palette colour. ``None`` clears it."""
-        if color_index is not None and not 1 <= color_index <= HOT_CUE_COLORS:
+        if color_index is not None and not 1 <= color_index <= HOT_CUE_PALETTE_SIZE:
             raise ValueError(f"Not a hot cue colour: {color_index}")
         db = self._writable_db()
         cue = db.query(t.DjmdCue).filter_by(ID=cue_id, ContentID=content_id).one_or_none()
         if cue is None or not cue.Kind:
             raise KeyError(f"Unknown hot cue {cue_id}")
         if cue.ColorTableIndex != color_index:
-            try:
+            def paint() -> None:
                 cue.ColorTableIndex = color_index
-                db.commit()
-            except Exception:
-                db.rollback()
-                raise
+
+            _commit(db, paint)
         return self.cues(content_id)
 
     def cues(self, content_id: str) -> list[dict]:

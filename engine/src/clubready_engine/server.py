@@ -1,10 +1,3 @@
-"""Newline-delimited JSON-RPC over stdin/stdout.
-
-Request:  {"id": 1, "method": "library.tracks", "params": {...}}
-Response: {"id": 1, "result": ...} | {"id": 1, "error": {"message": ...}}
-Event:    {"event": "library.changed", "data": {...}}
-"""
-
 import json
 import logging
 import sys
@@ -114,9 +107,12 @@ class Engine:
                 notified = changed
 
 
-def main() -> None:
-    # stdout is reserved for the protocol; anything else that prints goes to stderr
+def _send_prints_to_stderr() -> None:
     sys.stdout = sys.stderr
+
+
+def main() -> None:
+    _send_prints_to_stderr()
     logging.basicConfig(
         stream=sys.stderr, level=logging.INFO, format="[engine] %(levelname)s %(name)s: %(message)s"
     )

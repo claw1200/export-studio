@@ -15,56 +15,64 @@
   const player = new Player()
   setApp({ library, player })
 
-  const SIDEBAR = { min: 180, max: 400, fallback: 240 }
-  const INSPECTOR = { min: 260, max: 480, fallback: 320 }
+  const PANELS = {
+    sidebar: { min: 180, max: 400, fallback: 240 },
+    inspector: { min: 260, max: 480, fallback: 320 }
+  } as const
 
-  function readWidth(key: string, min: number, max: number, fallback: number): number {
-    const n = Number(localStorage.getItem(key))
-    return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback
-  }
+  type Panel = keyof typeof PANELS
 
-  let inspectorOpen = $state(localStorage.getItem('inspectorOpen') !== 'false')
-  let sidebarWidth = $state(readWidth('sidebarWidth', SIDEBAR.min, SIDEBAR.max, SIDEBAR.fallback))
-  let inspectorWidth = $state(readWidth('inspectorWidth', INSPECTOR.min, INSPECTOR.max, INSPECTOR.fallback))
-  let panelDrag = $state<{ side: 'sidebar' | 'inspector'; startX: number; startW: number } | null>(null)
-
-  function clampWidth(side: 'sidebar' | 'inspector', width: number): number {
-    const spec = side === 'sidebar' ? SIDEBAR : INSPECTOR
+  function clampWidth(panel: Panel, width: number): number {
+    const spec = PANELS[panel]
     return Math.min(spec.max, Math.max(spec.min, Math.round(width)))
   }
 
-  function startPanelResize(e: PointerEvent, side: 'sidebar' | 'inspector'): void {
+  function readWidth(panel: Panel): number {
+    const n = Number(localStorage.getItem(`${panel}Width`))
+    return Number.isFinite(n) ? clampWidth(panel, n) : PANELS[panel].fallback
+  }
+
+  let inspectorOpen = $state(localStorage.getItem('inspectorOpen') !== 'false')
+  let sidebarWidth = $state(readWidth('sidebar'))
+  let inspectorWidth = $state(readWidth('inspector'))
+  let panelDrag = $state<{ side: Panel; startX: number; startW: number } | null>(null)
+
+  function widthOf(panel: Panel): number {
+    return panel === 'sidebar' ? sidebarWidth : inspectorWidth
+  }
+
+  function setWidth(panel: Panel, width: number): void {
+    const next = clampWidth(panel, width)
+    if (panel === 'sidebar') sidebarWidth = next
+    else inspectorWidth = next
+  }
+
+  function startPanelResize(e: PointerEvent, side: Panel): void {
     if (e.button !== 0 || e.detail > 1) return
     e.preventDefault()
     e.stopPropagation()
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    panelDrag = { side, startX: e.clientX, startW: side === 'sidebar' ? sidebarWidth : inspectorWidth }
+    panelDrag = { side, startX: e.clientX, startW: widthOf(side) }
   }
 
   function onPanelMove(e: PointerEvent): void {
     const drag = panelDrag
     if (!drag) return
     const delta = e.clientX - drag.startX
-    const next = drag.side === 'sidebar' ? drag.startW + delta : drag.startW - delta
-    if (drag.side === 'sidebar') sidebarWidth = clampWidth('sidebar', next)
-    else inspectorWidth = clampWidth('inspector', next)
+    const signed = drag.side === 'sidebar' ? delta : -delta
+    setWidth(drag.side, drag.startW + signed)
   }
 
   function endPanelResize(): void {
     const drag = panelDrag
     if (!drag) return
     panelDrag = null
-    const key = drag.side === 'sidebar' ? 'sidebarWidth' : 'inspectorWidth'
-    const width = drag.side === 'sidebar' ? sidebarWidth : inspectorWidth
-    localStorage.setItem(key, String(width))
+    localStorage.setItem(`${drag.side}Width`, String(widthOf(drag.side)))
   }
 
-  function resetPanel(side: 'sidebar' | 'inspector'): void {
-    if (side === 'sidebar') sidebarWidth = SIDEBAR.fallback
-    else inspectorWidth = INSPECTOR.fallback
-    const key = side === 'sidebar' ? 'sidebarWidth' : 'inspectorWidth'
-    const width = side === 'sidebar' ? sidebarWidth : inspectorWidth
-    localStorage.setItem(key, String(width))
+  function resetPanel(side: Panel): void {
+    setWidth(side, PANELS[side].fallback)
+    localStorage.setItem(`${side}Width`, String(widthOf(side)))
   }
 
   let searchInput = $state<HTMLInputElement>()
@@ -99,14 +107,12 @@
     table?.ensureVisible(next)
   }
 
-  /** Search and other text fields. Sliders and buttons are not typing. */
+  const TEXT_INPUTS = new Set(['text', 'search', 'email', 'password', 'url'])
+
   function isTypingTarget(target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) return false
-    if (target.isContentEditable) return true
-    if (target.tagName === 'TEXTAREA') return true
-    if (!(target instanceof HTMLInputElement)) return false
-    const type = target.type
-    return type === 'text' || type === 'search' || type === 'email' || type === 'password' || type === 'url'
+    if (target.isContentEditable || target.tagName === 'TEXTAREA') return true
+    return target instanceof HTMLInputElement && TEXT_INPUTS.has(target.type)
   }
 
   function onmousedown(e: MouseEvent): void {
@@ -114,8 +120,6 @@
     if (e.target.closest('input, textarea, select, [contenteditable]')) return
     const active = document.activeElement
     if (active instanceof HTMLElement && isTypingTarget(active)) active.blur()
-    // Keep the click from focusing a button or row. preventDefault also keeps the
-    // current field focused, so the blur above has to happen first.
     if (e.target.closest('button, a, [tabindex]')) e.preventDefault()
   }
 
@@ -194,9 +198,9 @@
     ]}
     role="separator"
     aria-orientation="vertical"
-    aria-valuenow={side === 'sidebar' ? sidebarWidth : inspectorWidth}
-    aria-valuemin={side === 'sidebar' ? SIDEBAR.min : INSPECTOR.min}
-    aria-valuemax={side === 'sidebar' ? SIDEBAR.max : INSPECTOR.max}
+    aria-valuenow={widthOf(side)}
+    aria-valuemin={PANELS[side].min}
+    aria-valuemax={PANELS[side].max}
     aria-label={side === 'sidebar' ? 'Resize playlists' : 'Resize info'}
     title="Drag to resize. Double-click to reset."
     onpointerdown={(e) => startPanelResize(e, side)}

@@ -1,5 +1,6 @@
 import type { WaveSamples } from './peaks'
 import type { Beatgrid, Cue, TrackDetail } from './types'
+import { firstIndexAtOrAfter } from './beat'
 import {
   HOT_CUE_DEFAULT,
   hotCueLetter,
@@ -14,13 +15,9 @@ export type WaveformMode = 'rgb' | '3band'
 export interface Waveform {
   rate: number
   length: number
-  /** heights 0–255, one per entry */
   rgbHeights?: Uint8Array
-  /** r,g,b triplets 0–255 */
   rgbColors?: Uint8Array
-  /** low,mid,high triplets 0–255 */
   bands?: Uint8Array
-  /** low,mid,high triplets from the fixed-width preview tag */
   previewBands?: Uint8Array
 }
 
@@ -67,11 +64,13 @@ export function cueColor(cue: Cue): string {
   return MEMORY_CUE_DEFAULT
 }
 
-/** Bass first, then mids, then highs on top. Same scale for every band. */
-const BAND_LAYERS: { band: number; color: string }[] = [
-  { band: 0, color: 'rgb(0,92,224)' },
-  { band: 1, color: 'rgb(232,170,80)' },
-  { band: 2, color: 'rgb(244,236,220)' }
+const LOW = 0
+const MID = 1
+const HIGH = 2
+const BANDS_LOW_TO_HIGH: { band: number; color: string }[] = [
+  { band: LOW, color: 'rgb(0,92,224)' },
+  { band: MID, color: 'rgb(232,170,80)' },
+  { band: HIGH, color: 'rgb(244,236,220)' }
 ]
 
 let colAmp = new Float32Array(0)
@@ -89,10 +88,6 @@ function packColor(colors: Uint8Array, index: number): number {
   return (colors[o] << 16) | (colors[o + 1] << 8) | colors[o + 2]
 }
 
-/**
- * Pixel columns anchored at entry 0. `first` is an integer, so a moving playhead
- * scrolls whole pixels instead of resampling the wave every frame.
- */
 function pixelGrid(from: number, to: number, pw: number): { per: number; first: number } | null {
   const span = to - from
   if (!(span > 0) || pw < 1) return null
@@ -101,34 +96,32 @@ function pixelGrid(from: number, to: number, pw: number): { per: number; first: 
   return { per, first: Math.floor(from / per) }
 }
 
-/**
- * Join two analysis samples. A rise stays at the quieter sample until the louder
- * one, so a hit does not fade in ahead of itself. A fall interpolates.
- */
-function joinAmp(current: number, next: number, fraction: number): number {
+function holdUntilPeak(current: number, next: number, fraction: number): number {
   if (next > current) return current
   return current + (next - current) * fraction
 }
 
-/**
- * Loudness for one pixel from the 150 Hz analysis.
- * A pixel narrower than one entry joins the stored samples.
- * A wider pixel keeps the peak so transients survive zooming out.
- */
-function readAmp(get: (i: number) => number, n: number, start: number, end: number): number {
-  if (!(end > start) || end <= 0 || start >= n) return NaN
+type ColumnSpan =
+  { kind: 'between'; index: number; next: number; fraction: number } | { kind: 'peak'; from: number; to: number }
+
+function columnSpan(count: number, start: number, end: number): ColumnSpan | null {
+  if (!(end > start) || end <= 0 || start >= count) return null
   if (end - start <= 1) {
-    const t = Math.min(n - 1, Math.max(0, (start + end) / 2))
-    const i = t | 0
-    const j = Math.min(n - 1, i + 1)
-    return joinAmp(get(i), get(j), t - i)
+    const at = Math.min(count - 1, Math.max(0, (start + end) / 2))
+    const index = at | 0
+    return { kind: 'between', index, next: Math.min(count - 1, index + 1), fraction: at - index }
   }
-  const i0 = Math.max(0, Math.floor(start))
-  const i1 = Math.min(n, Math.ceil(end))
+  return { kind: 'peak', from: Math.max(0, Math.floor(start)), to: Math.min(count, Math.ceil(end)) }
+}
+
+function readAmp(get: (i: number) => number, count: number, start: number, end: number): number {
+  const span = columnSpan(count, start, end)
+  if (!span) return NaN
+  if (span.kind === 'between') return holdUntilPeak(get(span.index), get(span.next), span.fraction)
   let peak = 0
-  for (let i = i0; i < i1; i++) {
-    const v = get(i)
-    if (v > peak) peak = v
+  for (let i = span.from; i < span.to; i++) {
+    const value = get(i)
+    if (value > peak) peak = value
   }
   return peak
 }
@@ -136,31 +129,29 @@ function readAmp(get: (i: number) => number, n: number, start: number, end: numb
 function readRgbColumn(
   heights: Uint8Array,
   colors: Uint8Array,
-  n: number,
+  count: number,
   start: number,
   end: number
 ): { amp: number; color: number } | null {
-  if (!(end > start) || end <= 0 || start >= n) return null
-  if (end - start <= 1) {
-    const t = Math.min(n - 1, Math.max(0, (start + end) / 2))
-    const i = t | 0
-    const j = Math.min(n - 1, i + 1)
-    return { amp: joinAmp(heights[i], heights[j], t - i) / 255, color: packColor(colors, i) }
-  }
-  const i0 = Math.max(0, Math.floor(start))
-  const i1 = Math.min(n, Math.ceil(end))
-  let peak = -1
-  let pi = i0
-  for (let i = i0; i < i1; i++) {
-    if (heights[i] > peak) {
-      peak = heights[i]
-      pi = i
+  const span = columnSpan(count, start, end)
+  if (!span) return null
+  if (span.kind === 'between') {
+    return {
+      amp: holdUntilPeak(heights[span.index], heights[span.next], span.fraction) / 255,
+      color: packColor(colors, span.index)
     }
   }
-  return { amp: Math.max(0, peak) / 255, color: packColor(colors, pi) }
+  let peak = -1
+  let peakIndex = span.from
+  for (let i = span.from; i < span.to; i++) {
+    if (heights[i] > peak) {
+      peak = heights[i]
+      peakIndex = i
+    }
+  }
+  return { amp: Math.max(0, peak) / 255, color: packColor(colors, peakIndex) }
 }
 
-/** Filled shape. `anchor` center mirrors around the middle; bottom grows up from the baseline. */
 function paintColumns(
   ctx: CanvasRenderingContext2D,
   pw: number,
@@ -203,10 +194,6 @@ function paintColumns(
   }
 }
 
-/**
- * Color waveform from the stored analysis. Each entry is only a loudness and a color;
- * neighboring entries are joined so the outline follows the data instead of sitting flat.
- */
 function drawAnalysisRgb(
   ctx: CanvasRenderingContext2D,
   heights: Uint8Array,
@@ -240,7 +227,6 @@ function drawAnalysisRgb(
   })
 }
 
-/** 3-band waveform from the stored analysis, layered and joined the same way. */
 function drawAnalysisBands(
   ctx: CanvasRenderingContext2D,
   bands: Uint8Array,
@@ -256,7 +242,7 @@ function drawAnalysisBands(
   fitColumns(pw)
   const { per, first } = grid
   const reach = anchor === 'center' ? ph / 2 : ph
-  for (const layer of BAND_LAYERS) {
+  for (const layer of BANDS_LOW_TO_HIGH) {
     for (let x = 0; x < pw; x++) {
       const start = (first + x) * per
       const amp = readAmp((i) => bands[i * 3 + layer.band] / 255, n, start, start + per)
@@ -288,17 +274,13 @@ export function drawOverview(
   ph: number
 ): void {
   ctx.clearRect(0, 0, pw, ph)
-  if (mode === '3band' && wf.previewBands) drawOverviewBands(ctx, wf.previewBands, pw, ph)
-  else if (mode === '3band' && wf.bands) drawOverviewBands(ctx, wf.bands, pw, ph)
+  const bands = mode === '3band' ? (wf.previewBands ?? wf.bands) : null
+  if (bands) drawStackedBands(ctx, bands, pw, ph)
   else if (wf.rgbHeights && wf.rgbColors)
     drawAnalysisRgb(ctx, wf.rgbHeights, wf.rgbColors, 0, wf.length, pw, ph, 'bottom')
 }
 
-/**
- * Full-track 3-band strip. Each column stacks lows, then mids, then highs,
- * so blue sits on the baseline and the other bands sit above it.
- */
-function drawOverviewBands(ctx: CanvasRenderingContext2D, bands: Uint8Array, pw: number, ph: number): void {
+function drawStackedBands(ctx: CanvasRenderingContext2D, bands: Uint8Array, pw: number, ph: number): void {
   const length = bands.length / 3
   const level = [new Float32Array(pw), new Float32Array(pw), new Float32Array(pw)]
   const floor0 = new Float32Array(pw)
@@ -319,7 +301,7 @@ function drawOverviewBands(ctx: CanvasRenderingContext2D, bands: Uint8Array, pw:
   for (let band = 0; band < 3; band++) {
     const floor = band === 0 ? floor0 : level[band - 1]
     const ceil = level[band]
-    ctx.fillStyle = BAND_LAYERS[band].color
+    ctx.fillStyle = BANDS_LOW_TO_HIGH[band].color
     ctx.beginPath()
     ctx.moveTo(0, ph - floor[0] * scale)
     for (let x = 0; x < pw; x++) ctx.lineTo(x + 0.5, ph - ceil[x] * scale)
@@ -330,9 +312,7 @@ function drawOverviewBands(ctx: CanvasRenderingContext2D, bands: Uint8Array, pw:
 }
 
 export interface DetailView {
-  /** playhead position in seconds */
   position: number
-  /** css pixels per waveform entry */
   zoom: number
   cues: Cue[]
   beatgrid: Beatgrid | null
@@ -341,11 +321,6 @@ export interface DetailView {
 let envUpper = new Float32Array(0)
 let envLower = new Float32Array(0)
 
-/**
- * Bipolar trace of the decoded audio, coloured by the RGB analysis.
- * Columns are locked to a grid anchored at sample 0 and drawn on whole pixels,
- * so playback scrolls the picture instead of resampling every frame.
- */
 function drawSampleWave(
   ctx: CanvasRenderingContext2D,
   wf: Waveform,
@@ -441,6 +416,110 @@ export function visibleRange(wf: Waveform, view: DetailView, cssWidth: number): 
   return [center - halfEntries, center + halfEntries]
 }
 
+interface Frame {
+  ctx: CanvasRenderingContext2D
+  wf: Waveform
+  view: DetailView
+  pw: number
+  ph: number
+  dpr: number
+  from: number
+  to: number
+  toX: (seconds: number) => number
+}
+
+function paintLoops(frame: Frame): void {
+  const { ctx, view, pw, ph, toX } = frame
+  for (const cue of view.cues) {
+    if (cue.end == null) continue
+    const x0 = toX(cue.start / 1000)
+    const x1 = toX(cue.end / 1000)
+    if (x1 < 0 || x0 > pw) continue
+    ctx.fillStyle = cueColor(cue) + '33'
+    ctx.fillRect(x0, 0, x1 - x0, ph)
+  }
+}
+
+function paintWave(frame: Frame, mode: WaveformMode, samples?: WaveSamples | null): void {
+  const { ctx, wf, from, to, pw, ph, dpr } = frame
+  const waveH = ph - 18 * dpr
+  ctx.save()
+  ctx.translate(0, 9 * dpr)
+  if (mode === 'rgb' && samples) drawSampleWave(ctx, wf, samples, from, to, pw, waveH)
+  else if (mode === '3band' && wf.bands) drawAnalysisBands(ctx, wf.bands, from, to, pw, waveH, 'center')
+  else if (wf.rgbHeights && wf.rgbColors)
+    drawAnalysisRgb(ctx, wf.rgbHeights, wf.rgbColors, from, to, pw, waveH, 'center')
+  ctx.restore()
+}
+
+function paintBeatGrid(frame: Frame): void {
+  const { ctx, wf, view, ph, dpr, from, to, toX } = frame
+  const grid = view.beatgrid
+  if (!grid) return
+  const startMs = (from / wf.rate) * 1000
+  const endMs = (to / wf.rate) * 1000
+  const cueXs = view.cues.map((cue) => Math.round(toX(cue.start / 1000)))
+  const coveredByCue = (x: number): boolean => cueXs.some((cueX) => Math.abs(cueX - x) <= 2 * dpr)
+  for (let i = firstIndexAtOrAfter(grid.times, startMs); i < grid.times.length && grid.times[i] <= endMs; i++) {
+    const x = Math.round(toX(grid.times[i] / 1000))
+    if (coveredByCue(x)) continue
+    const downbeat = grid.beats[i] === 1
+    const tick = (downbeat ? 7 : 4) * dpr
+    ctx.fillStyle = downbeat ? 'rgba(255,72,88,0.9)' : 'rgba(255,255,255,0.28)'
+    ctx.fillRect(x, 0, Math.max(1, dpr), tick)
+    ctx.fillRect(x, ph - tick, Math.max(1, dpr), tick)
+    if (downbeat) {
+      ctx.fillStyle = 'rgba(255,255,255,0.10)'
+      ctx.fillRect(x, 0, Math.max(1, dpr), ph)
+    }
+  }
+}
+
+function memoryCueBeforeHotCue(a: Cue, b: Cue): number {
+  return Number(a.kind === 'hot') - Number(b.kind === 'hot')
+}
+
+function paintCues(frame: Frame): void {
+  const { ctx, view, pw, ph, dpr, toX } = frame
+  const diamond = 6 * dpr
+  const stem = Math.max(1, dpr)
+  const hotStem = Math.max(2, Math.round(1.5 * dpr))
+  const tipHeight = Math.round(diamond * 1.2)
+  const badge = Math.round(14 * dpr)
+  ctx.font = `700 ${Math.round(9.5 * dpr)}px "Inter Variable", system-ui, sans-serif`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  for (const cue of [...view.cues].sort(memoryCueBeforeHotCue)) {
+    const x = Math.round(toX(cue.start / 1000))
+    if (x < -40 * dpr || x > pw + 40 * dpr) continue
+    ctx.fillStyle = cueColor(cue)
+    if (cue.kind === 'hot') {
+      ctx.fillRect(x, 0, hotStem, ph)
+      ctx.fillRect(x, ph - badge, badge, badge)
+      ctx.fillStyle = 'rgba(0,0,0,0.85)'
+      ctx.fillText(hotCueLetter(cue.slot), x + badge / 2, ph - badge / 2 + 0.5 * dpr)
+      continue
+    }
+    const tip = x + stem / 2
+    ctx.fillRect(x, 0, stem, ph)
+    ctx.beginPath()
+    ctx.moveTo(tip - diamond, 0)
+    ctx.lineTo(tip + diamond, 0)
+    ctx.lineTo(tip, tipHeight)
+    ctx.closePath()
+    ctx.fill()
+  }
+}
+
+function paintPlayhead(frame: Frame): void {
+  const { ctx, pw, ph, dpr } = frame
+  const x = Math.round(pw / 2)
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'
+  ctx.fillRect(x - dpr, 0, 3 * dpr, ph)
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(x, 0, Math.max(1, dpr), ph)
+}
+
 export function drawDetail(
   ctx: CanvasRenderingContext2D,
   wf: Waveform,
@@ -453,94 +532,20 @@ export function drawDetail(
 ): void {
   ctx.clearRect(0, 0, pw, ph)
   const [from, to] = visibleRange(wf, view, pw / dpr)
-  const toX = (seconds: number): number => ((seconds * wf.rate - from) / (to - from)) * pw
-
-  // loops behind everything
-  for (const cue of view.cues) {
-    if (cue.end == null) continue
-    const x0 = toX(cue.start / 1000)
-    const x1 = toX(cue.end / 1000)
-    if (x1 < 0 || x0 > pw) continue
-    ctx.fillStyle = cueColor(cue) + '33'
-    ctx.fillRect(x0, 0, x1 - x0, ph)
+  const frame: Frame = {
+    ctx,
+    wf,
+    view,
+    pw,
+    ph,
+    dpr,
+    from,
+    to,
+    toX: (seconds) => ((seconds * wf.rate - from) / (to - from)) * pw
   }
-
-  const waveH = ph - 18 * dpr
-  ctx.save()
-  ctx.translate(0, 9 * dpr)
-  if (mode === 'rgb' && samples) drawSampleWave(ctx, wf, samples, from, to, pw, waveH)
-  else if (mode === '3band' && wf.bands) drawAnalysisBands(ctx, wf.bands, from, to, pw, waveH, 'center')
-  else if (wf.rgbHeights && wf.rgbColors)
-    drawAnalysisRgb(ctx, wf.rgbHeights, wf.rgbColors, from, to, pw, waveH, 'center')
-  ctx.restore()
-
-  // beat grid
-  const grid = view.beatgrid
-  if (grid) {
-    const t0 = (from / wf.rate) * 1000
-    const t1 = (to / wf.rate) * 1000
-    let lo = 0
-    let hi = grid.times.length
-    while (lo < hi) {
-      const m = (lo + hi) >> 1
-      if (grid.times[m] < t0) lo = m + 1
-      else hi = m
-    }
-    const cueXs = view.cues.map((cue) => Math.round(toX(cue.start / 1000)))
-    const nearCue = (x: number): boolean => cueXs.some((cx) => Math.abs(cx - x) <= 2 * dpr)
-    for (let i = lo; i < grid.times.length && grid.times[i] <= t1; i++) {
-      const x = Math.round(toX(grid.times[i] / 1000))
-      if (nearCue(x)) continue
-      const down = grid.beats[i] === 1
-      ctx.fillStyle = down ? 'rgba(255,72,88,0.9)' : 'rgba(255,255,255,0.28)'
-      ctx.fillRect(x, 0, Math.max(1, dpr), down ? 7 * dpr : 4 * dpr)
-      ctx.fillRect(x, ph - (down ? 7 : 4) * dpr, Math.max(1, dpr), (down ? 7 : 4) * dpr)
-      if (down) {
-        ctx.fillStyle = 'rgba(255,255,255,0.10)'
-        ctx.fillRect(x, 0, Math.max(1, dpr), ph)
-      }
-    }
-  }
-
-  // cue markers: memory cues hang from the top, hot cues are lettered squares on the bottom.
-  // The stem is `mark` device pixels wide starting at `x`; the memory cue tip sits on its
-  // center so it stays locked to the beat grid instead of riding the stem's left edge.
-  const s = 6 * dpr
-  const mark = Math.max(1, dpr)
-  const hotMark = Math.max(2, Math.round(1.5 * dpr))
-  const tipH = Math.round(s * 1.2)
-  const box = Math.round(14 * dpr)
-  ctx.font = `700 ${Math.round(9.5 * dpr)}px "Inter Variable", system-ui, sans-serif`
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  // Memory cues first so a hot cue on the same spot stays on top.
-  const ordered = [...view.cues].sort((a, b) => Number(a.kind === 'hot') - Number(b.kind === 'hot'))
-  for (const cue of ordered) {
-    const x = Math.round(toX(cue.start / 1000))
-    if (x < -40 * dpr || x > pw + 40 * dpr) continue
-    const color = cueColor(cue)
-    ctx.fillStyle = color
-    if (cue.kind === 'hot') {
-      ctx.fillRect(x, 0, hotMark, ph)
-      ctx.fillRect(x, ph - box, box, box)
-      ctx.fillStyle = 'rgba(0,0,0,0.85)'
-      ctx.fillText(hotCueLetter(cue.slot), x + box / 2, ph - box / 2 + 0.5 * dpr)
-      continue
-    }
-    const tip = x + mark / 2
-    ctx.fillRect(x, 0, mark, ph)
-    ctx.beginPath()
-    ctx.moveTo(tip - s, 0)
-    ctx.lineTo(tip + s, 0)
-    ctx.lineTo(tip, tipH)
-    ctx.closePath()
-    ctx.fill()
-  }
-
-  // playhead
-  const px = Math.round(pw / 2)
-  ctx.fillStyle = 'rgba(0,0,0,0.5)'
-  ctx.fillRect(px - dpr, 0, 3 * dpr, ph)
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(px, 0, Math.max(1, dpr), ph)
+  paintLoops(frame)
+  paintWave(frame, mode, samples)
+  paintBeatGrid(frame)
+  paintCues(frame)
+  paintPlayhead(frame)
 }

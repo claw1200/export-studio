@@ -63,11 +63,11 @@
   }}
   onpointerup={() => {
     if (!drag) return
-    player.commit()
+    player.endScrub()
     drag = null
   }}
   onpointercancel={() => {
-    if (drag) player.commit()
+    if (drag) player.endScrub()
     drag = null
   }}
 >

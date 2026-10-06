@@ -1,29 +1,40 @@
 import { api, audioUrl } from './api'
 import { nearestBeat } from './beat'
+import { Lru } from './lru'
 import { cachedWaveSamples, loadWaveSamples, type WaveSamples } from './peaks'
 import type { Cue, Track, TrackDetail } from './types'
 import { decodeWaveform, type Waveform, type WaveformMode } from './waveform'
 
 type DetailEntry = { detail: TrackDetail; waveform: Waveform | null }
-const detailCache = new Map<string, Promise<DetailEntry>>()
-const CACHE_SIZE = 24
+const detailCache = new Lru<string, Promise<DetailEntry>>(24)
+const SEEK_TOLERANCE = 0.05
+const FILE_MISSING = 'Audio file not found'
 
 function storedVolume(): number {
   const n = Number(localStorage.getItem('volume'))
-  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1
+  return Number.isFinite(n) ? clampUnit(n) : 1
+}
+
+function clampUnit(n: number): number {
+  return Math.min(1, Math.max(0, n))
+}
+
+function storedFlag(key: string, fallback = false): boolean {
+  const value = localStorage.getItem(key)
+  if (value == null) return fallback
+  return value === '1'
+}
+
+function storeFlag(key: string, on: boolean): void {
+  localStorage.setItem(key, on ? '1' : '0')
 }
 
 export function loadDetail(id: string): Promise<DetailEntry> {
   const hit = detailCache.get(id)
-  if (hit) {
-    detailCache.delete(id)
-    detailCache.set(id, hit)
-    return hit
-  }
+  if (hit) return hit
   const entry = api.trackDetail(id).then((detail) => ({ detail, waveform: decodeWaveform(detail) }))
   entry.catch(() => detailCache.delete(id))
   detailCache.set(id, entry)
-  if (detailCache.size > CACHE_SIZE) detailCache.delete(detailCache.keys().next().value!)
   return entry
 }
 
@@ -35,7 +46,6 @@ export class Player {
   track = $state.raw<Track | null>(null)
   detail = $state.raw<TrackDetail | null>(null)
   waveform = $state.raw<Waveform | null>(null)
-  /** PCM for the RGB detail view. Null until the audio has been decoded. */
   wave = $state.raw<WaveSamples | null>(null)
   loading = $state(false)
   playing = $state(false)
@@ -43,34 +53,26 @@ export class Player {
   duration = $state(0)
   audioError = $state<string | null>(null)
   mode = $state<WaveformMode>((localStorage.getItem('waveformMode') as WaveformMode) || 'rgb')
-  /** Detail RGB wave drawn from the audio. Off uses the analysis bars. */
   hqRgb = $state(localStorage.getItem('hqRgb') !== '0')
   zoom = $state(Number(localStorage.getItem('waveformZoom')) || 1)
   volume = $state(storedVolume())
-  muted = $state(localStorage.getItem('muted') === '1')
-  /** Snap gestures that opt in to the nearest beat. */
-  quantise = $state(localStorage.getItem('quantise') === '1')
-  /** A cue edit is being written. */
+  muted = $state(storedFlag('muted'))
+  quantise = $state(storedFlag('quantise'))
   editing = $state(false)
   editError = $state<string | null>(null)
-  /** Level restored by unmute. */
-  private level = 1
+  private unmuteVolume = 1
 
   private audio = new Audio()
   private raf = 0
   private token = 0
-  /** Playhead is following a gesture, so playback must not overwrite it. */
   private scrubbing = false
-  /** Target of the seek the element is currently performing. */
-  private sent: number | null = null
-  /** Seek made before the element knew its duration. */
-  private pending: number | null = null
-  /** Playhead to restore if starting playback resets the element to 0. */
-  private resume: number | null = null
+  private seekTarget: number | null = null
+  private seekBeforeMetadata: number | null = null
+  private playheadBeforePlay: number | null = null
   private waveAbort: AbortController | null = null
 
   constructor() {
-    this.level = this.volume > 0 ? this.volume : 1
+    this.unmuteVolume = this.volume > 0 ? this.volume : 1
     this.audio.volume = this.volume
     this.audio.muted = this.muted
     this.audio.preload = 'auto'
@@ -79,30 +81,31 @@ export class Player {
       this.tick()
     })
     this.audio.addEventListener('playing', () => {
-      const resume = this.resume
-      this.resume = null
-      if (resume == null || this.scrubbing) return
-      if (Math.abs(this.audio.currentTime - resume) < 0.05) return
-      this.position = resume
-      this.sent = null
-      this.apply(resume)
+      const playhead = this.playheadBeforePlay
+      this.playheadBeforePlay = null
+      if (playhead == null || this.scrubbing) return
+      if (this.near(playhead)) return
+      this.position = playhead
+      this.seekTarget = null
+      this.apply(playhead)
     })
     this.audio.addEventListener('pause', () => {
       this.playing = false
       cancelAnimationFrame(this.raf)
-      if (!this.scrubbing && this.sent == null && this.resume == null) this.position = this.audio.currentTime
+      if (!this.scrubbing && this.seekTarget == null && this.playheadBeforePlay == null)
+        this.position = this.audio.currentTime
     })
     this.audio.addEventListener('ended', () => (this.playing = false))
     this.audio.addEventListener('seeked', () => {
-      const sent = this.sent
-      this.sent = null
-      if (sent != null && Math.abs(this.position - sent) >= 0.05) this.apply(this.position)
+      const sent = this.seekTarget
+      this.seekTarget = null
+      if (sent != null && Math.abs(this.position - sent) >= SEEK_TOLERANCE) this.apply(this.position)
     })
     this.audio.addEventListener('loadedmetadata', () => {
       if (Number.isFinite(this.audio.duration)) this.duration = this.audio.duration
-      if (this.pending != null && !this.scrubbing) {
-        const t = this.pending
-        this.pending = null
+      if (this.seekBeforeMetadata != null && !this.scrubbing) {
+        const t = this.seekBeforeMetadata
+        this.seekBeforeMetadata = null
         this.apply(t)
       }
     })
@@ -110,57 +113,59 @@ export class Player {
       if (event === 'library.locked') void this.refreshDetail()
     })
     this.audio.addEventListener('error', () => {
-      // Replacing src aborts the previous load. That is not a failure of the new one.
-      if (this.audio.error?.code === MediaError.MEDIA_ERR_ABORTED) return
+      if (this.sourceWasReplaced()) return
       const ext = this.track?.fileType ?? ''
       this.audioError =
-        this.detail && !this.detail.fileExists
-          ? 'Audio file not found'
-          : `Preview not supported for ${ext || 'this file type'}`
+        this.detail && !this.detail.fileExists ? FILE_MISSING : `Preview not supported for ${ext || 'this file type'}`
     })
   }
 
+  private near(seconds: number): boolean {
+    return Math.abs(this.audio.currentTime - seconds) < SEEK_TOLERANCE
+  }
+
+  private sourceWasReplaced(): boolean {
+    return this.audio.error?.code === MediaError.MEDIA_ERR_ABORTED
+  }
+
   private tick = (): void => {
-    if (!this.scrubbing && this.sent == null && this.resume == null) this.position = this.audio.currentTime
+    if (!this.scrubbing && this.seekTarget == null && this.playheadBeforePlay == null)
+      this.position = this.audio.currentTime
     if (!this.audio.paused) this.raf = requestAnimationFrame(this.tick)
   }
 
-  /** Move the playhead. The element follows when it is free. */
   scrub(seconds: number): void {
     this.scrubbing = true
     this.apply(seconds)
   }
 
-  /** The gesture has ended. Land on the last playhead position. */
-  commit(): void {
+  endScrub(): void {
     if (!this.scrubbing) return
     this.scrubbing = false
     this.apply(this.position)
   }
 
-  /** Discrete jump: cue, keyboard, inspector. */
   seek(seconds: number): void {
     this.scrubbing = false
     this.apply(seconds)
   }
 
-  /** The sample at `duration` is past the end of the file, so stay just inside it. */
-  private playable(seconds: number): number {
+  private insideFile(seconds: number): number {
     const end = Number.isFinite(this.audio.duration) && this.audio.duration > 0 ? this.audio.duration : this.duration
     const max = Number.isFinite(end) && end > 0.05 ? end - 0.001 : Math.max(0, end)
     return Math.max(0, Math.min(seconds, max || seconds))
   }
 
   private apply(seconds: number): void {
-    const t = this.playable(seconds)
+    const t = this.insideFile(seconds)
     this.position = t
     if (this.audio.readyState < HTMLMediaElement.HAVE_METADATA) {
-      this.pending = t
+      this.seekBeforeMetadata = t
       return
     }
-    this.pending = null
-    if (this.sent != null || Math.abs(this.audio.currentTime - t) < 0.05) return
-    this.sent = t
+    this.seekBeforeMetadata = null
+    if (this.seekTarget != null || this.near(t)) return
+    this.seekTarget = t
     this.audio.currentTime = t
   }
 
@@ -172,9 +177,9 @@ export class Player {
     const token = ++this.token
     this.audio.pause()
     this.scrubbing = false
-    this.sent = null
-    this.pending = null
-    this.resume = null
+    this.seekTarget = null
+    this.seekBeforeMetadata = null
+    this.playheadBeforePlay = null
     this.track = track
     this.detail = null
     this.waveform = null
@@ -191,7 +196,7 @@ export class Player {
       if (token !== this.token) return
       this.detail = detail
       this.waveform = waveform
-      if (!detail.fileExists) this.audioError = 'Audio file not found'
+      if (!detail.fileExists) this.audioError = FILE_MISSING
     } catch (e) {
       if (token === this.token) this.audioError = (e as Error).message
     } finally {
@@ -201,13 +206,13 @@ export class Player {
 
   play(): void {
     if (!this.track) return
-    this.resume = this.position
-    if (Math.abs(this.audio.currentTime - this.position) >= 0.05) {
-      this.sent = null
+    this.playheadBeforePlay = this.position
+    if (!this.near(this.position)) {
+      this.seekTarget = null
       this.apply(this.position)
     }
     void this.audio.play().catch(() => {
-      this.resume = null
+      this.playheadBeforePlay = null
     })
   }
 
@@ -216,7 +221,6 @@ export class Player {
     else this.audio.pause()
   }
 
-  /** Reload analysis for the open track after the library connection changes. */
   async refreshDetail(): Promise<void> {
     const id = this.track?.id
     if (!id) return
@@ -228,11 +232,10 @@ export class Player {
       this.detail = detail
       this.waveform = waveform
     } catch {
-      // Keep the deck that is already on screen.
+      return
     }
   }
 
-  /** Set pad `kind` at the playhead, on the beat while quantise is on. */
   setHotCue(kind: number): Promise<void> {
     const ms = Math.round(this.quantised(this.position) * 1000)
     return this.editCues((id) => api.setHotCue(id, kind, ms))
@@ -242,7 +245,6 @@ export class Player {
     return this.editCues((id) => api.deleteCue(id, cue.id))
   }
 
-  /** `colorIndex` is a rekordbox hot cue palette entry. Null clears it. */
   setCueColor(cue: Cue, colorIndex: number | null): Promise<void> {
     return this.editCues((id) => api.setCueColor(id, cue.id, colorIndex))
   }
@@ -269,10 +271,9 @@ export class Player {
 
   setQuantise(on: boolean): void {
     this.quantise = on
-    localStorage.setItem('quantise', on ? '1' : '0')
+    storeFlag('quantise', on)
   }
 
-  /** `seconds`, snapped to the beat grid while quantise is on. */
   quantised(seconds: number): number {
     if (!this.quantise) return seconds
     return nearestBeat(seconds, this.detail?.beatgrid ?? null)
@@ -286,7 +287,7 @@ export class Player {
   setHqRgb(on: boolean): void {
     if (this.hqRgb === on) return
     this.hqRgb = on
-    localStorage.setItem('hqRgb', on ? '1' : '0')
+    storeFlag('hqRgb', on)
     if (this.track) this.beginWave(this.token, this.track.id)
     else if (!on) {
       this.waveAbort?.abort()
@@ -300,7 +301,6 @@ export class Player {
     localStorage.setItem('waveformZoom', String(this.zoom))
   }
 
-  /** Starts decoding PCM for the RGB wave. Cached tracks show up immediately. */
   private beginWave(token: number, id: string): void {
     this.waveAbort?.abort()
     if (!this.hqRgb) {
@@ -320,27 +320,27 @@ export class Player {
   }
 
   setVolume(volume: number): void {
-    const v = Math.min(1, Math.max(0, volume))
+    const v = clampUnit(volume)
     this.volume = v
     this.audio.volume = v
     if (v > 0) {
-      this.level = v
+      this.unmuteVolume = v
       this.muted = false
       this.audio.muted = false
     }
     localStorage.setItem('volume', String(v))
-    localStorage.setItem('muted', this.muted ? '1' : '0')
+    storeFlag('muted', this.muted)
   }
 
   toggleMute(): void {
     if (this.muted || this.volume === 0) {
       this.muted = false
       this.audio.muted = false
-      this.setVolume(this.level > 0 ? this.level : 1)
+      this.setVolume(this.unmuteVolume > 0 ? this.unmuteVolume : 1)
       return
     }
     this.muted = true
     this.audio.muted = true
-    localStorage.setItem('muted', '1')
+    storeFlag('muted', true)
   }
 }

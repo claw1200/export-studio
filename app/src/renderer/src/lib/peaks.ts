@@ -1,39 +1,24 @@
-/** Mono PCM used to draw the RGB waveform at audio resolution. */
+import { Lru } from './lru'
 
 export interface WaveSamples {
-  /** samples per second of audio */
   rate: number
-  /** signed mono samples, −32767…32767 */
   data: Int16Array
-  /** largest absolute sample, at least 1 */
   peak: number
 }
 
 const TARGET_RATE = 16_000
-/** Caps a long mix at about 12 MB of samples. */
-const MAX_SAMPLES = 6_000_000
+const BYTES_PER_SAMPLE = 2
+const MAX_BYTES = 12_000_000
+const MAX_SAMPLES = MAX_BYTES / BYTES_PER_SAMPLE
+const CACHE_SIZE = 2
 
-const cache = new Map<string, WaveSamples>()
+const cache = new Lru<string, WaveSamples>(CACHE_SIZE)
 let context: AudioContext | null = null
 
 export function cachedWaveSamples(url: string): WaveSamples | null {
-  const hit = cache.get(url)
-  if (!hit) return null
-  cache.delete(url)
-  cache.set(url, hit)
-  return hit
+  return cache.get(url) ?? null
 }
 
-function remember(url: string, samples: WaveSamples): void {
-  cache.delete(url)
-  cache.set(url, samples)
-  while (cache.size > 2) cache.delete(cache.keys().next().value!)
-}
-
-/**
- * Decodes the track and keeps the loudest sample in each window, so zooming in
- * follows the real wave instead of the 150 Hz analysis bars.
- */
 export async function loadWaveSamples(url: string, signal: AbortSignal): Promise<WaveSamples | null> {
   const hit = cachedWaveSamples(url)
   if (hit) return hit
@@ -47,7 +32,7 @@ export async function loadWaveSamples(url: string, signal: AbortSignal): Promise
     if (signal.aborted) return null
     const samples = await downsample(audio, signal)
     if (!samples || signal.aborted) return null
-    remember(url, samples)
+    cache.set(url, samples)
     return samples
   } catch (err) {
     if (signal.aborted || (err as Error).name === 'AbortError') return null

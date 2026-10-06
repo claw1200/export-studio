@@ -30,10 +30,6 @@ export function registerMediaScheme(): void {
 
 type ByteRange = { start: number; end: number }
 
-/**
- * `bytes=start-end`, `bytes=start-`, and `bytes=-suffix`.
- * `null` means the header isn't a single range we understand; the caller sends the whole file.
- */
 function byteRange(header: string, size: number): ByteRange | 'unsatisfiable' | null {
   const spec = header.split(',')[0]?.trim() ?? ''
   const match = /^bytes=(\d*)-(\d*)$/.exec(spec)
@@ -75,12 +71,6 @@ function openFile(path: string, signal: AbortSignal, range?: ByteRange): Readabl
   return Readable.toWeb(node) as ReadableStream<Uint8Array>
 }
 
-/**
- * media://art/<trackId>?size=s|m  and  media://audio/<trackId>
- * Paths are resolved by the engine, so the renderer can only reach files the library references.
- * Ranges are answered here: file:// fetches ignore Range, so <audio> would report nothing
- * seekable and snap currentTime back to 0 on play.
- */
 export function handleMediaProtocol(engine: Engine): void {
   const cache = new Map<string, string | null>()
   engine.onEvent((event) => {

@@ -31,7 +31,6 @@ export function formatSize(bytes: number): string {
   return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`
 }
 
-/** rekordbox track colour IDs 1–8 */
 export const TRACK_COLORS: Record<number, { name: string; hex: string }> = {
   1: { name: 'Pink', hex: '#f472b6' },
   2: { name: 'Red', hex: '#ef4444' },
@@ -45,7 +44,6 @@ export const TRACK_COLORS: Record<number, { name: string; hex: string }> = {
 
 const CAMELOT_HUES = [170, 140, 100, 60, 30, 10, 345, 320, 290, 260, 230, 200]
 
-/** Colour-wheel hue for a Camelot / Open Key / musical key string. */
 export function keyColor(key: string): string | null {
   const m = /^(\d{1,2})([AB])$/i.exec(key.trim())
   if (!m) return null
@@ -55,19 +53,16 @@ export function keyColor(key: string): string | null {
   return `oklch(${minor ? 0.72 : 0.8} 0.14 ${CAMELOT_HUES[n - 1]})`
 }
 
-/** djmdCue.Kind → hot cue letter. rekordbox skips Kind 4. */
+const LOOP_KIND = 4
+export const HOT_CUE_LETTERS = 'ABCDEFGH'
+export const HOT_CUE_KINDS = Array.from({ length: HOT_CUE_LETTERS.length + 1 }, (_, index) => index + 1).filter(
+  (kind) => kind !== LOOP_KIND
+)
+
 export function hotCueLetter(kind: number): string {
-  const index = kind >= 5 ? kind - 2 : kind - 1
-  return 'ABCDEFGH'[index] ?? '?'
+  return HOT_CUE_LETTERS[HOT_CUE_KINDS.indexOf(kind)] ?? '?'
 }
 
-/** djmdCue.Kind for pads A–H. */
-export const HOT_CUE_KINDS = [1, 2, 3, 5, 6, 7, 8, 9]
-
-/**
- * rekordbox hot cue palette. djmdCue.ColorTableIndex `n` is entry `n - 1`; 0 and null mean no colour.
- * Table from Deep Symmetry's beat-link (CueList.findRekordboxColor).
- */
 // prettier-ignore
 const HOT_CUE_PALETTE = [
   '#305aff', '#5073ff', '#508cff', '#50a0ff', '#50b4ff', '#50b0f2', '#50aee8', '#45acdb',
@@ -80,7 +75,6 @@ const HOT_CUE_PALETTE = [
   '#b93cff', '#c542ff', '#aa5aff', '#aa72ff', '#8272ff', '#6473ff'
 ]
 
-/** The 16 palette entries rekordbox offers in its hot cue colour picker, as ColorTableIndex values. */
 export const HOT_CUE_PICKER = [1, 5, 9, 14, 18, 22, 26, 30, 32, 38, 42, 45, 49, 56, 60, 62]
 
 export function hotCuePaletteColor(index: number | null): string | null {

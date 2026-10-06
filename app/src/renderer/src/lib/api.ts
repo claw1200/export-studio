@@ -22,7 +22,11 @@ export const api = {
   showItemInFolder: window.api.showItemInFolder
 }
 
-export const artworkUrl = (id: string, size: 's' | 'm' | '' = 'm'): string =>
-  `media://art/${encodeURIComponent(id)}${size ? `?size=${size}` : ''}`
+function mediaUrl(kind: 'art' | 'audio', id: string, query = ''): string {
+  return `media://${kind}/${encodeURIComponent(id)}${query}`
+}
 
-export const audioUrl = (id: string): string => `media://audio/${encodeURIComponent(id)}`
+export const artworkUrl = (id: string, size: 's' | 'm' | '' = 'm'): string =>
+  mediaUrl('art', id, size ? `?size=${size}` : '')
+
+export const audioUrl = (id: string): string => mediaUrl('audio', id)

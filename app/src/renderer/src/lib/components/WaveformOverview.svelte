@@ -20,12 +20,11 @@
   }
 
   let wheelTimer = 0
-  /** Unsnapped playhead for the wheel gesture, so small ticks can still cross a beat. */
-  let wheelAt: number | null = null
+  let rawWheelSeconds: number | null = null
 
   function place(e: PointerEvent): void {
     clearTimeout(wheelTimer)
-    wheelAt = null
+    rawWheelSeconds = null
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left))
     player.scrub(player.quantised((x / rect.width) * span))
@@ -41,13 +40,13 @@
     if (!player.waveform || !width) return
     e.preventDefault()
     const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
-    const at = Math.max(0, Math.min(span, (wheelAt ?? player.position) + delta * (span / width)))
-    wheelAt = at
+    const at = Math.max(0, Math.min(span, (rawWheelSeconds ?? player.position) + delta * (span / width)))
+    rawWheelSeconds = at
     player.scrub(player.quantised(at))
     clearTimeout(wheelTimer)
     wheelTimer = window.setTimeout(() => {
-      wheelAt = null
-      player.commit()
+      rawWheelSeconds = null
+      player.endScrub()
     }, 80)
   }
 </script>
@@ -70,8 +69,8 @@
   onpointermove={(e) => {
     if (e.currentTarget.hasPointerCapture(e.pointerId)) place(e)
   }}
-  onpointerup={() => player.commit()}
-  onpointercancel={() => player.commit()}
+  onpointerup={() => player.endScrub()}
+  onpointercancel={() => player.endScrub()}
 >
   <canvas {@attach paint} class="absolute inset-0 size-full"></canvas>
   <div class="pointer-events-none absolute inset-y-0 left-0 bg-black/50" style:width="{pct(player.position)}%"></div>

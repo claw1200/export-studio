@@ -17,7 +17,6 @@
     width: number
     min: number
     max: number
-    /** Shares leftover space until the user drags this column. */
     fr?: number
     align?: 'right' | 'center'
     sort?: SortKey
@@ -72,7 +71,7 @@
         }
       }
     } catch {
-      // Ignore unreadable prefs and keep the defaults.
+      return { widths, sized, hidden }
     }
     return { widths, sized, hidden }
   }

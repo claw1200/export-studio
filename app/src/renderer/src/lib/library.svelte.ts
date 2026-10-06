@@ -81,9 +81,7 @@ export class Library {
   status = $state<'idle' | 'loading' | 'ready' | 'error'>('idle')
   error = $state<string | null>(null)
   changed = $state(false)
-  /** Write mode is opening or closing. */
   switching = $state(false)
-  /** Why the last attempt to unlock was refused. */
   lockError = $state<string | null>(null)
 
   writable = $derived(this.info?.writable ?? false)
@@ -193,7 +191,6 @@ export class Library {
     }
   }
 
-  /** Open the live library, or return to the read-only snapshot. */
   async setWritable(on: boolean): Promise<boolean> {
     if (this.switching || on === this.writable) return false
     if (on && this.info?.rekordboxRunning) {
@@ -218,7 +215,7 @@ export class Library {
           await this.refreshContents()
         }
       } catch {
-        // The previous view stays up if the library can no longer be read.
+        return false
       }
       return false
     } finally {

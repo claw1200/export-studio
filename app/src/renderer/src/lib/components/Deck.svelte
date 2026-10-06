@@ -6,11 +6,13 @@
     formatBpm,
     formatClock,
     HOT_CUE_KINDS,
+    HOT_CUE_LETTERS,
     HOT_CUE_PICKER,
     hotCueLetter,
     hotCuePaletteColor,
     keyColor
   } from '$lib/format'
+  import { bpmAt } from '$lib/beat'
   import type { Cue } from '$lib/types'
   import { cueColor, type WaveformMode } from '$lib/waveform'
   import WaveformDetail from './WaveformDetail.svelte'
@@ -28,36 +30,26 @@
     const bySlot = new Map(
       (player.detail?.cues ?? []).filter((c) => c.kind === 'hot').map((c) => [hotCueLetter(c.slot), c])
     )
-    return [...'ABCDEFGH'].map((letter, i) => ({ letter, kind: HOT_CUE_KINDS[i], cue: bySlot.get(letter) ?? null }))
+    return [...HOT_CUE_LETTERS].map((letter, i) => ({
+      letter,
+      kind: HOT_CUE_KINDS[i],
+      cue: bySlot.get(letter) ?? null
+    }))
   })
   const editable = $derived(library.writable && !!player.detail)
-  /** Hot cue whose colour picker is open. */
-  let colorFor = $state<string | null>(null)
+  let colorPickerCueId = $state<string | null>(null)
 
   function pickColor(cue: Cue, colorIndex: number | null): void {
-    colorFor = null
+    colorPickerCueId = null
     void player.setCueColor(cue, colorIndex)
   }
   const memoryCount = $derived((player.detail?.cues ?? []).filter((c) => c.kind === 'memory').length)
-
-  const currentBpm = $derived.by(() => {
-    const grid = player.detail?.beatgrid
-    if (!grid || !grid.times.length) return track?.bpm ?? 0
-    const ms = player.position * 1000
-    let lo = 0
-    let hi = grid.times.length - 1
-    while (lo < hi) {
-      const m = (lo + hi + 1) >> 1
-      if (grid.times[m] <= ms) lo = m
-      else hi = m - 1
-    }
-    return grid.bpms[lo]
-  })
+  const currentBpm = $derived(bpmAt(player.position, player.detail?.beatgrid ?? null, track?.bpm ?? 0))
 </script>
 
 <svelte:window
   onkeydown={(e) => {
-    if (e.key === 'Escape' && colorFor) colorFor = null
+    if (e.key === 'Escape' && colorPickerCueId) colorPickerCueId = null
   }}
 />
 
@@ -171,7 +163,7 @@
             <span
               class={[
                 'tabular truncate font-mono text-[10px] font-medium opacity-75 transition-opacity',
-                editable && ['group-hover:opacity-0', colorFor === cue.id && 'opacity-0']
+                editable && ['group-hover:opacity-0', colorPickerCueId === cue.id && 'opacity-0']
               ]}
             >
               {formatClock(cue.start).slice(0, 5)}
@@ -181,15 +173,15 @@
             <div
               class={[
                 'absolute top-1/2 right-1 flex -translate-y-1/2 opacity-0 group-hover:opacity-100 focus-within:opacity-100',
-                colorFor === cue.id && 'opacity-100'
+                colorPickerCueId === cue.id && 'opacity-100'
               ]}
             >
               <button
                 class="grid size-5 place-items-center rounded text-bg hover:bg-black/25 disabled:hidden"
                 disabled={player.editing}
-                onclick={() => (colorFor = colorFor === cue.id ? null : cue.id)}
+                onclick={() => (colorPickerCueId = colorPickerCueId === cue.id ? null : cue.id)}
                 aria-label="Change colour of hot cue {letter}"
-                aria-expanded={colorFor === cue.id}
+                aria-expanded={colorPickerCueId === cue.id}
                 aria-haspopup="dialog"
                 title="Change colour"
               >
@@ -206,11 +198,11 @@
               </button>
             </div>
           {/if}
-          {#if editable && colorFor === cue.id}
+          {#if editable && colorPickerCueId === cue.id}
             <button
               class="fixed inset-0 z-40 cursor-default"
               aria-label="Close colour picker"
-              onclick={() => (colorFor = null)}
+              onclick={() => (colorPickerCueId = null)}
             ></button>
             <div
               class="absolute top-full left-0 z-50 mt-1.5 w-max rounded-lg border border-line bg-surface p-2 shadow-xl shadow-black/40"
