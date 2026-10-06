@@ -498,9 +498,9 @@ function paintCues(frame: Frame): void {
     ctx.fillStyle = cueColor(cue)
     if (cue.kind === 'hot') {
       ctx.fillRect(x, 0, hotStem, ph)
-      ctx.fillRect(x, ph - badge, badge, badge)
+      ctx.fillRect(x, 0, badge, badge)
       ctx.fillStyle = 'rgba(0,0,0,0.85)'
-      ctx.fillText(hotCueLetter(cue.slot), x + badge / 2, ph - badge / 2 + 0.5 * dpr)
+      ctx.fillText(hotCueLetter(cue.slot), x + badge / 2, badge / 2 + 0.5 * dpr)
       continue
     }
     const tip = x + stem / 2
@@ -520,14 +520,12 @@ function paintCuePoint(frame: Frame): void {
   const x = Math.round(toX(view.cuePoint))
   const size = 7 * dpr
   if (x < -size || x > pw + size) return
-  const stem = Math.max(1, dpr)
-  const tip = x + stem / 2
+  const tipHeight = Math.round(size * 1.2)
   ctx.fillStyle = CUE_POINT_COLOR
-  ctx.fillRect(x, 0, stem, ph)
   ctx.beginPath()
-  ctx.moveTo(tip - size, 0)
-  ctx.lineTo(tip + size, 0)
-  ctx.lineTo(tip, Math.round(size * 1.2))
+  ctx.moveTo(x - size, ph)
+  ctx.lineTo(x + size, ph)
+  ctx.lineTo(x, ph - tipHeight)
   ctx.closePath()
   ctx.fill()
 }

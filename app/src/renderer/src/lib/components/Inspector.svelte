@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { Music, FolderSearch, Repeat, AlertTriangle } from '@lucide/svelte'
+  import { Music, FolderSearch, Repeat, AlertTriangle, X } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import { api, artworkUrl } from '$lib/api'
   import { formatBpm, formatClock, formatDuration, formatSize, hotCueLetter, keyColor, TRACK_COLORS } from '$lib/format'
   import { loadDetail } from '$lib/player.svelte'
   import { cueColor } from '$lib/waveform'
-  import type { TrackDetail } from '$lib/types'
+  import type { Cue, TrackDetail } from '$lib/types'
 
   let { onjump }: { onjump: (seconds: number) => void } = $props()
 
@@ -44,6 +44,12 @@
   })
 
   const tags = $derived(track ? track.myTags.map((id) => library.tagNames.get(id)).filter(Boolean) : [])
+  const canRemoveCues = $derived(library.writable && !!player.detail && player.track?.id === track?.id)
+
+  function removeCueLabel(cue: Cue): string {
+    if (cue.kind === 'hot') return `Remove hot cue ${hotCueLetter(cue.slot)}`
+    return `Remove memory cue at ${formatClock(cue.start)}`
+  }
 </script>
 
 <aside class="flex h-full w-full flex-col overflow-y-auto border-l border-line-soft bg-bg">
@@ -122,9 +128,15 @@
       {#if detail?.cues.length}
         <ul class="tabular space-y-0.5">
           {#each detail.cues as cue (cue.id)}
-            <li>
+            <li
+              class="flex items-center rounded-md hover:bg-surface"
+              onpointerenter={() => {
+                if (player.track?.id === track.id) player.setPreview(cue.id, cue.start / 1000)
+              }}
+              onpointerleave={() => player.clearPreview(cue.id)}
+            >
               <button
-                class="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-[12px] hover:bg-surface disabled:cursor-default disabled:hover:bg-transparent"
+                class="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-1 text-left text-[12px] disabled:cursor-default"
                 disabled={player.track?.id !== track.id}
                 title={player.track?.id === track.id ? 'Jump to cue' : 'Load the track to jump to cues'}
                 onclick={() => onjump(cue.start / 1000)}
@@ -146,6 +158,17 @@
                 {/if}
                 <span class="min-w-0 flex-1 truncate text-right text-faint">{cue.comment}</span>
               </button>
+              {#if canRemoveCues}
+                <button
+                  class="mr-1 grid size-5 shrink-0 place-items-center rounded text-faint hover:bg-hover hover:text-danger disabled:hidden"
+                  disabled={player.editing}
+                  onclick={() => player.deleteCue(cue)}
+                  aria-label={removeCueLabel(cue)}
+                  title="Remove cue"
+                >
+                  <X class="size-3" />
+                </button>
+              {/if}
             </li>
           {/each}
         </ul>

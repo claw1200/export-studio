@@ -68,6 +68,8 @@ export class Player {
   cuePoint = $state(0)
   loopIn = $state<number | null>(null)
   cueHeld = $state(false)
+  previewAt = $state<number | null>(null)
+  private previewOwner: string | null = null
   private cueLatched = false
   private unmuteVolume = 1
 
@@ -185,6 +187,17 @@ export class Player {
     this.endScrub()
   }
 
+  setPreview(owner: string, seconds: number): void {
+    this.previewOwner = owner
+    this.previewAt = seconds
+  }
+
+  clearPreview(owner: string): void {
+    if (this.previewOwner !== owner) return
+    this.previewOwner = null
+    this.previewAt = null
+  }
+
   private insideFile(seconds: number): number {
     const end = Number.isFinite(this.audio.duration) && this.audio.duration > 0 ? this.audio.duration : this.duration
     const max = Number.isFinite(end) && end > 0.05 ? end - 0.001 : Math.max(0, end)
@@ -233,6 +246,8 @@ export class Player {
     this.loopIn = null
     this.cueHeld = false
     this.cueLatched = false
+    this.previewOwner = null
+    this.previewAt = null
     this.track = track
     this.detail = null
     this.waveform = null
