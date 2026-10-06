@@ -1,0 +1,84 @@
+import { app, shell, BrowserWindow, ipcMain, nativeTheme } from 'electron'
+import { join } from 'path'
+import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import icon from '../../resources/icon.png?asset'
+import { Engine } from './engine'
+import { handleMediaProtocol, registerMediaScheme } from './media'
+
+const engine = new Engine()
+registerMediaScheme()
+
+function createWindow(): BrowserWindow {
+  const isMac = process.platform === 'darwin'
+  const win = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    minWidth: 960,
+    minHeight: 600,
+    show: false,
+    backgroundColor: '#0b0c0f',
+    autoHideMenuBar: true,
+    titleBarStyle: 'hidden',
+    ...(isMac
+      ? { trafficLightPosition: { x: 14, y: 14 } }
+      : { titleBarOverlay: { color: '#0b0c0f', symbolColor: '#a1a1aa', height: 40 } }),
+    ...(process.platform === 'linux' ? { icon } : {}),
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false,
+      contextIsolation: true
+    }
+  })
+
+  win.on('ready-to-show', () => win.show())
+  win.webContents.setWindowOpenHandler((details) => {
+    shell.openExternal(details.url)
+    return { action: 'deny' }
+  })
+
+  const unsubscribe = engine.onEvent((event, data) => {
+    if (!win.isDestroyed()) win.webContents.send('engine:event', event, data)
+  })
+  win.on('closed', unsubscribe)
+
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    win.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  } else {
+    win.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+  return win
+}
+
+app.whenReady().then(() => {
+  electronApp.setAppUserModelId('com.clubready.app')
+  nativeTheme.themeSource = 'dark'
+
+  app.on('browser-window-created', (_, window) => {
+    optimizer.watchWindowShortcuts(window)
+  })
+
+  engine.start().catch((err) => console.error('[engine] failed to start', err))
+  handleMediaProtocol(engine)
+
+  ipcMain.handle('engine:call', async (_e, method: string, params?: unknown) => {
+    try {
+      return { ok: true, result: await engine.call(method, params) }
+    } catch (err) {
+      const e = err as Error & { type?: string }
+      return { ok: false, error: { message: e.message, type: e.type ?? 'Error' } }
+    }
+  })
+  ipcMain.handle('shell:showItem', (_e, path: string) => shell.showItemInFolder(path))
+
+  createWindow()
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('will-quit', () => engine.stop())
