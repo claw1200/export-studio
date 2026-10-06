@@ -469,7 +469,7 @@ class Library:
 
     def _writable_db(self) -> Rekordbox6Database:
         if not self.writable or self.db is None:
-            raise RuntimeError("Unlock write mode to edit the library")
+            raise RuntimeError("Unlock editing to change the library")
         if get_rekordbox_pid():
             raise RuntimeError(WRITE_BLOCKED)
         return self.db

@@ -46,7 +46,7 @@
   <span class="ml-auto truncate" title={library.info?.dbPath}>
     {library.info?.rekordboxRunning ? 'rekordbox is running' : 'rekordbox is closed'}
     {#if library.info}
-      · {library.writable ? 'write' : 'read-only'}
+      · {library.writable ? 'editing' : 'read-only'}
     {/if}
   </span>
 </footer>

@@ -28,7 +28,7 @@
     library.lockError
       ? library.lockError
       : library.writable
-        ? 'Write mode. Lock to return to a read-only snapshot.'
+        ? 'Editing the library. Lock to return to a read-only snapshot.'
         : writeBlocked
           ? 'Close rekordbox to edit the library'
           : 'Unlock to edit the library'
@@ -80,6 +80,25 @@
   </div>
 
   <div class="ml-auto flex items-center gap-2">
+    {#if library.changed}
+      <button
+        class="no-drag flex h-7 items-center gap-1.5 rounded-md bg-warn/15 px-2.5 text-[12px] font-medium text-warn hover:bg-warn/25"
+        onclick={() => library.load(true)}
+      >
+        <RefreshCw class="size-3.5" />
+        Library changed — reload
+      </button>
+    {:else if library.info && !library.writable}
+      <button
+        class="no-drag flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] text-faint hover:bg-hover hover:text-muted"
+        title="Reload the read-only snapshot of {library.info.dbPath}"
+        onclick={() => library.load(true)}
+      >
+        {snapshotLabel}
+        <RefreshCw class={['size-3', library.status === 'loading' && 'animate-spin']} />
+      </button>
+    {/if}
+
     {#if library.info}
       <button
         class={[
@@ -100,26 +119,7 @@
         {:else}
           <Lock class="size-3" />
         {/if}
-        {library.writable ? 'Write' : 'Read-only'}
-      </button>
-    {/if}
-
-    {#if library.changed}
-      <button
-        class="no-drag flex h-7 items-center gap-1.5 rounded-md bg-warn/15 px-2.5 text-[12px] font-medium text-warn hover:bg-warn/25"
-        onclick={() => library.load(true)}
-      >
-        <RefreshCw class="size-3.5" />
-        Library changed — reload
-      </button>
-    {:else if library.info && !library.writable}
-      <button
-        class="no-drag flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] text-faint hover:bg-hover hover:text-muted"
-        title="Reload the read-only snapshot of {library.info.dbPath}"
-        onclick={() => library.load(true)}
-      >
-        {snapshotLabel}
-        <RefreshCw class={['size-3', library.status === 'loading' && 'animate-spin']} />
+        {library.writable ? 'Editing' : 'Read-only'}
       </button>
     {/if}
 
