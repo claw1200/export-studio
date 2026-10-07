@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Sign (when an identity is available), notarize, and staple a macOS release file.
-# Credential names match perfect-sidechain packaging/macos/sign.sh:
 #   NOTARYTOOL_PROFILE, or APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID.
 set -euo pipefail
 

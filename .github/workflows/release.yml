@@ -28,7 +28,7 @@ jobs:
           missing=0
           for name in MACOS_CERTIFICATE_BASE64 MACOS_CERTIFICATE_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
             if [[ -z "${!name:-}" ]]; then
-              echo "error: set repo secret ${name} (same names as perfect-sidechain)" >&2
+              echo "error: set repo secret ${name}" >&2
               missing=1
             fi
           done
@@ -123,9 +123,8 @@ jobs:
       - name: Build macOS release
         working-directory: app
         run: |
-          npm run build:mac -- --publish never \
-            -c.extraMetadata.version="${VERSION}" \
-            -c.mac.forceCodeSigning=true
+          npm pkg set "version=${VERSION}"
+          npm run build:mac -- --publish never --config.mac.forceCodeSigning=true
 
       - name: Notarize disk image
         run: |
@@ -192,7 +191,9 @@ jobs:
 
       - name: Build Windows release
         working-directory: app
-        run: npm run build:win -- --publish never -c.extraMetadata.version="${{ env.VERSION }}"
+        run: |
+          npm pkg set "version=${{ env.VERSION }}"
+          npm run build:win -- --publish never
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v3
