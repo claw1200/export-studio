@@ -86,7 +86,7 @@
         onclick={() => library.load(true)}
       >
         <RefreshCw class="size-3.5" />
-        Library changed — reload
+        Refresh library
       </button>
     {:else if library.info && !library.writable}
       <button
