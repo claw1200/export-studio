@@ -57,6 +57,9 @@ export const ACTIONS = {
   'library.loadSelected': { label: 'Load and play selected track', group: 'Library', fields: 'always' },
   'library.search': { label: 'Search', group: 'Library', fields: 'always' },
   'library.reload': { label: 'Reload library', group: 'Library', fields: 'always' },
+  'library.selectAll': { label: 'Select all tracks', group: 'Library' },
+  'library.editInfo': { label: 'Edit track info', group: 'Library' },
+  'library.removeFromPlaylist': { label: 'Remove from playlist', group: 'Library' },
   'app.settings': { label: 'Settings', group: 'App', fields: 'always' }
 } satisfies Record<string, ActionSpec>
 
@@ -93,6 +96,9 @@ export const DEFAULT_BINDINGS: Record<ActionId, readonly string[]> = {
   'library.loadSelected': ['Enter'],
   'library.search': ['Mod+KeyF'],
   'library.reload': ['Mod+KeyR'],
+  'library.selectAll': ['Mod+KeyA'],
+  'library.editInfo': ['Mod+KeyI'],
+  'library.removeFromPlaylist': ['Mod+Backspace', 'Delete'],
   'app.settings': ['Mod+Comma']
 }
 

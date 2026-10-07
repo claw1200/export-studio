@@ -3,20 +3,29 @@
   import {
     Library as LibraryIcon,
     ListMusic,
+    ListPlus,
     Folder,
     FolderOpen,
+    FolderPlus,
     Sparkles,
     History,
     Tag,
-    ChevronRight
+    ChevronRight,
+    Pencil,
+    Plus,
+    Trash2
   } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import type { TreeNode } from '$lib/library.svelte'
+  import { menuAt, tidy, type MenuEntry, type MenuRequest } from '$lib/menu'
+  import { SEPARATOR, unlockEntry } from '$lib/trackMenu'
   import type { Source } from '$lib/types'
+  import ConfirmDialog from './ConfirmDialog.svelte'
+  import ContextMenu from './ContextMenu.svelte'
 
   let { onsource }: { onsource?: () => void } = $props()
 
-  const { library } = getApp()
+  const { library, player } = getApp()
 
   function setSource(source: Source): void {
     library.setSource(source)
@@ -38,11 +47,164 @@
     else collapsedSections.add(id)
   }
 
+  function sectionOpen(id: string): boolean {
+    return !collapsedSections.has(id) || (id === 'playlists' && !!library.renamingId)
+  }
+
   function open(type: SourceType, node: TreeNode): void {
     if (node.kind === 'folder') toggle(`${type}:${node.id}`)
     else setSource({ type, id: node.id } as Source)
   }
+
+  const EXPAND_DELAY = 600
+  let dropKey = $state<string | null>(null)
+  let expandKey: string | null = null
+  let expandTimer: ReturnType<typeof setTimeout> | undefined
+
+  function accepts(type: SourceType, node: TreeNode): boolean {
+    return (type === 'playlist' && node.kind === 'playlist') || (type === 'tag' && node.kind === 'tag')
+  }
+
+  function expandSoon(key: string, expand: () => void): void {
+    if (expandKey === key) return
+    clearTimeout(expandTimer)
+    expandKey = key
+    expandTimer = setTimeout(() => {
+      expandKey = null
+      expand()
+    }, EXPAND_DELAY)
+  }
+
+  function cancelExpand(key: string): void {
+    if (expandKey !== key) return
+    clearTimeout(expandTimer)
+    expandKey = null
+  }
+
+  function dragOver(e: DragEvent, type: SourceType, node: TreeNode): void {
+    if (!library.dragging) return
+    const key = `${type}:${node.id}`
+    if (node.kind === 'folder' && !expanded.has(key)) expandSoon(key, () => expanded.add(key))
+    if (!accepts(type, node)) return
+    if (!library.writable) {
+      library.notify(`Unlock editing to add tracks to ${type === 'tag' ? 'tags' : 'playlists'}`)
+      return
+    }
+    e.preventDefault()
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+    dropKey = key
+  }
+
+  function dragLeave(e: DragEvent, key: string): void {
+    const into = e.relatedTarget
+    if (into instanceof Node && (e.currentTarget as HTMLElement).contains(into)) return
+    if (dropKey === key) dropKey = null
+    cancelExpand(key)
+  }
+
+  function drop(e: DragEvent, type: SourceType, node: TreeNode): void {
+    dropKey = null
+    const ids = library.dragging
+    if (!ids || !library.writable || !accepts(type, node)) return
+    e.preventDefault()
+    if (type === 'playlist') void library.addToPlaylist(node.id, ids)
+    else void library.setTag(node.id, ids, true)
+  }
+
+  let menu = $state<MenuRequest | null>(null)
+  let deleting = $state<TreeNode | null>(null)
+
+  function create(parentId: string, folder: boolean): void {
+    if (parentId !== 'root') expanded.add(`playlist:${parentId}`)
+    collapsedSections.delete('playlists')
+    void library.createPlaylist(parentId, folder)
+  }
+
+  function createItems(parentId: string): MenuEntry[] {
+    const locked = !library.writable
+    return [
+      { label: 'New playlist', icon: ListPlus, disabled: locked, onselect: () => create(parentId, false) },
+      { label: 'New folder', icon: FolderPlus, disabled: locked, onselect: () => create(parentId, true) }
+    ]
+  }
+
+  function sectionMenu(e: MouseEvent): void {
+    e.preventDefault()
+    menu = menuAt(
+      e,
+      'Playlists',
+      tidy([...createItems('root'), !library.writable && SEPARATOR, !library.writable && unlockEntry(library, player)])
+    )
+  }
+
+  function playlistMenu(e: MouseEvent, node: TreeNode): void {
+    e.preventDefault()
+    const locked = !library.writable
+    const isFolder = node.kind === 'folder'
+    menu = menuAt(
+      e,
+      isFolder ? 'Folder' : 'Playlist',
+      tidy([
+        ...(isFolder ? [...createItems(node.id), SEPARATOR] : []),
+        { label: 'Rename', icon: Pencil, disabled: locked, onselect: () => (library.renamingId = node.id) },
+        { label: 'Delete', icon: Trash2, danger: true, disabled: locked, onselect: () => (deleting = node) },
+        locked && SEPARATOR,
+        locked && unlockEntry(library, player)
+      ])
+    )
+  }
+
+  function deleteMessage(node: TreeNode): string {
+    const name = node.name || 'Untitled'
+    if (node.kind === 'folder') {
+      return `Delete the folder “${name}” and every playlist inside it? The tracks stay in your collection.`
+    }
+    return `Delete the playlist “${name}”? The tracks stay in your collection.`
+  }
+
+  function startRename(input: HTMLInputElement): void {
+    input.focus()
+    input.select()
+    input.scrollIntoView({ block: 'nearest' })
+  }
+
+  function commitRename(node: TreeNode, value: string): void {
+    if (library.renamingId === node.id) void library.renamePlaylist(node.id, value)
+  }
+
+  function renameKey(e: KeyboardEvent, node: TreeNode): void {
+    e.stopPropagation()
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      commitRename(node, e.currentTarget instanceof HTMLInputElement ? e.currentTarget.value : node.name)
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      library.renamingId = null
+    }
+  }
 </script>
+
+{#snippet icon(node: TreeNode, type: SourceType, isOpen: boolean)}
+  {#if node.kind === 'folder'}
+    <ChevronRight class={['size-3 shrink-0 text-faint transition-transform', isOpen && 'rotate-90']} />
+    {#if isOpen}
+      <FolderOpen class="size-3.5 shrink-0 text-faint" />
+    {:else}
+      <Folder class="size-3.5 shrink-0 text-faint" />
+    {/if}
+  {:else}
+    <span class="w-3 shrink-0"></span>
+    {#if node.kind === 'smart'}
+      <Sparkles class="size-3.5 shrink-0 text-accent/80" />
+    {:else if type === 'history'}
+      <History class="size-3.5 shrink-0 text-faint" />
+    {:else if type === 'tag'}
+      <Tag class="size-3.5 shrink-0 text-faint" />
+    {:else}
+      <ListMusic class="size-3.5 shrink-0 text-faint" />
+    {/if}
+  {/if}
+{/snippet}
 
 {#snippet tree(nodes: TreeNode[], type: SourceType, depth: number)}
   {#each nodes as node (node.id)}
@@ -50,41 +212,49 @@
     {@const isFolder = node.kind === 'folder'}
     {@const isOpen = expanded.has(key)}
     {@const active = !isFolder && library.isSource({ type, id: node.id } as Source)}
-    <button
-      class={[
-        'group flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-left text-[12.5px]',
-        active ? 'bg-select text-fg' : 'text-muted hover:bg-hover hover:text-fg'
-      ]}
-      style:padding-left="{8 + depth * 14}px"
-      onclick={() => open(type, node)}
-    >
-      {#if isFolder}
-        <ChevronRight class={['size-3 shrink-0 text-faint transition-transform', isOpen && 'rotate-90']} />
-        {#if isOpen}
-          <FolderOpen class="size-3.5 shrink-0 text-faint" />
-        {:else}
-          <Folder class="size-3.5 shrink-0 text-faint" />
+    {#if type === 'playlist' && library.renamingId === node.id}
+      <div
+        class="flex h-7 w-full items-center gap-1.5 rounded-md bg-hover pr-1"
+        style:padding-left="{8 + depth * 14}px"
+      >
+        {@render icon(node, type, isOpen)}
+        <input
+          {@attach startRename}
+          value={node.name}
+          spellcheck="false"
+          aria-label="Playlist name"
+          class="h-5.5 min-w-0 flex-1 rounded border border-accent/60 bg-bg px-1.5 text-[12.5px] text-fg focus:outline-none"
+          onkeydown={(e) => renameKey(e, node)}
+          onblur={(e) => commitRename(node, e.currentTarget.value)}
+        />
+      </div>
+    {:else}
+      <button
+        class={[
+          'group flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-left text-[12.5px]',
+          dropKey === key
+            ? 'bg-accent-soft text-fg ring-1 ring-accent/70 ring-inset'
+            : active
+              ? 'bg-select text-fg'
+              : 'text-muted hover:bg-hover hover:text-fg'
+        ]}
+        style:padding-left="{8 + depth * 14}px"
+        onclick={() => open(type, node)}
+        oncontextmenu={type === 'playlist' ? (e) => playlistMenu(e, node) : undefined}
+        ondragover={(e) => dragOver(e, type, node)}
+        ondragleave={(e) => dragLeave(e, key)}
+        ondrop={(e) => drop(e, type, node)}
+      >
+        {@render icon(node, type, isOpen)}
+        <span class="min-w-0 flex-1 truncate">{node.name || 'Untitled'}</span>
+        {#if !isFolder}
+          {@const count = type === 'tag' ? (library.tagCounts.get(node.id) ?? 0) : node.count}
+          {#if count != null}
+            <span class="tabular text-[11px] text-faint group-hover:text-muted">{count}</span>
+          {/if}
         {/if}
-      {:else}
-        <span class="w-3 shrink-0"></span>
-        {#if node.kind === 'smart'}
-          <Sparkles class="size-3.5 shrink-0 text-accent/80" />
-        {:else if type === 'history'}
-          <History class="size-3.5 shrink-0 text-faint" />
-        {:else if type === 'tag'}
-          <Tag class="size-3.5 shrink-0 text-faint" />
-        {:else}
-          <ListMusic class="size-3.5 shrink-0 text-faint" />
-        {/if}
-      {/if}
-      <span class="min-w-0 flex-1 truncate">{node.name || 'Untitled'}</span>
-      {#if !isFolder}
-        {@const count = type === 'tag' ? (library.tagCounts.get(node.id) ?? 0) : node.count}
-        {#if count != null}
-          <span class="tabular text-[11px] text-faint group-hover:text-muted">{count}</span>
-        {/if}
-      {/if}
-    </button>
+      </button>
+    {/if}
     {#if isFolder && isOpen}
       {@render tree(node.children, type, depth + 1)}
     {/if}
@@ -92,17 +262,43 @@
 {/snippet}
 
 {#snippet section(id: string, title: string, nodes: TreeNode[], type: SourceType)}
-  {#if nodes.length}
+  {#if nodes.length || type === 'playlist'}
+    {@const sectionKey = `section:${id}`}
     <div class="mt-4">
-      <button
-        class="flex w-full items-center gap-1 px-2 pb-1 text-[10.5px] font-semibold tracking-wider text-faint uppercase hover:text-muted"
-        onclick={() => toggleSection(id)}
+      <div
+        class="group/section flex items-center pr-1"
+        role="presentation"
+        oncontextmenu={type === 'playlist' ? sectionMenu : undefined}
       >
-        <ChevronRight class={['size-3 transition-transform', !collapsedSections.has(id) && 'rotate-90']} />
-        {title}
-      </button>
-      {#if !collapsedSections.has(id)}
+        <button
+          class="flex flex-1 items-center gap-1 px-2 pb-1 text-[10.5px] font-semibold tracking-wider text-faint uppercase hover:text-muted"
+          onclick={() => toggleSection(id)}
+          ondragover={() => {
+            if (library.dragging && collapsedSections.has(id)) {
+              expandSoon(sectionKey, () => collapsedSections.delete(id))
+            }
+          }}
+          ondragleave={(e) => dragLeave(e, sectionKey)}
+        >
+          <ChevronRight class={['size-3 transition-transform', sectionOpen(id) && 'rotate-90']} />
+          {title}
+        </button>
+        {#if type === 'playlist'}
+          <button
+            class="-mt-1 grid size-5 place-items-center rounded text-faint opacity-0 group-hover/section:opacity-100 hover:bg-hover hover:text-fg focus-visible:opacity-100"
+            aria-label="New playlist or folder"
+            title="New playlist or folder"
+            onclick={sectionMenu}
+          >
+            <Plus class="size-3.5" />
+          </button>
+        {/if}
+      </div>
+      {#if sectionOpen(id)}
         {@render tree(nodes, type, 0)}
+        {#if !nodes.length}
+          <p class="px-2 py-1 text-[12px] text-faint">No playlists yet</p>
+        {/if}
       {/if}
     </div>
   {/if}
@@ -125,3 +321,19 @@
   {@render section('tags', 'My Tag', library.tagTree, 'tag')}
   {@render section('histories', 'Histories', library.historyTree, 'history')}
 </nav>
+
+{#if menu}
+  <ContextMenu {menu} onclose={() => (menu = null)} />
+{/if}
+
+{#if deleting}
+  {@const node = deleting}
+  <ConfirmDialog
+    title={node.kind === 'folder' ? 'Delete folder' : 'Delete playlist'}
+    message={deleteMessage(node)}
+    confirmLabel="Delete"
+    danger
+    onconfirm={() => void library.deletePlaylist(node.id)}
+    onclose={() => (deleting = null)}
+  />
+{/if}

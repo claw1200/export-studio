@@ -1,6 +1,11 @@
 import { api } from './api'
 import { clearDetailCache } from './player.svelte'
-import type { LibraryInfo, Source, Track, TreeItem } from './types'
+import type { LibraryInfo, Source, Track, TrackEdit, TreeItem } from './types'
+
+export const TRACK_DRAG_TYPE = 'application/x-exportstudio-tracks'
+
+const READ_ONLY = 'Unlock editing to change the library'
+const NOTICE_MS = 6000
 
 export type SortKey =
   | 'title'
@@ -20,6 +25,7 @@ export type SortKey =
   | 'fileType'
   | 'comment'
   | 'remixer'
+  | 'position'
 
 export interface TreeNode extends TreeItem {
   children: TreeNode[]
@@ -49,7 +55,7 @@ function camelotRank(key: string): number {
   return Number(m[1]) * 2 + (m[2].toUpperCase() === 'B' ? 1 : 0)
 }
 
-function compare(a: Track, b: Track, key: SortKey): number {
+function compare(a: Track, b: Track, key: Exclude<SortKey, 'position'>): number {
   switch (key) {
     case 'bpm':
     case 'duration':
@@ -92,8 +98,18 @@ export class Library {
   query = $state('')
   sort = $state.raw<{ key: SortKey; dir: 1 | -1 } | null>(null)
   selectedId = $state<string | null>(null)
+  selection = $state.raw<ReadonlySet<string>>(new Set())
+  private anchorId: string | null = null
+
+  editError = $state<string | null>(null)
+  writeFileTags = $state(localStorage.getItem('writeFileTags') === '1')
+  renamingId = $state<string | null>(null)
+  dragging = $state.raw<string[] | null>(null)
+  private noticeTimer: ReturnType<typeof setTimeout> | undefined
+  private trackListeners = new Set<(tracks: Track[]) => void>()
 
   byId = $derived(new Map(this.tracks.map((t) => [t.id, t])))
+  playlistById = $derived(new Map(this.playlists.map((p) => [p.id, p])))
   playlistTree = $derived(buildTree(this.playlists))
   historyTree = $derived(buildTree(this.histories))
   tagTree = $derived(buildTree(this.myTags))
@@ -114,6 +130,16 @@ export class Library {
       ])
     )
   )
+
+  /** 1-based position of each track in the current playlist or history, as stored in rekordbox. */
+  positions = $derived.by(() => {
+    const out = new Map<string, number>()
+    if (this.source.type !== 'playlist' && this.source.type !== 'history') return out
+    this.sourceIds?.forEach((id, i) => {
+      if (!out.has(id)) out.set(id, i + 1)
+    })
+    return out
+  })
 
   sourceTracks = $derived.by(() => {
     const src = this.source
@@ -139,7 +165,13 @@ export class Library {
     }
     const sort = this.sort
     if (sort) {
-      list = [...list].sort((a, b) => compare(a, b, sort.key) * sort.dir || collator.compare(a.title, b.title))
+      const { key, dir } = sort
+      const positions = this.positions
+      const order =
+        key === 'position'
+          ? (a: Track, b: Track) => (positions.get(a.id) ?? 0) - (positions.get(b.id) ?? 0)
+          : (a: Track, b: Track) => compare(a, b, key)
+      list = [...list].sort((a, b) => order(a, b) * dir || collator.compare(a.title, b.title))
     } else if (this.source.type === 'collection' || this.source.type === 'tag') {
       list = [...list].sort((a, b) => collator.compare(b.dateAdded, a.dateAdded))
     }
@@ -147,6 +179,18 @@ export class Library {
   })
 
   selected = $derived(this.selectedId ? (this.byId.get(this.selectedId) ?? null) : null)
+  selectedTracks = $derived.by(() => {
+    const picked = this.visible.filter((t) => this.selection.has(t.id))
+    return picked.length || !this.selected ? picked : [this.selected]
+  })
+
+  sourcePlaylist = $derived(this.source.type === 'playlist' ? this.playlistById.get(this.source.id) : undefined)
+  canReorder = $derived(
+    this.writable &&
+      this.sourcePlaylist?.kind === 'playlist' &&
+      (!this.sort || (this.sort.key === 'position' && this.sort.dir === 1)) &&
+      !this.query.trim()
+  )
 
   sourceTitle = $derived.by(() => {
     const src = this.source
@@ -228,6 +272,163 @@ export class Library {
     this.tracks = this.tracks.map((t) => (t.id === id ? { ...t, bpm } : t))
   }
 
+  selectOnly(id: string): void {
+    this.selectedId = id
+    this.selection = new Set([id])
+    this.anchorId = id
+  }
+
+  toggleSelected(id: string): void {
+    const next = new Set(this.selection)
+    if (next.has(id) && next.size > 1) {
+      next.delete(id)
+      if (this.selectedId === id) this.selectedId = [...next].at(-1) ?? null
+    } else {
+      next.add(id)
+      this.selectedId = id
+    }
+    this.selection = next
+    this.anchorId = id
+  }
+
+  selectRange(id: string): void {
+    const list = this.visible
+    const from = list.findIndex((t) => t.id === (this.anchorId ?? this.selectedId))
+    const to = list.findIndex((t) => t.id === id)
+    if (from < 0 || to < 0) return this.selectOnly(id)
+    const [lo, hi] = from < to ? [from, to] : [to, from]
+    this.selection = new Set(list.slice(lo, hi + 1).map((t) => t.id))
+    this.selectedId = id
+  }
+
+  selectAll(): void {
+    const list = this.visible
+    if (!list.length) return
+    this.selection = new Set(list.map((t) => t.id))
+    if (!this.selectedId || !this.selection.has(this.selectedId)) this.selectedId = list[0].id
+  }
+
+  setWriteFileTags(on: boolean): void {
+    this.writeFileTags = on
+    localStorage.setItem('writeFileTags', on ? '1' : '0')
+  }
+
+  onTracksUpdated(listener: (tracks: Track[]) => void): () => void {
+    this.trackListeners.add(listener)
+    return () => this.trackListeners.delete(listener)
+  }
+
+  notify(message: string): void {
+    clearTimeout(this.noticeTimer)
+    this.editError = message
+    this.noticeTimer = setTimeout(() => {
+      if (this.editError === message) this.editError = null
+    }, NOTICE_MS)
+  }
+
+  private async edit<T>(run: () => Promise<T>): Promise<T | undefined> {
+    if (!this.writable) {
+      this.notify(READ_ONLY)
+      return undefined
+    }
+    clearTimeout(this.noticeTimer)
+    this.editError = null
+    try {
+      return await run()
+    } catch (e) {
+      this.notify((e as Error).message)
+      return undefined
+    }
+  }
+
+  private applyTracks(rows: Track[]): void {
+    if (!rows.length) return
+    const fresh = new Map(rows.map((r) => [r.id, r]))
+    this.tracks = this.tracks.map((t) => fresh.get(t.id) ?? t)
+    for (const listener of this.trackListeners) listener(rows)
+  }
+
+  private applyPlaylistIds(id: string, ids: string[]): void {
+    this.playlists = this.playlists.map((p) => (p.id === id ? { ...p, count: ids.length } : p))
+    if (this.source.type === 'playlist' && this.source.id === id) this.sourceIds = ids
+  }
+
+  private applyPlaylists(playlists: TreeItem[]): void {
+    this.playlists = playlists
+    const src = this.source
+    if (src.type === 'playlist' && !playlists.some((p) => p.id === src.id)) void this.setSource({ type: 'collection' })
+  }
+
+  async updateTracks(ids: string[], fields: TrackEdit): Promise<boolean> {
+    if (!ids.length || !Object.keys(fields).length) return true
+    const result = await this.edit(() => api.updateTracks(ids, fields, this.writeFileTags))
+    if (!result) return false
+    this.applyTracks(result.tracks)
+    const failed = result.tagErrors
+    if (failed.length) {
+      const files = failed.length === 1 ? 'one file' : `${failed.length} files`
+      this.notify(`Saved to rekordbox, but couldn’t write tags to ${files}: ${failed[0]}`)
+    }
+    return true
+  }
+
+  async addToPlaylist(playlistId: string, ids: string[]): Promise<void> {
+    const before = this.playlistById.get(playlistId)?.count ?? 0
+    const result = await this.edit(() => api.addToPlaylist(playlistId, ids))
+    if (!result) return
+    this.applyPlaylistIds(playlistId, result)
+    const name = this.playlistById.get(playlistId)?.name ?? 'the playlist'
+    if (result.length === before) this.notify(`Already in ${name}`)
+  }
+
+  async removeFromPlaylist(playlistId: string, ids: string[]): Promise<void> {
+    const result = await this.edit(() => api.removeFromPlaylist(playlistId, ids))
+    if (result) this.applyPlaylistIds(playlistId, result)
+  }
+
+  /** Move tracks so they sit just before `beforeId`, or at the end when it is null. */
+  async moveInPlaylist(playlistId: string, ids: string[], beforeId: string | null): Promise<void> {
+    if (!(this.source.type === 'playlist' && this.source.id === playlistId && this.sourceIds)) return
+    const current = this.sourceIds
+    const found = beforeId === null ? -1 : current.indexOf(beforeId)
+    const index = found < 0 ? current.length : found
+    const moving = new Set(ids)
+    const before = current.slice(0, index).filter((id) => !moving.has(id)).length
+    const rest = current.filter((id) => !moving.has(id))
+    this.sourceIds = [...rest.slice(0, before), ...current.filter((id) => moving.has(id)), ...rest.slice(before)]
+    const result = await this.edit(() => api.moveInPlaylist(playlistId, ids, index))
+    if (result) this.applyPlaylistIds(playlistId, result)
+    else await this.setSource(this.source)
+  }
+
+  async createPlaylist(parentId = 'root', folder = false, trackIds: string[] = []): Promise<string | null> {
+    const name = folder ? 'New folder' : 'New playlist'
+    const result = await this.edit(() => api.createPlaylist(name, parentId, folder, trackIds))
+    if (!result) return null
+    this.playlists = result.playlists
+    this.renamingId = result.id
+    return result.id
+  }
+
+  async renamePlaylist(id: string, name: string): Promise<void> {
+    this.renamingId = null
+    const current = this.playlistById.get(id)
+    if (!current || !name.trim() || name.trim() === current.name) return
+    this.playlists = this.playlists.map((p) => (p.id === id ? { ...p, name: name.trim() } : p))
+    const result = await this.edit(() => api.renamePlaylist(id, name))
+    this.applyPlaylists(result ?? this.playlists.map((p) => (p.id === id ? current : p)))
+  }
+
+  async deletePlaylist(id: string): Promise<void> {
+    const result = await this.edit(() => api.deletePlaylist(id))
+    if (result) this.applyPlaylists(result)
+  }
+
+  async setTag(tagId: string, ids: string[], on: boolean): Promise<void> {
+    const result = await this.edit(() => (on ? api.addTag(tagId, ids) : api.removeTag(tagId, ids)))
+    if (result) this.applyTracks(result)
+  }
+
   private async refreshContents(): Promise<void> {
     const [tracks, playlists, histories, myTags] = await Promise.all([
       api.tracks(),
@@ -245,8 +446,11 @@ export class Library {
 
   async setSource(source: Source): Promise<void> {
     const token = ++this.sourceToken
+    if (!this.isSource(source)) {
+      this.sort = null
+      this.selection = this.selectedId ? new Set([this.selectedId]) : new Set()
+    }
     this.source = source
-    this.sort = null
     if (source.type === 'collection' || source.type === 'tag') {
       this.sourceIds = null
       return

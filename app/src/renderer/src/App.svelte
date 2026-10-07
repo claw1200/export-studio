@@ -13,6 +13,7 @@
   import Deck from '$lib/components/Deck.svelte'
   import Inspector from '$lib/components/Inspector.svelte'
   import StatusBar from '$lib/components/StatusBar.svelte'
+  import TrackEditDialog from '$lib/components/TrackEditDialog.svelte'
 
   const library = new Library()
   const player = new Player()
@@ -84,18 +85,44 @@
   let previewTimer: ReturnType<typeof setTimeout> | undefined
 
   library.load()
+  library.onTracksUpdated((rows) => {
+    const loaded = player.track
+    const fresh = loaded && rows.find((t) => t.id === loaded.id)
+    if (fresh) player.track = fresh
+  })
+
+  let editing = $state.raw<Track[] | null>(null)
+
+  function edit(tracks: Track[]): void {
+    if (!tracks.length) return
+    if (!library.writable) library.notify('Unlock editing to change track info')
+    else editing = tracks
+  }
 
   function select(track: Track): void {
-    library.selectedId = track.id
+    library.selectOnly(track.id)
     if (player.playing) return
     clearTimeout(previewTimer)
     previewTimer = setTimeout(() => player.load(track), 80)
   }
 
   function activate(track: Track): void {
-    library.selectedId = track.id
+    library.selectOnly(track.id)
     clearTimeout(previewTimer)
     player.load(track, true)
+  }
+
+  function removeSelectedFromPlaylist(): void {
+    const playlist = library.sourcePlaylist
+    const ids = library.selectedTracks.map((t) => t.id)
+    if (playlist?.kind !== 'playlist' || !ids.length) return
+    const list = library.visible
+    const last = Math.max(...ids.map((id) => list.findIndex((t) => t.id === id)))
+    const removing = new Set(ids)
+    const next = list.slice(last + 1).find((t) => !removing.has(t.id)) ?? list.findLast((t) => !removing.has(t.id))
+    void library.removeFromPlaylist(playlist.id, ids).then(() => {
+      if (next && library.selection.has(ids[0])) library.selectOnly(next.id)
+    })
   }
 
   function reload(): void {
@@ -124,6 +151,7 @@
     if (e.target.closest('input, textarea, select, [contenteditable]')) return
     const active = document.activeElement
     if (active instanceof HTMLElement && isTypingTarget(active)) active.blur()
+    if (e.target.closest('[draggable="true"]')) return
     if (e.target.closest('button, a, [tabindex]')) e.preventDefault()
   }
 
@@ -161,7 +189,10 @@
         searchInput?.focus()
         searchInput?.select()
       },
-      'library.reload': reload
+      'library.reload': reload,
+      'library.selectAll': () => library.selectAll(),
+      'library.editInfo': () => edit(library.selectedTracks),
+      'library.removeFromPlaylist': removeSelectedFromPlaylist
     })
   )
 </script>
@@ -243,12 +274,12 @@
         {@render panelHandle('sidebar', 'right')}
       </div>
       <main class="min-w-0 flex-1 bg-bg">
-        <TrackTable bind:this={table} onselect={select} onactivate={activate} />
+        <TrackTable bind:this={table} onselect={select} onactivate={activate} onedit={edit} />
       </main>
       {#if inspectorOpen}
         <div class="relative h-full shrink-0" style:width="{inspectorWidth}px">
           {@render panelHandle('inspector', 'left')}
-          <Inspector onjump={(s) => player.seek(s)} />
+          <Inspector onjump={(s) => player.seek(s)} onedit={edit} />
         </div>
       {/if}
     </div>
@@ -257,5 +288,9 @@
 
   {#if panelDrag}
     <div class="fixed inset-0 z-50 cursor-col-resize"></div>
+  {/if}
+
+  {#if editing}
+    <TrackEditDialog tracks={editing} onclose={() => (editing = null)} />
   {/if}
 </div>

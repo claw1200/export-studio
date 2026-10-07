@@ -1,35 +1,40 @@
 <script lang="ts">
-  import { Music, FolderSearch, Repeat, AlertTriangle, X } from '@lucide/svelte'
+  import { Music, FolderSearch, Repeat, AlertTriangle, X, Pencil, Star } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import { api, artworkUrl } from '$lib/api'
   import { formatBpm, formatClock, formatDuration, formatSize, hotCueLetter, keyColor, TRACK_COLORS } from '$lib/format'
   import { loadDetail } from '$lib/player.svelte'
   import { cueColor } from '$lib/waveform'
-  import type { Cue, TrackDetail } from '$lib/types'
+  import type { Cue, EditableField, Track, TrackDetail } from '$lib/types'
+  import EditableText from './EditableText.svelte'
 
-  let { onjump }: { onjump: (seconds: number) => void } = $props()
+  let { onjump, onedit }: { onjump: (seconds: number) => void; onedit: (tracks: Track[]) => void } = $props()
 
   const { library, player } = getApp()
   const track = $derived(library.selected)
+  const editable = $derived(library.writable)
+  const MAX_NUMBER = 9999
 
   const detailPromise = $derived(track ? loadDetail(track.id).then((d) => d.detail) : null)
 
-  const fields = $derived.by(() => {
+  type Row = { label: string; value: string; field?: EditableField; numeric?: boolean }
+
+  const fields = $derived.by((): Row[] => {
     if (!track) return []
-    const rows: [string, string][] = [
-      ['Album', track.album],
-      ['Genre', track.genre],
-      ['Label', track.label],
-      ['Remixer', track.remixer],
-      ['Original artist', track.originalArtist],
-      ['Composer', track.composer],
-      ['Year', track.year ? String(track.year) : ''],
-      ['Date added', track.dateAdded],
-      ['Play count', track.playCount ? String(track.playCount) : ''],
-      ['Colour', TRACK_COLORS[track.color]?.name ?? ''],
-      [
-        'Format',
-        [
+    const rows: Row[] = [
+      { label: 'Album', value: track.album, field: 'album' },
+      { label: 'Genre', value: track.genre, field: 'genre' },
+      { label: 'Label', value: track.label, field: 'label' },
+      { label: 'Remixer', value: track.remixer, field: 'remixer' },
+      { label: 'Original artist', value: track.originalArtist, field: 'originalArtist' },
+      { label: 'Composer', value: track.composer, field: 'composer' },
+      { label: 'Year', value: track.year ? String(track.year) : '', field: 'year', numeric: true },
+      { label: 'Track no.', value: track.trackNo ? String(track.trackNo) : '', field: 'trackNo', numeric: true },
+      { label: 'Date added', value: track.dateAdded },
+      { label: 'Play count', value: track.playCount ? String(track.playCount) : '' },
+      {
+        label: 'Format',
+        value: [
           track.fileType,
           track.sampleRate ? `${(track.sampleRate / 1000).toFixed(1)} kHz` : '',
           track.bitDepth ? `${track.bitDepth}-bit` : '',
@@ -37,11 +42,27 @@
         ]
           .filter(Boolean)
           .join(' · ')
-      ],
-      ['Size', formatSize(track.fileSize)]
+      },
+      { label: 'Size', value: formatSize(track.fileSize) }
     ]
-    return rows.filter(([, v]) => v)
+    return rows.filter((row) => row.value || (editable && row.field))
   })
+
+  function saveField(id: string, field: EditableField, label: string, numeric = false) {
+    return async (value: string): Promise<boolean> => {
+      if (!numeric) return library.updateTracks([id], { [field]: value })
+      const n = value ? Number(value) : 0
+      if (!Number.isInteger(n) || n < 0 || n > MAX_NUMBER) {
+        library.notify(`${label} must be a whole number between 0 and ${MAX_NUMBER}`)
+        return false
+      }
+      return library.updateTracks([id], { [field]: n })
+    }
+  }
+
+  function setRating(t: Track, n: number): void {
+    void library.updateTracks([t.id], { rating: t.rating === n ? 0 : n })
+  }
 
   const tags = $derived(track ? track.myTags.map((id) => library.tagNames.get(id)).filter(Boolean) : [])
   const canRemoveCues = $derived(library.writable && !!player.detail && player.track?.id === track?.id)
@@ -53,6 +74,20 @@
 </script>
 
 <aside class="flex h-full w-full flex-col overflow-y-auto border-l border-line-soft bg-bg">
+  {#if library.selectedTracks.length > 1}
+    <div class="flex items-center gap-2 border-b border-line-soft bg-surface px-4 py-2 text-[12px]">
+      <span class="min-w-0 flex-1 truncate text-muted">{library.selectedTracks.length} tracks selected</span>
+      <button
+        class="flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium text-accent hover:bg-accent-soft disabled:pointer-events-none disabled:opacity-40"
+        disabled={!editable}
+        title={editable ? undefined : 'Unlock editing to change tracks'}
+        onclick={() => onedit(library.selectedTracks)}
+      >
+        <Pencil class="size-3" />
+        Edit all
+      </button>
+    </div>
+  {/if}
   {#if track}
     <div class="p-4">
       <div class="aspect-square w-full overflow-hidden rounded-lg bg-raised shadow-xl shadow-black/40">
@@ -62,8 +97,34 @@
           <div class="grid size-full place-items-center text-faint"><Music class="size-10" /></div>
         {/if}
       </div>
-      <h2 class="mt-4 text-[16px] leading-snug font-semibold text-fg select-text">{track.title}</h2>
-      <p class="mt-0.5 text-[13px] text-muted select-text">{track.artist || 'Unknown artist'}</p>
+      <div class="mt-4 flex items-start gap-2">
+        <div class="min-w-0 flex-1">
+          <h2 class="text-[16px] leading-snug font-semibold text-fg">
+            <EditableText value={track.title} label="Title" {editable} onsave={saveField(track.id, 'title', 'Title')} />
+          </h2>
+          <div class="mt-0.5 text-[13px] text-muted">
+            <EditableText
+              value={track.artist}
+              label="Artist"
+              placeholder="Unknown artist"
+              {editable}
+              onsave={saveField(track.id, 'artist', 'Artist')}
+            />
+            {#if !editable && !track.artist}<span>Unknown artist</span>{/if}
+          </div>
+        </div>
+        {#if editable}
+          {@const current = track}
+          <button
+            class="mt-0.5 grid size-6 shrink-0 place-items-center rounded-md text-faint hover:bg-hover hover:text-fg"
+            onclick={() => onedit([current])}
+            aria-label="Edit track info"
+            title="Edit track info"
+          >
+            <Pencil class="size-3.5" />
+          </button>
+        {/if}
+      </div>
 
       <div class="tabular mt-3 grid grid-cols-3 gap-1.5 text-center">
         <div class="rounded-md bg-surface py-2">
@@ -81,11 +142,89 @@
       </div>
     </div>
 
-    <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 border-t border-line-soft px-4 py-3 text-[12px]">
-      {#each fields as [label, value] (label)}
-        <dt class="text-faint">{label}</dt>
-        <dd class="min-w-0 truncate text-right text-muted select-text" title={value}>{value}</dd>
+    <dl
+      class="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-1.5 border-t border-line-soft px-4 py-3 text-[12px]"
+    >
+      {#each fields as row (row.label)}
+        <dt class="text-faint">{row.label}</dt>
+        <dd class="flex min-w-0 justify-end text-right text-muted" title={row.value}>
+          {#if row.field}
+            <EditableText
+              value={row.value}
+              label={row.label}
+              placeholder="Add"
+              numeric={row.numeric}
+              {editable}
+              class="text-right"
+              onsave={saveField(track.id, row.field, row.label, row.numeric)}
+            />
+          {:else}
+            <span class="truncate select-text">{row.value}</span>
+          {/if}
+        </dd>
       {/each}
+      {#if editable || track.rating}
+        {@const current = track}
+        <dt class="text-faint">Rating</dt>
+        <dd class="flex justify-end">
+          <div class="flex gap-px" role={editable ? 'radiogroup' : 'img'} aria-label="Rating {current.rating} of 5">
+            {#each [1, 2, 3, 4, 5] as n (n)}
+              {@const lit = n <= current.rating}
+              {#if editable}
+                <button
+                  class="grid size-4.5 place-items-center rounded hover:bg-hover"
+                  role="radio"
+                  aria-checked={current.rating === n}
+                  aria-label="{n} star{n === 1 ? '' : 's'}"
+                  onclick={() => setRating(current, n)}
+                >
+                  <Star class={['size-3', lit ? 'fill-warn text-warn' : 'text-line']} strokeWidth={lit ? 0 : 2} />
+                </button>
+              {:else}
+                <Star class={['size-3', lit ? 'fill-warn text-warn' : 'text-line']} strokeWidth={lit ? 0 : 2} />
+              {/if}
+            {/each}
+          </div>
+        </dd>
+      {/if}
+      {#if editable}
+        {@const current = track}
+        <dt class="text-faint">Colour</dt>
+        <dd class="flex justify-end">
+          <div class="flex gap-1" role="radiogroup" aria-label="Colour">
+            <button
+              class={[
+                'grid size-3.5 place-items-center rounded-full border text-faint',
+                current.color === 0 ? 'border-fg' : 'border-line hover:border-muted'
+              ]}
+              role="radio"
+              aria-checked={current.color === 0}
+              aria-label="No colour"
+              title="No colour"
+              onclick={() => void library.updateTracks([current.id], { color: 0 })}
+            >
+              <X class="size-2.5" />
+            </button>
+            {#each Object.entries(TRACK_COLORS) as [n, c] (n)}
+              <button
+                class={[
+                  'size-3.5 rounded-full ring-offset-1 ring-offset-bg',
+                  current.color === Number(n) ? 'ring-[1.5px] ring-fg' : 'hover:ring-1 hover:ring-muted'
+                ]}
+                style:background={c.hex}
+                role="radio"
+                aria-checked={current.color === Number(n)}
+                aria-label={c.name}
+                title={c.name}
+                onclick={() => void library.updateTracks([current.id], { color: Number(n) })}
+              ></button>
+            {/each}
+          </div>
+        </dd>
+      {:else if TRACK_COLORS[track.color]}
+        <dt class="text-faint">Colour</dt>
+        <dd class="truncate text-right text-muted">{TRACK_COLORS[track.color].name}</dd>
+      {/if}
     </dl>
 
     {#if tags.length}
@@ -96,8 +235,17 @@
       </div>
     {/if}
 
-    {#if track.comment}
-      <p class="border-t border-line-soft px-4 py-3 text-[12px] text-muted select-text">{track.comment}</p>
+    {#if track.comment || editable}
+      <div class="border-t border-line-soft px-4 py-3 text-[12px] text-muted">
+        <EditableText
+          value={track.comment}
+          label="Comment"
+          placeholder="Add a comment"
+          multiline
+          {editable}
+          onsave={saveField(track.id, 'comment', 'Comment')}
+        />
+      </div>
     {/if}
 
     {#await detailPromise}

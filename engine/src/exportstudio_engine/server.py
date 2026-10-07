@@ -44,6 +44,17 @@ class Engine:
             "cue.delete": lambda id, cueId: self.lib.delete_cue(id, cueId),
             "cue.setColor": lambda id, cueId, colorIndex: self.lib.set_cue_color(id, cueId, colorIndex),
             "beatgrid.set": lambda id, times, beats, bpms, cues=None: self.lib.set_beatgrid(id, times, beats, bpms, cues),
+            "track.update": lambda ids, fields, writeTags=False: self.lib.update_tracks(ids, fields, writeTags),
+            "playlist.add": lambda id, trackIds: self.lib.add_to_playlist(id, trackIds),
+            "playlist.remove": lambda id, trackIds: self.lib.remove_from_playlist(id, trackIds),
+            "playlist.move": lambda id, trackIds, index: self.lib.move_in_playlist(id, trackIds, index),
+            "playlist.create": lambda name, parentId="root", folder=False, trackIds=None: self.lib.create_playlist(
+                name, parentId, folder, trackIds
+            ),
+            "playlist.rename": lambda id, name: self.lib.rename_playlist(id, name),
+            "playlist.delete": lambda id: self.lib.delete_playlist(id),
+            "tag.add": lambda id, trackIds: self.lib.add_tag(id, trackIds),
+            "tag.remove": lambda id, trackIds: self.lib.remove_tag(id, trackIds),
             "media.resolve": lambda kind, id, size="": self.lib.resolve_media(kind, id, size),
         }
 

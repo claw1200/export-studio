@@ -6,7 +6,7 @@
 
   let { onclose }: { onclose: () => void } = $props()
 
-  const { player, keybinds } = getApp()
+  const { library, player, keybinds } = getApp()
 
   type Section = 'general' | 'keyboard'
   const SECTIONS: { id: Section; label: string; icon: typeof Keyboard }[] = [
@@ -184,6 +184,12 @@
                 {/each}
               </div>
             </div>
+            {@render toggle(
+              'Write track info to file tags',
+              'When you edit title, artist, album and other text fields, also save them into the audio files’ own tags. Off keeps changes in rekordbox only. Rating and colour always stay in rekordbox.',
+              library.writeFileTags,
+              () => library.setWriteFileTags(!library.writeFileTags)
+            )}
           </div>
         {:else}
           {#each groups as { group, ids } (group)}

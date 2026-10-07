@@ -15,7 +15,7 @@
     return { duration, size }
   })
 
-  const message = $derived(player.editError ?? library.lockError ?? player.audioError)
+  const message = $derived(player.editError ?? library.editError ?? library.lockError ?? player.audioError)
 </script>
 
 <footer

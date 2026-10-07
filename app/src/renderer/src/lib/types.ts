@@ -30,6 +30,28 @@ export interface Track {
   myTags: string[]
 }
 
+export type EditableField =
+  | 'title'
+  | 'artist'
+  | 'album'
+  | 'genre'
+  | 'label'
+  | 'remixer'
+  | 'originalArtist'
+  | 'composer'
+  | 'comment'
+  | 'year'
+  | 'trackNo'
+  | 'rating'
+  | 'color'
+
+export type TrackEdit = Partial<Pick<Track, EditableField>>
+
+export interface TrackUpdate {
+  tracks: Track[]
+  tagErrors: string[]
+}
+
 export interface TreeItem {
   id: string
   name: string

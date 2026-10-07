@@ -3,6 +3,7 @@ import shutil
 import tempfile
 import time
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,6 +14,7 @@ from pyrekordbox.utils import get_rekordbox_pid
 from sqlalchemy import event, select
 from sqlalchemy.orm import aliased
 
+from . import tags as file_tags
 from . import waveform
 
 log = logging.getLogger(__name__)
@@ -31,6 +33,25 @@ MIN_GRID_BPM = 40
 MAX_GRID_BPM = 300
 BEATS_PER_BAR = 4
 ANLZ_BACKUP_DIR = Path.home() / ".exportstudio" / "anlz-backup"
+NORMAL_PLAYLIST = 0
+
+TEXT_COLUMNS = {"title": "Title", "comment": "Commnt"}
+NUMBER_COLUMNS = {
+    "year": ("ReleaseYear", 9999, "Year"),
+    "trackNo": ("TrackNo", 9999, "Track number"),
+    "rating": ("Rating", 5, "Rating"),
+    "color": ("ColorID", 8, "Colour"),
+}
+NAMED_COLUMNS = {
+    "artist": (t.DjmdArtist, "ArtistID", "add_artist"),
+    "remixer": (t.DjmdArtist, "RemixerID", "add_artist"),
+    "originalArtist": (t.DjmdArtist, "OrgArtistID", "add_artist"),
+    "composer": (t.DjmdArtist, "ComposerID", "add_artist"),
+    "album": (t.DjmdAlbum, "AlbumID", "add_album"),
+    "genre": (t.DjmdGenre, "GenreID", "add_genre"),
+    "label": (t.DjmdLabel, "LabelID", "add_label"),
+}
+EDITABLE_FIELDS = set(TEXT_COLUMNS) | set(NUMBER_COLUMNS) | set(NAMED_COLUMNS)
 
 
 def _rekordbox_db_path() -> Path:
@@ -145,6 +166,51 @@ def _move_cue(content: t.DjmdContent, cue: t.DjmdCue, move: dict) -> None:
         cue.OutFrame = out * CDJ_FRAMES_PER_SECOND // 1000
         cue.OutMpegFrame = 0
         cue.OutMpegAbs = 0
+
+
+def _clean_fields(fields: dict) -> dict:
+    unknown = set(fields) - EDITABLE_FIELDS
+    if unknown:
+        raise ValueError(f"These fields can't be edited: {', '.join(sorted(unknown))}")
+    out = {}
+    for name, value in fields.items():
+        if name in NUMBER_COLUMNS:
+            _, limit, label = NUMBER_COLUMNS[name]
+            try:
+                number = int(value or 0)
+            except (TypeError, ValueError):
+                raise ValueError(f"{label} must be a whole number") from None
+            if not 0 <= number <= limit:
+                raise ValueError(f"{label} must be between 0 and {limit}")
+            out[name] = number
+        else:
+            text = str(value or "").strip()
+            if name == "title" and not text:
+                raise ValueError("A track needs a title")
+            out[name] = text
+    return out
+
+
+def _set(row, column: str, value) -> None:
+    if getattr(row, column) != value:
+        setattr(row, column, value)
+
+
+def _renumber(db: Rekordbox6Database, songs: list[t.DjmdSongPlaylist]) -> None:
+    now = datetime.now()
+    moved = []
+    with db.registry.disabled():
+        for no, song in enumerate(songs, 1):
+            if song.TrackNo != no:
+                song.TrackNo = no
+                song.updated_at = now
+                moved.append(song)
+    if moved:
+        db.registry.on_move(moved)
+
+
+def _ordered_songs(playlist: t.DjmdPlaylist) -> list[t.DjmdSongPlaylist]:
+    return sorted(playlist.Songs, key=lambda s: s.TrackNo or 0)
 
 
 class Library:
@@ -274,7 +340,7 @@ class Library:
             "writable": self.writable,
         }
 
-    def tracks(self) -> list[dict]:
+    def tracks(self, ids: list[str] | None = None) -> list[dict]:
         C = t.DjmdContent
         artist, remixer, org_artist, composer = (aliased(t.DjmdArtist) for _ in range(4))
         album, genre, label, key = t.DjmdAlbum, t.DjmdGenre, t.DjmdLabel, t.DjmdKey
@@ -296,8 +362,13 @@ class Library:
             .outerjoin(key, C.KeyID == key.ID)
             .where(C.rb_local_deleted == 0)
         )
+        SMT = t.DjmdSongMyTag
+        tag_stmt = select(SMT.ContentID, SMT.MyTagID)
+        if ids is not None:
+            stmt = stmt.where(C.ID.in_(ids))
+            tag_stmt = tag_stmt.where(SMT.ContentID.in_(ids))
         tags_by_track: dict[str, list[str]] = defaultdict(list)
-        for content_id, tag_id in self._q(t.DjmdSongMyTag.ContentID, t.DjmdSongMyTag.MyTagID):
+        for content_id, tag_id in self.db.session.execute(tag_stmt):
             tags_by_track[content_id].append(tag_id)
 
         rows = []
@@ -571,6 +642,178 @@ class Library:
     def cues(self, content_id: str) -> list[dict]:
         content = self._content(content_id)
         return self._cues(content, self._anlz(content)["EXT"])
+
+    def update_tracks(self, ids: list[str], fields: dict, write_tags: bool = False) -> dict:
+        fields = _clean_fields(fields)
+        db = self._writable_db()
+        contents = [self._content(cid) for cid in dict.fromkeys(ids)]
+        file_fields = {k: v for k, v in fields.items() if k in file_tags.FILE_FIELDS}
+        errors: list[str] = []
+        names: dict[tuple, str] = {}
+
+        def named_id(table, add: str, name: str) -> str | None:
+            if not name:
+                return None
+            key = (table, name)
+            if key not in names:
+                row = db.query(table).filter_by(Name=name).first()
+                names[key] = (row or getattr(db, add)(name)).ID
+            return names[key]
+
+        def update() -> None:
+            for content in contents:
+                for name, value in fields.items():
+                    if name in TEXT_COLUMNS:
+                        _set(content, TEXT_COLUMNS[name], value)
+                    elif name == "color":
+                        _set(content, "ColorID", str(value) if value else None)
+                    elif name in NUMBER_COLUMNS:
+                        _set(content, NUMBER_COLUMNS[name][0], value)
+                    else:
+                        table, column, add = NAMED_COLUMNS[name]
+                        _set(content, column, named_id(table, add, value))
+                if write_tags and file_fields:
+                    path = Path(content.FolderPath or "")
+                    try:
+                        file_tags.write(path, file_fields)
+                        _set(content, "FileSize", path.stat().st_size)
+                    except Exception as e:
+                        log.warning("Could not write tags to %s: %s", path, e)
+                        errors.append(f"{path.name}: {e}")
+
+        if fields and contents:
+            _commit(db, update)
+        return {"tracks": self.tracks(ids=[c.ID for c in contents]), "tagErrors": errors}
+
+    def _editable_playlist(self, db: Rekordbox6Database, playlist_id: str) -> t.DjmdPlaylist:
+        pl = db.get_playlist(ID=playlist_id)
+        if pl is None or pl.ID in HIDDEN_PLAYLISTS:
+            raise KeyError(f"Unknown playlist {playlist_id}")
+        if pl.Attribute != NORMAL_PLAYLIST:
+            raise ValueError("Tracks can only be added to or removed from a normal playlist")
+        return pl
+
+    def add_to_playlist(self, playlist_id: str, track_ids: list[str]) -> list[str]:
+        db = self._writable_db()
+        pl = self._editable_playlist(db, playlist_id)
+        present = {s.ContentID for s in pl.Songs}
+        new = [self._content(cid).ID for cid in dict.fromkeys(track_ids) if cid not in present]
+
+        def add() -> None:
+            for cid in new:
+                db.add_to_playlist(pl, cid)
+
+        if new:
+            _commit(db, add)
+        return self.playlist_tracks(pl.ID)
+
+    def remove_from_playlist(self, playlist_id: str, track_ids: list[str]) -> list[str]:
+        db = self._writable_db()
+        pl = self._editable_playlist(db, playlist_id)
+        drop = set(track_ids)
+        songs = _ordered_songs(pl)
+        if any(s.ContentID in drop for s in songs):
+
+            def remove() -> None:
+                for song in songs:
+                    if song.ContentID in drop:
+                        db.delete(song)
+                _renumber(db, [s for s in songs if s.ContentID not in drop])
+
+            _commit(db, remove)
+        return self.playlist_tracks(pl.ID)
+
+    def move_in_playlist(self, playlist_id: str, track_ids: list[str], index: int) -> list[str]:
+        """Move tracks so they sit together before the track currently at `index`."""
+        db = self._writable_db()
+        pl = self._editable_playlist(db, playlist_id)
+        moving = set(track_ids)
+        songs = _ordered_songs(pl)
+        index = max(0, min(int(index), len(songs)))
+        before = sum(1 for s in songs[:index] if s.ContentID not in moving)
+        rest = [s for s in songs if s.ContentID not in moving]
+        picked = [s for s in songs if s.ContentID in moving]
+        order = rest[:before] + picked + rest[before:]
+        if order != songs:
+            _commit(db, lambda: _renumber(db, order))
+        return self.playlist_tracks(pl.ID)
+
+    def create_playlist(
+        self, name: str, parent_id: str = "root", folder: bool = False, track_ids: list[str] | None = None
+    ) -> dict:
+        db = self._writable_db()
+        name = name.strip() or ("New folder" if folder else "New playlist")
+        parent = None if parent_id in (None, "", "root") else parent_id
+        created: list[str] = []
+
+        def create() -> None:
+            make = db.create_playlist_folder if folder else db.create_playlist
+            pl = make(name, parent=parent)
+            created.append(pl.ID)
+            if not folder:
+                for cid in dict.fromkeys(track_ids or []):
+                    db.add_to_playlist(pl, self._content(cid))
+
+        _commit(db, create)
+        return {"id": created[0], "playlists": self.playlists()}
+
+    def rename_playlist(self, playlist_id: str, name: str) -> list[dict]:
+        db = self._writable_db()
+        name = name.strip()
+        if not name:
+            raise ValueError("A playlist needs a name")
+        pl = db.get_playlist(ID=playlist_id)
+        if pl is None or pl.ID in HIDDEN_PLAYLISTS:
+            raise KeyError(f"Unknown playlist {playlist_id}")
+        if pl.Name != name:
+            _commit(db, lambda: db.rename_playlist(pl, name))
+        return self.playlists()
+
+    def delete_playlist(self, playlist_id: str) -> list[dict]:
+        db = self._writable_db()
+        pl = db.get_playlist(ID=playlist_id)
+        if pl is None or pl.ID in HIDDEN_PLAYLISTS:
+            raise KeyError(f"Unknown playlist {playlist_id}")
+        _commit(db, lambda: db.delete_playlist(pl))
+        return self.playlists()
+
+    def _tag(self, db: Rekordbox6Database, tag_id: str) -> t.DjmdMyTag:
+        tag = db.get_my_tag(ID=tag_id)
+        if tag is None:
+            raise KeyError(f"Unknown tag {tag_id}")
+        if tag.Attribute == FOLDER:
+            raise ValueError("Pick a tag rather than a tag folder")
+        return tag
+
+    def add_tag(self, tag_id: str, track_ids: list[str]) -> list[dict]:
+        db = self._writable_db()
+        tag = self._tag(db, tag_id)
+        SMT = t.DjmdSongMyTag
+        tagged = [cid for (cid,) in db.session.execute(select(SMT.ContentID).where(SMT.MyTagID == tag.ID))]
+        present = set(tagged)
+        new = [self._content(cid).ID for cid in dict.fromkeys(track_ids) if cid not in present]
+
+        def add() -> None:
+            for no, cid in enumerate(new, len(tagged) + 1):
+                db.add(SMT.create(ID=str(uuid4()), UUID=str(uuid4()), MyTagID=tag.ID, ContentID=cid, TrackNo=no))
+
+        if new:
+            _commit(db, add)
+        return self.tracks(ids=list(track_ids))
+
+    def remove_tag(self, tag_id: str, track_ids: list[str]) -> list[dict]:
+        db = self._writable_db()
+        tag = self._tag(db, tag_id)
+        SMT = t.DjmdSongMyTag
+        rows = db.query(SMT).filter(SMT.MyTagID == tag.ID, SMT.ContentID.in_(track_ids)).all()
+
+        def remove() -> None:
+            for row in rows:
+                db.delete(row)
+
+        if rows:
+            _commit(db, remove)
+        return self.tracks(ids=list(track_ids))
 
     def _writable_db(self) -> Rekordbox6Database:
         if not self.writable or self.db is None:

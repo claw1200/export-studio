@@ -1,14 +1,28 @@
 <script lang="ts">
-  import { ArrowUp, ArrowDown, Check, Star, AudioLines, Music } from '@lucide/svelte'
+  import { flushSync } from 'svelte'
+  import { ArrowUp, ArrowDown, Star, AudioLines, Music } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import { artworkUrl } from '$lib/api'
   import { formatBpm, formatDuration, keyColor, TRACK_COLORS } from '$lib/format'
-  import type { SortKey } from '$lib/library.svelte'
+  import { chordLabel } from '$lib/keymap'
+  import { TRACK_DRAG_TYPE, type SortKey } from '$lib/library.svelte'
+  import { menuAt, type MenuEntry, type MenuRequest } from '$lib/menu'
+  import { trackMenu } from '$lib/trackMenu'
   import type { Track } from '$lib/types'
+  import ContextMenu from './ContextMenu.svelte'
 
-  let { onselect, onactivate }: { onselect: (track: Track) => void; onactivate: (track: Track) => void } = $props()
+  let {
+    onselect,
+    onactivate,
+    onedit
+  }: {
+    onselect: (track: Track) => void
+    onactivate: (track: Track) => void
+    onedit: (tracks: Track[]) => void
+  } = $props()
 
-  const { library, player } = getApp()
+  const { library, player, keybinds } = getApp()
+  const isMac = window.api.platform === 'darwin'
 
   type Column = {
     id: string
@@ -23,7 +37,7 @@
   }
 
   const COLUMNS: Column[] = [
-    { id: 'index', name: '#', label: '#', width: 44, min: 36, max: 72, align: 'right' },
+    { id: 'index', name: '#', label: '#', width: 44, min: 36, max: 72, align: 'right', sort: 'position' },
     { id: 'color', name: 'Colour', label: '', width: 10, min: 10, max: 28, sort: 'color' },
     { id: 'art', name: 'Artwork', label: '', width: 34, min: 28, max: 64 },
     { id: 'title', name: 'Title', label: 'Title', width: 220, min: 120, max: 640, fr: 2.2, sort: 'title' },
@@ -159,26 +173,23 @@
     save()
   }
 
-  let menu = $state<{ x: number; y: number } | null>(null)
-
-  function openMenu(e: MouseEvent): void {
-    e.preventDefault()
-    if (drag) return
-    const margin = 8
-    const width = 192
-    const height = Math.min(440, COLUMNS.length * 28 + 72)
-    let x = e.clientX
-    let y = e.clientY
-    if (x + width > window.innerWidth - margin) x = window.innerWidth - width - margin
-    if (y + height > window.innerHeight - margin) y = e.clientY - height
-    menu = { x: Math.max(margin, x), y: Math.max(margin, y) }
+  function columnItems(): MenuEntry[] {
+    return [
+      { kind: 'header', label: 'Columns' },
+      ...COLUMNS.map((column) => ({
+        label: column.name,
+        checked: !hidden.includes(column.id),
+        keepOpen: true,
+        onselect: () => toggleColumn(column.id)
+      })),
+      { kind: 'separator' },
+      { label: 'Reset columns', keepOpen: true, onselect: resetColumns }
+    ]
   }
 
-  function onMenuKey(e: KeyboardEvent): void {
-    if (menu && e.key === 'Escape') {
-      e.preventDefault()
-      menu = null
-    }
+  function openColumnMenu(e: MouseEvent): void {
+    e.preventDefault()
+    if (!drag) rowMenu = menuAt(e, 'Columns', columnItems)
   }
 
   const ROW = 32
@@ -205,9 +216,95 @@
   export function scrollToTop(): void {
     if (viewport) viewport.scrollTop = 0
   }
+
+  let pendingCollapse: string | null = null
+
+  function rowMousedown(e: MouseEvent, track: Track): void {
+    if (e.button !== 0) return
+    pendingCollapse = null
+    if (e.shiftKey) library.selectRange(track.id)
+    else if (isMac ? e.metaKey : e.ctrlKey) library.toggleSelected(track.id)
+    else if (library.selection.has(track.id) && library.selection.size > 1) pendingCollapse = track.id
+    else onselect(track)
+  }
+
+  function rowMouseup(e: MouseEvent, track: Track): void {
+    if (e.button === 0 && pendingCollapse === track.id) onselect(track)
+    pendingCollapse = null
+  }
+
+  let rowMenu = $state<MenuRequest | null>(null)
+
+  function shortcut(id: 'library.editInfo' | 'library.removeFromPlaylist'): string | undefined {
+    const chord = keybinds.bindings[id][0]
+    return chord ? chordLabel(chord) : undefined
+  }
+
+  function rowContextMenu(e: MouseEvent, track: Track): void {
+    e.preventDefault()
+    pendingCollapse = null
+    if (!library.selection.has(track.id)) onselect(track)
+    rowMenu = menuAt(e, 'Track', trackMenu(library, player, library.selectedTracks, { edit: onedit, shortcut }))
+  }
+
+  let ghost = $state<HTMLDivElement>()
+  let ghostLabel = $state('')
+  let dropIndex = $state<number | null>(null)
+  const dragged = $derived(new Set(library.dragging ?? []))
+  const AUTOSCROLL_EDGE = 40
+  const AUTOSCROLL_STEP = 14
+
+  function dragStart(e: DragEvent, track: Track): void {
+    pendingCollapse = null
+    if (!library.selection.has(track.id)) onselect(track)
+    const ids = library.selectedTracks.map((t) => t.id)
+    library.dragging = ids
+    const transfer = e.dataTransfer
+    if (!transfer) return
+    transfer.effectAllowed = 'copyMove'
+    transfer.setData(TRACK_DRAG_TYPE, JSON.stringify(ids))
+    ghostLabel = ids.length === 1 ? track.title : `${ids.length} tracks`
+    flushSync()
+    if (ghost) transfer.setDragImage(ghost, -12, -8)
+  }
+
+  function dragEnd(): void {
+    library.dragging = null
+    dropIndex = null
+  }
+
+  function rowsDragOver(e: DragEvent): void {
+    if (!library.dragging || !library.canReorder) return
+    e.preventDefault()
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+    const top = (e.currentTarget as HTMLElement).getBoundingClientRect().top
+    dropIndex = Math.max(0, Math.min(list.length, Math.round((e.clientY - top) / ROW)))
+  }
+
+  function rowsDragLeave(e: DragEvent): void {
+    const into = e.relatedTarget
+    if (!(into instanceof Node) || !(e.currentTarget as HTMLElement).contains(into)) dropIndex = null
+  }
+
+  function rowsDrop(e: DragEvent): void {
+    const ids = library.dragging
+    const playlist = library.sourcePlaylist
+    const index = dropIndex
+    dropIndex = null
+    if (!ids || !playlist || index === null || !library.canReorder) return
+    e.preventDefault()
+    void library.moveInPlaylist(playlist.id, ids, list[index]?.id ?? null)
+  }
+
+  function autoScroll(e: DragEvent): void {
+    if (!library.dragging || !library.canReorder || !viewport) return
+    const rect = viewport.getBoundingClientRect()
+    if (e.clientY < rect.top + ROW + AUTOSCROLL_EDGE) viewport.scrollTop -= AUTOSCROLL_STEP
+    else if (e.clientY > rect.bottom - AUTOSCROLL_EDGE) viewport.scrollTop += AUTOSCROLL_STEP
+  }
 </script>
 
-<svelte:window onpointermove={onResizeMove} onpointerup={endResize} onpointercancel={endResize} onkeydown={onMenuKey} />
+<svelte:window onpointermove={onResizeMove} onpointerup={endResize} onpointercancel={endResize} />
 
 {#snippet sortIcon(key: SortKey | undefined)}
   {#if key && library.sort?.key === key}
@@ -224,7 +321,7 @@
     {#if player.track?.id === track.id}
       <AudioLines class={['ml-auto size-3.5 text-accent', player.playing && 'animate-pulse']} />
     {:else}
-      <span class="text-faint">{index + 1}</span>
+      <span class="text-faint">{library.positions.get(track.id) ?? index + 1}</span>
     {/if}
   {:else if column.id === 'color'}
     {#if TRACK_COLORS[track.color]}
@@ -277,7 +374,9 @@
     bind:this={viewport}
     bind:clientHeight={height}
     class="tabular relative h-full overflow-auto"
+    role="presentation"
     onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}
+    ondragover={autoScroll}
   >
     <div style:min-width="max(100%, {minWidth}px)">
       <div
@@ -285,11 +384,11 @@
         style:grid-template-columns={template}
         role="row"
         tabindex="-1"
-        oncontextmenu={openMenu}
+        oncontextmenu={openColumnMenu}
       >
         {#each shownColumns as column (column.id)}
           <div class="relative flex h-full min-w-0 items-center">
-            {#if column.sort}
+            {#if column.sort && (column.sort !== 'position' || library.positions.size)}
               <button
                 class={[
                   'flex h-full min-w-0 flex-1 items-center gap-1 px-2 hover:text-fg',
@@ -327,24 +426,35 @@
         {/each}
       </div>
 
-      <div class="relative" style:height="{list.length * ROW}px" role="rowgroup">
+      <div
+        class="relative"
+        style:height="{list.length * ROW}px"
+        role="rowgroup"
+        ondragover={rowsDragOver}
+        ondragleave={rowsDragLeave}
+        ondrop={rowsDrop}
+      >
         <div class="absolute inset-x-0 top-0" style:transform="translateY({first * ROW}px)">
           {#each rows as track, i (track.id)}
             {@const index = first + i}
-            {@const selected = library.selectedId === track.id}
+            {@const selected = library.selection.has(track.id)}
             <div
               class={[
                 'grid cursor-default items-center text-[12.5px] text-muted',
-                selected ? 'bg-select text-fg' : 'hover:bg-surface'
+                selected ? 'bg-select text-fg' : 'hover:bg-surface',
+                library.canReorder && dragged.has(track.id) && 'opacity-40'
               ]}
               style:grid-template-columns={template}
               style:height="{ROW}px"
               role="row"
               tabindex="-1"
               aria-selected={selected}
-              onmousedown={(e) => {
-                if (e.button === 0) onselect(track)
-              }}
+              draggable="true"
+              onmousedown={(e) => rowMousedown(e, track)}
+              onmouseup={(e) => rowMouseup(e, track)}
+              oncontextmenu={(e) => rowContextMenu(e, track)}
+              ondragstart={(e) => dragStart(e, track)}
+              ondragend={dragEnd}
               ondblclick={() => onactivate(track)}
             >
               {#each shownColumns as column (column.id)}
@@ -362,6 +472,12 @@
             </div>
           {/each}
         </div>
+        {#if dropIndex !== null}
+          <div
+            class="pointer-events-none absolute inset-x-0 z-10 h-0.5 rounded-full bg-accent"
+            style:top="{dropIndex * ROW - 1}px"
+          ></div>
+        {/if}
       </div>
 
       {#if library.status === 'ready' && !library.sourceLoading && list.length === 0}
@@ -372,59 +488,19 @@
     </div>
   </div>
 
-  {#if menu}
-    <button
-      class="fixed inset-0 z-40 cursor-default"
-      aria-label="Close columns menu"
-      onclick={() => (menu = null)}
-      oncontextmenu={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        menu = null
-      }}
-    ></button>
-    <div
-      class="fixed z-50 max-h-[min(440px,calc(100vh-16px))] w-48 overflow-y-auto rounded-lg border border-line bg-surface p-1"
-      style:left="{menu.x}px"
-      style:top="{menu.y}px"
-      role="menu"
-      tabindex="-1"
-      aria-label="Columns"
-      oncontextmenu={(e) => {
-        e.preventDefault()
-        e.stopPropagation()
-      }}
-    >
-      <div class="px-2 pt-1 pb-1 text-[11px] font-medium text-faint">Columns</div>
-      {#each COLUMNS as column (column.id)}
-        <button
-          type="button"
-          class="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[12.5px] text-fg hover:bg-hover"
-          role="menuitemcheckbox"
-          aria-checked={!hidden.includes(column.id)}
-          onclick={() => toggleColumn(column.id)}
-        >
-          <span class="grid size-3.5 shrink-0 place-items-center text-accent">
-            {#if !hidden.includes(column.id)}
-              <Check class="size-3.5" strokeWidth={2.5} />
-            {/if}
-          </span>
-          <span class="truncate">{column.name}</span>
-        </button>
-      {/each}
-      <div class="mx-2 my-1 border-t border-line-soft"></div>
-      <button
-        type="button"
-        class="w-full rounded-md px-2 py-1 text-left text-[12.5px] text-muted hover:bg-hover hover:text-fg"
-        role="menuitem"
-        onclick={resetColumns}
-      >
-        Reset columns
-      </button>
-    </div>
-  {/if}
-
   {#if drag}
     <div class="fixed inset-0 z-50 cursor-col-resize"></div>
   {/if}
+
+  {#if rowMenu}
+    <ContextMenu menu={rowMenu} onclose={() => (rowMenu = null)} />
+  {/if}
+
+  <div
+    bind:this={ghost}
+    class="pointer-events-none fixed -top-20 left-0 max-w-64 truncate rounded-md border border-line bg-raised px-2.5 py-1 text-[12px] font-medium text-fg"
+    aria-hidden="true"
+  >
+    {ghostLabel}
+  </div>
 </div>
