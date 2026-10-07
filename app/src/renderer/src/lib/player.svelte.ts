@@ -15,7 +15,9 @@ export type CuePlacement = 'playhead' | 'cuePoint'
 const FILE_MISSING = 'Audio file not found'
 
 function storedVolume(): number {
-  const n = Number(localStorage.getItem('volume'))
+  const raw = localStorage.getItem('volume')
+  if (raw == null) return 1
+  const n = Number(raw)
   return Number.isFinite(n) ? clampUnit(n) : 1
 }
 
