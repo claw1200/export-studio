@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getApp } from '$lib/context'
+  import type { GridDraft } from '$lib/beat'
   import { drawDetail, setupCanvas } from '$lib/waveform'
 
   const { player } = getApp()
@@ -7,6 +8,7 @@
   let width = $state(0)
   let height = $state(0)
   let drag: { x: number; position: number } | null = null
+  let gridDrag: { x: number; base: GridDraft } | null = null
 
   function paint(canvas: HTMLCanvasElement): void {
     if (!width || !height) return
@@ -23,9 +25,10 @@
       {
         position: player.position,
         zoom: player.zoom,
-        cues: player.detail?.cues ?? [],
-        beatgrid: player.detail?.beatgrid ?? null,
-        cuePoint: player.track ? player.cuePoint : null
+        cues: player.displayCues,
+        beatgrid: player.displayGrid,
+        cuePoint: player.track ? player.cuePoint : null,
+        gridEditing: player.gridEditing
       },
       canvas.width,
       canvas.height,
@@ -44,6 +47,7 @@
   }
 
   function release(): void {
+    gridDrag = null
     if (!drag) return
     drag = null
     player.endScrub()
@@ -51,21 +55,32 @@
 </script>
 
 <div
-  class="relative h-full w-full cursor-grab touch-none active:cursor-grabbing"
+  class={[
+    'relative h-full w-full touch-none',
+    player.gridEditing ? 'cursor-ew-resize' : 'cursor-grab active:cursor-grabbing'
+  ]}
   bind:clientWidth={width}
   bind:clientHeight={height}
   role="slider"
   tabindex="-1"
-  aria-label="Waveform"
+  aria-label={player.gridEditing ? 'Beatgrid' : 'Waveform'}
   aria-valuenow={Math.round(player.position)}
   {onwheel}
   onpointerdown={(e) => {
     if (!player.waveform || e.button !== 0) return
     e.currentTarget.setPointerCapture(e.pointerId)
+    if (player.gridEditing) {
+      if (player.gridDraft) gridDrag = { x: e.clientX, base: player.gridDraft }
+      return
+    }
     drag = { x: e.clientX, position: player.position }
     player.scrub(drag.position)
   }}
   onpointermove={(e) => {
+    if (gridDrag) {
+      player.nudgeGrid((e.clientX - gridDrag.x) * secondsPerPixel() * 1000, gridDrag.base)
+      return
+    }
     if (!drag) return
     player.scrub(drag.position - (e.clientX - drag.x) * secondsPerPixel())
   }}

@@ -99,7 +99,7 @@
   <canvas {@attach paint} class="absolute inset-0 size-full"></canvas>
   <div class="pointer-events-none absolute inset-y-0 left-0 bg-black/50" style:width="{pct(player.position)}%"></div>
 
-  {#each player.detail?.cues ?? [] as cue (cue.id)}
+  {#each player.displayCues as cue (cue.id)}
     {#if cue.end != null}
       <div
         class="pointer-events-none absolute inset-y-0 opacity-25"

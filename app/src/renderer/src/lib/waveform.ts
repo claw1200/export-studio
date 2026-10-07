@@ -317,6 +317,7 @@ export interface DetailView {
   cues: Cue[]
   beatgrid: Beatgrid | null
   cuePoint: number | null
+  gridEditing: boolean
 }
 
 export const CUE_POINT_COLOR = '#ff8a1f'
@@ -443,15 +444,23 @@ function paintLoops(frame: Frame): void {
   }
 }
 
+/**
+ * Each analysis entry is the peak of the window that starts at its index, so drawing it from that start puts
+ * transients up to one entry early. Rekordbox draws an entry at the end of its window.
+ */
+const ANALYSIS_LAG_ENTRIES = 0
+
 function paintWave(frame: Frame, mode: WaveformMode, samples?: WaveSamples | null): void {
   const { ctx, wf, from, to, pw, ph, dpr } = frame
   const waveH = ph - 18 * dpr
+  const entryFrom = from - ANALYSIS_LAG_ENTRIES
+  const entryTo = to - ANALYSIS_LAG_ENTRIES
   ctx.save()
   ctx.translate(0, 9 * dpr)
   if (mode === 'rgb' && samples) drawSampleWave(ctx, wf, samples, from, to, pw, waveH)
-  else if (mode === '3band' && wf.bands) drawAnalysisBands(ctx, wf.bands, from, to, pw, waveH, 'center')
+  else if (mode === '3band' && wf.bands) drawAnalysisBands(ctx, wf.bands, entryFrom, entryTo, pw, waveH, 'center')
   else if (wf.rgbHeights && wf.rgbColors)
-    drawAnalysisRgb(ctx, wf.rgbHeights, wf.rgbColors, from, to, pw, waveH, 'center')
+    drawAnalysisRgb(ctx, wf.rgbHeights, wf.rgbColors, entryFrom, entryTo, pw, waveH, 'center')
   ctx.restore()
 }
 
@@ -461,19 +470,29 @@ function paintBeatGrid(frame: Frame): void {
   if (!grid) return
   const startMs = (from / wf.rate) * 1000
   const endMs = (to / wf.rate) * 1000
+  const first = firstIndexAtOrAfter(grid.times, startMs)
+  const line = Math.max(1, dpr)
+  if (view.gridEditing) {
+    for (let i = first; i < grid.times.length && grid.times[i] <= endMs; i++) {
+      const x = Math.round(toX(grid.times[i] / 1000))
+      ctx.fillStyle = grid.beats[i] === 1 ? 'rgba(255,72,88,0.95)' : 'rgba(255,255,255,0.55)'
+      ctx.fillRect(x, 0, line, ph)
+    }
+    return
+  }
   const cueXs = view.cues.map((cue) => Math.round(toX(cue.start / 1000)))
   const coveredByCue = (x: number): boolean => cueXs.some((cueX) => Math.abs(cueX - x) <= 2 * dpr)
-  for (let i = firstIndexAtOrAfter(grid.times, startMs); i < grid.times.length && grid.times[i] <= endMs; i++) {
+  for (let i = first; i < grid.times.length && grid.times[i] <= endMs; i++) {
     const x = Math.round(toX(grid.times[i] / 1000))
     if (coveredByCue(x)) continue
     const downbeat = grid.beats[i] === 1
     const tick = (downbeat ? 7 : 4) * dpr
     ctx.fillStyle = downbeat ? 'rgba(255,72,88,0.9)' : 'rgba(255,255,255,0.28)'
-    ctx.fillRect(x, 0, Math.max(1, dpr), tick)
-    ctx.fillRect(x, ph - tick, Math.max(1, dpr), tick)
+    ctx.fillRect(x, 0, line, tick)
+    ctx.fillRect(x, ph - tick, line, tick)
     if (downbeat) {
       ctx.fillStyle = 'rgba(255,255,255,0.10)'
-      ctx.fillRect(x, 0, Math.max(1, dpr), ph)
+      ctx.fillRect(x, 0, line, ph)
     }
   }
 }

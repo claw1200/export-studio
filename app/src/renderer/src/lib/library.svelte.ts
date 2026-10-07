@@ -223,6 +223,11 @@ export class Library {
     }
   }
 
+  setTrackBpm(id: string, bpm: number): void {
+    if (this.byId.get(id)?.bpm === bpm) return
+    this.tracks = this.tracks.map((t) => (t.id === id ? { ...t, bpm } : t))
+  }
+
   private async refreshContents(): Promise<void> {
     const [tracks, playlists, histories, myTags] = await Promise.all([
       api.tracks(),

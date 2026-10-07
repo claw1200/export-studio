@@ -27,6 +27,10 @@ HOT_CUE_KINDS = tuple(kind for kind in range(1, 10) if kind != LOOP_KIND)
 HOT_CUE_PALETTE_SIZE = 62
 CDJ_FRAMES_PER_SECOND = 150
 FOLDER = 1
+MIN_GRID_BPM = 40
+MAX_GRID_BPM = 300
+BEATS_PER_BAR = 4
+ANLZ_BACKUP_DIR = Path.home() / ".exportstudio" / "anlz-backup"
 
 
 def _rekordbox_db_path() -> Path:
@@ -106,6 +110,41 @@ def _new_cue(db: Rekordbox6Database, content: t.DjmdContent, kind: int, msec: in
         OutMpegAbs=0,
         Color=-1,
     )
+
+
+def _check_grid(times: list[int], beats: list[int], bpms: list[float]) -> None:
+    if not times or not len(times) == len(beats) == len(bpms):
+        raise ValueError("A beatgrid needs matching times, beats and tempos")
+    if times[0] < 0 or any(b <= a for a, b in zip(times, times[1:])):
+        raise ValueError("Beatgrid times must start at 0 or later and keep increasing")
+    if any(not 1 <= b <= BEATS_PER_BAR for b in beats):
+        raise ValueError("Beat numbers must be between 1 and 4")
+    if any(not MIN_GRID_BPM <= b <= MAX_GRID_BPM for b in bpms):
+        raise ValueError(f"Tempo must be between {MIN_GRID_BPM} and {MAX_GRID_BPM} BPM")
+
+
+def _back_up_once(content_id: str, paths: list[Path]) -> None:
+    folder = ANLZ_BACKUP_DIR / content_id
+    folder.mkdir(parents=True, exist_ok=True)
+    for path in paths:
+        target = folder / path.name
+        if not target.exists():
+            shutil.copy2(path, target)
+
+
+def _move_cue(content: t.DjmdContent, cue: t.DjmdCue, move: dict) -> None:
+    msec = _clamp_msec(content, move["start"])
+    cue.InMsec = msec
+    cue.InFrame = msec * CDJ_FRAMES_PER_SECOND // 1000
+    cue.InMpegFrame = 0
+    cue.InMpegAbs = 0
+    end = move.get("end")
+    if end is not None and cue.OutMsec is not None and cue.OutMsec >= 0:
+        out = max(msec, _clamp_msec(content, end))
+        cue.OutMsec = out
+        cue.OutFrame = out * CDJ_FRAMES_PER_SECOND // 1000
+        cue.OutMpegFrame = 0
+        cue.OutMpegAbs = 0
 
 
 class Library:
@@ -356,11 +395,16 @@ class Library:
             raise KeyError(f"Unknown track {content_id}")
         return content
 
+    def _anlz_path(self, content: t.DjmdContent) -> Path | None:
+        if not content.AnalysisDataPath:
+            return None
+        return self.share_dir / content.AnalysisDataPath.strip("/\\")
+
     def _anlz(self, content: t.DjmdContent) -> dict[str, waveform.Tags | None]:
         out: dict[str, waveform.Tags | None] = {"DAT": None, "EXT": None, "2EX": None}
-        if not content.AnalysisDataPath:
+        dat = self._anlz_path(content)
+        if dat is None:
             return out
-        dat = self.share_dir / content.AnalysisDataPath.strip("/\\")
         for kind in out:
             path = dat.with_suffix(f".{kind}")
             if path.is_file():
@@ -462,6 +506,67 @@ class Library:
 
             _commit(db, paint)
         return self.cues(content_id)
+
+    def set_beatgrid(
+        self,
+        content_id: str,
+        times: list[int],
+        beats: list[int],
+        bpms: list[float],
+        cues: list[dict] | None = None,
+    ) -> dict:
+        times = [int(round(x)) for x in times]
+        beats = [int(b) for b in beats]
+        bpms = [round(float(b), 2) for b in bpms]
+        _check_grid(times, beats, bpms)
+        db = self._writable_db()
+        content = self._content(content_id)
+        dat = self._anlz_path(content)
+        if dat is None or not dat.is_file():
+            raise FileNotFoundError("This track has no analysis file to hold a beatgrid")
+        dat_tags = waveform.read_tags(dat)
+        if waveform.BEATGRID_TAG not in dat_tags:
+            raise ValueError("This track has no beatgrid to edit")
+
+        writes = {dat: {waveform.BEATGRID_TAG: waveform.build_beatgrid(dat_tags[waveform.BEATGRID_TAG][0], times, beats, bpms)}}
+        ext = dat.with_suffix(".EXT")
+        if ext.is_file():
+            ext_tags = waveform.read_tags(ext)
+            if waveform.EXTENDED_BEATGRID_TAG in ext_tags:
+                tag = ext_tags[waveform.EXTENDED_BEATGRID_TAG][0]
+                writes[ext] = {waveform.EXTENDED_BEATGRID_TAG: waveform.clear_extended_beatgrid(tag)}
+
+        _back_up_once(content_id, list(writes))
+        previous = {path: path.read_bytes() for path in writes}
+        constant_bpm = bpms[0] if len(set(bpms)) == 1 else None
+        moves = {str(m["id"]): m for m in cues or []}
+
+        def update() -> None:
+            if constant_bpm is not None:
+                content.BPM = int(round(constant_bpm * 100))
+            for cue in content.Cues:
+                move = moves.get(str(cue.ID))
+                if move is None or cue.rb_local_deleted:
+                    continue
+                _move_cue(content, cue, move)
+
+        try:
+            for path, replace in writes.items():
+                waveform.write_tags(path, replace)
+            _commit(db, update)
+        except Exception:
+            for path, data in previous.items():
+                try:
+                    path.write_bytes(data)
+                except OSError:
+                    log.exception("Could not restore %s", path)
+            raise
+        self._content_cache.clear()
+        return {
+            "beatgrid": waveform.decode_beatgrid(waveform.read_tags(dat)),
+            "cues": self.cues(content_id),
+            "bpm": constant_bpm,
+        }
 
     def cues(self, content_id: str) -> list[dict]:
         content = self._content(content_id)

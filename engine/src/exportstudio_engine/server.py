@@ -43,6 +43,7 @@ class Engine:
             "cue.addMemory": lambda id, ms: self.lib.add_memory_cue(id, ms),
             "cue.delete": lambda id, cueId: self.lib.delete_cue(id, cueId),
             "cue.setColor": lambda id, cueId, colorIndex: self.lib.set_cue_color(id, cueId, colorIndex),
+            "beatgrid.set": lambda id, times, beats, bpms, cues=None: self.lib.set_beatgrid(id, times, beats, bpms, cues),
             "media.resolve": lambda kind, id, size="": self.lib.resolve_media(kind, id, size),
         }
 

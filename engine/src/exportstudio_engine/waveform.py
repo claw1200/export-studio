@@ -1,4 +1,5 @@
 import base64
+import os
 import struct
 from pathlib import Path
 
@@ -13,7 +14,11 @@ DETAIL_BANDS_TAG = "PWV7"
 PREVIEW_BANDS_TAG = "PWV6"
 MONO_TAG = "PWV3"
 BEATGRID_TAG = "PQTZ"
+EXTENDED_BEATGRID_TAG = "PQT2"
 HOT_CUE_TAG = "PCO2"
+FILE_LENGTH_OFFSET = 8
+TAG_LENGTH_OFFSET = 8
+PQT2_ANCHORS_OFFSET = 24
 
 RGB_BITS = 0x7
 HEIGHT_BITS = 0x1F
@@ -139,6 +144,52 @@ def decode_beatgrid(dat: Tags | None) -> dict | None:
         "beats": entries["beat"].astype(int).tolist(),
         "bpms": (entries["tempo"] / 100).round(2).tolist(),
     }
+
+
+def build_beatgrid(tag: memoryview, times: list[int], beats: list[int], bpms: list[float]) -> bytes:
+    len_header = struct.unpack_from(">I", tag, 4)[0]
+    entries = np.empty(len(times), dtype=_BEAT)
+    entries["time"] = times
+    entries["beat"] = beats
+    entries["tempo"] = np.round(np.asarray(bpms, dtype=np.float64) * 100)
+    body = entries.tobytes()
+    header = bytearray(tag[:len_header])
+    struct.pack_into(">I", header, TAG_LENGTH_OFFSET, len_header + len(body))
+    struct.pack_into(">I", header, BEAT_COUNT_OFFSET, len(times))
+    return bytes(header) + body
+
+
+def clear_extended_beatgrid(tag: memoryview) -> bytes:
+    """Empty PQT2, as rekordbox writes for many tracks. Its per-beat data can't be rebuilt, so players fall back to PQTZ."""
+    len_header = struct.unpack_from(">I", tag, 4)[0]
+    header = bytearray(tag[:len_header])
+    header[PQT2_ANCHORS_OFFSET:] = bytes(len_header - PQT2_ANCHORS_OFFSET)
+    struct.pack_into(">I", header, TAG_LENGTH_OFFSET, len_header)
+    return bytes(header)
+
+
+def write_tags(path: Path, replace: dict[str, bytes]) -> None:
+    data = path.read_bytes()
+    if data[:4] != b"PMAI":
+        raise ValueError(f"Not an ANLZ file: {path}")
+    (file_header,) = struct.unpack_from(">I", data, 4)
+    out = bytearray(data[:file_header])
+    pos = file_header
+    pending = dict(replace)
+    while pos + TAG_HEADER_BYTES <= len(data):
+        kind = data[pos : pos + 4].decode("ascii", "replace")
+        _len_header, len_tag = struct.unpack_from(">II", data, pos + 4)
+        if len_tag < TAG_HEADER_BYTES:
+            break
+        out += pending.pop(kind) if kind in pending else data[pos : pos + len_tag]
+        pos += len_tag
+    if pending:
+        raise ValueError(f"{path.name} has no {', '.join(pending)} tag")
+    out += data[pos:]
+    struct.pack_into(">I", out, FILE_LENGTH_OFFSET, len(out))
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(out)
+    os.replace(tmp, path)
 
 
 def hot_cue_colors(ext: Tags | None) -> dict[tuple[int, int], str]:

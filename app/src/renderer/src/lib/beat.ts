@@ -93,3 +93,121 @@ export function bpmAt(seconds: number, grid: Beatgrid | null, fallback = 0): num
   if (!grid?.times.length) return fallback
   return grid.bpms[lastIndexAtOrBefore(grid.times, seconds * 1000)]
 }
+
+export interface GridDraft extends Beatgrid {
+  /** Where beat 0 sits, counted in beats of the saved grid. Lets cues follow the edit. */
+  origin: number
+  /** Saved-grid beats per draft beat. */
+  scale: number
+}
+
+export const MIN_GRID_BPM = 40
+export const MAX_GRID_BPM = 300
+const FALLBACK_STEP_MS = 500
+
+export function draftOf(grid: Beatgrid): GridDraft {
+  return { times: [...grid.times], beats: [...grid.beats], bpms: [...grid.bpms], origin: 0, scale: 1 }
+}
+
+function stepAt(bpms: readonly number[], index: number): number {
+  const bpm = bpms[index]
+  return bpm > 0 ? 60_000 / bpm : FALLBACK_STEP_MS
+}
+
+function cycleBeat(beat: number, delta: number): number {
+  return ((((beat - 1 + delta) % BEATS_PER_BAR) + BEATS_PER_BAR) % BEATS_PER_BAR) + 1
+}
+
+function fractionalIndex(grid: Beatgrid, ms: number): number {
+  const { times, bpms } = grid
+  const last = times.length - 1
+  if (ms < times[0]) return (ms - times[0]) / stepAt(bpms, 0)
+  if (ms >= times[last]) return last + (ms - times[last]) / stepAt(bpms, last)
+  const i = lastIndexAtOrBefore(times, ms)
+  const span = times[i + 1] - times[i]
+  return i + (span > 0 ? (ms - times[i]) / span : 0)
+}
+
+function timeAtIndex(grid: Beatgrid, index: number): number {
+  const { times, bpms } = grid
+  const last = times.length - 1
+  if (index <= 0) return times[0] + index * stepAt(bpms, 0)
+  if (index >= last) return times[last] + (index - last) * stepAt(bpms, last)
+  const i = Math.floor(index)
+  return times[i] + (index - i) * (times[i + 1] - times[i])
+}
+
+function fitToTrack(draft: GridDraft, durationMs: number): GridDraft {
+  const times = [...draft.times]
+  const beats = [...draft.beats]
+  const bpms = [...draft.bpms]
+  let origin = draft.origin
+  const { scale } = draft
+  while (times.length > 1 && times[0] < 0) {
+    times.shift()
+    beats.shift()
+    bpms.shift()
+    origin += scale
+  }
+  while (times[0] - stepAt(bpms, 0) >= 0) {
+    times.unshift(times[0] - stepAt(bpms, 0))
+    beats.unshift(cycleBeat(beats[0], -1))
+    bpms.unshift(bpms[0])
+    origin -= scale
+  }
+  while (times.length > 1 && times[times.length - 1] > durationMs) {
+    times.pop()
+    beats.pop()
+    bpms.pop()
+  }
+  for (let last = times.length - 1; times[last] + stepAt(bpms, last) <= durationMs; last++) {
+    times.push(times[last] + stepAt(bpms, last))
+    beats.push(cycleBeat(beats[last], 1))
+    bpms.push(bpms[last])
+  }
+  return { times, beats, bpms, origin, scale }
+}
+
+export function shiftGrid(draft: GridDraft, ms: number, durationMs: number): GridDraft {
+  const { times } = draft
+  if (!times.length) return draft
+  const offset = Math.max(-times[times.length - 1], Math.min(Math.max(0, durationMs - times[0]), ms))
+  return fitToTrack({ ...draft, times: times.map((t) => t + offset) }, durationMs)
+}
+
+/** Constant-tempo grid through the beat nearest `anchorMs`. `density` is draft beats per old draft beat. */
+export function retempoGrid(
+  draft: GridDraft,
+  bpm: number,
+  anchorMs: number,
+  durationMs: number,
+  density = 1
+): GridDraft {
+  if (!draft.times.length) return draft
+  const tempo = Math.round(Math.max(MIN_GRID_BPM, Math.min(MAX_GRID_BPM, bpm)) * 100) / 100
+  const anchor = nearestBeatIndex(draft.times, anchorMs)
+  const anchorMsExact = draft.times[anchor]
+  const anchorCoord = draft.origin + anchor * draft.scale
+  const scale = draft.scale / density
+  const step = 60_000 / tempo
+  const before = Math.floor(anchorMsExact / step)
+  const end = Math.max(durationMs, anchorMsExact)
+  const times: number[] = []
+  const beats: number[] = []
+  const bpms: number[] = []
+  for (let j = 0; ; j++) {
+    const t = anchorMsExact + (j - before) * step
+    if (t > end + 0.5) break
+    times.push(t)
+    beats.push(cycleBeat(draft.beats[anchor], j - before))
+    bpms.push(tempo)
+  }
+  return { times, beats, bpms, origin: anchorCoord - before * scale, scale }
+}
+
+/** Moves a time from one grid onto another, keeping its position relative to the beats. */
+export function remapTime(ms: number, from: Beatgrid | GridDraft, to: GridDraft): number {
+  if (!from.times.length || !to.times.length) return ms
+  const coord = 'origin' in from ? from.origin + fractionalIndex(from, ms) * from.scale : fractionalIndex(from, ms)
+  return timeAtIndex(to, (coord - to.origin) / to.scale)
+}

@@ -58,6 +58,18 @@ export interface Beatgrid {
   bpms: number[]
 }
 
+export interface CueMove {
+  id: string
+  start: number
+  end: number | null
+}
+
+export interface BeatgridSaved {
+  beatgrid: Beatgrid | null
+  cues: Cue[]
+  bpm: number | null
+}
+
 export interface WaveformPayload {
   rate: number
   rgb: { length: number; heights: string; colors: string } | null

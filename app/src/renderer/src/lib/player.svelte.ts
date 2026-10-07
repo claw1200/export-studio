@@ -1,8 +1,8 @@
 import { api, audioUrl } from './api'
-import { bpmAt, nearestBeat } from './beat'
+import { bpmAt, draftOf, type GridDraft, nearestBeat, remapTime, retempoGrid, shiftGrid } from './beat'
 import { Lru } from './lru'
 import { cachedWaveSamples, loadWaveSamples, type WaveSamples } from './peaks'
-import type { Cue, Track, TrackDetail } from './types'
+import type { Cue, CueMove, Track, TrackDetail } from './types'
 import { decodeWaveform, type Waveform, type WaveformMode } from './waveform'
 
 type DetailEntry = { detail: TrackDetail; waveform: Waveform | null }
@@ -71,6 +71,19 @@ export class Player {
   loopIn = $state<number | null>(null)
   cueHeld = $state(false)
   previewAt = $state<number | null>(null)
+  gridEditing = $state(false)
+  gridDraft = $state.raw<GridDraft | null>(null)
+  gridDirty = $state(false)
+  gridLink = $state(storedFlag('gridLink', true))
+  readonly displayGrid = $derived(this.gridDraft ?? this.detail?.beatgrid ?? null)
+  readonly displayCues = $derived.by(() => {
+    const cues = this.detail?.cues ?? []
+    const saved = this.detail?.beatgrid
+    const draft = this.gridDraft
+    if (!this.gridLink || !this.gridDirty || !saved || !draft) return cues
+    const move = (ms: number): number => Math.max(0, Math.round(remapTime(ms, saved, draft)))
+    return cues.map((cue) => ({ ...cue, start: move(cue.start), end: cue.end == null ? null : move(cue.end) }))
+  })
   private previewOwner: string | null = null
   private cueLatched = false
   private unmuteVolume = 1
@@ -118,7 +131,9 @@ export class Player {
       if (this.deferred) this.syncElement()
     })
     api.onEvent((event) => {
-      if (event === 'library.locked') void this.refreshDetail()
+      if (event !== 'library.locked') return
+      this.cancelGridEdit()
+      void this.refreshDetail()
     })
     this.audio.addEventListener('error', () => {
       if (this.sourceWasReplaced()) return
@@ -250,6 +265,7 @@ export class Player {
     this.cueLatched = false
     this.previewOwner = null
     this.previewAt = null
+    this.cancelGridEdit()
     this.track = track
     this.detail = null
     this.waveform = null
@@ -377,13 +393,13 @@ export class Player {
   }
 
   triggerHotCue(kind: number): void {
-    const cue = this.detail?.cues.find((c) => c.kind === 'hot' && c.slot === kind)
+    const cue = this.displayCues.find((c) => c.kind === 'hot' && c.slot === kind)
     if (cue) this.seek(cue.start / 1000)
     else void this.setHotCue(kind)
   }
 
   callMemoryCue(direction: -1 | 1): void {
-    const starts = (this.detail?.cues ?? [])
+    const starts = this.displayCues
       .filter((c) => c.kind === 'memory')
       .map((c) => c.start / 1000)
       .sort((a, b) => a - b)
@@ -404,7 +420,7 @@ export class Player {
     const tolerance = this.cueHitTolerance()
     let nearest: Cue | null = null
     let nearestGap = Infinity
-    for (const cue of this.detail?.cues ?? []) {
+    for (const cue of this.displayCues) {
       const gap = Math.abs(cue.start / 1000 - this.position)
       if (gap <= tolerance && gap < nearestGap) {
         nearest = cue
@@ -421,7 +437,7 @@ export class Player {
 
   private cueHitTolerance(): number {
     if (!this.quantise) return CUE_HIT_TOLERANCE
-    const bpm = bpmAt(this.position, this.detail?.beatgrid ?? null, this.track?.bpm ?? 0)
+    const bpm = bpmAt(this.position, this.displayGrid, this.track?.bpm ?? 0)
     return bpm > 0 ? 30 / bpm : CUE_HIT_TOLERANCE
   }
 
@@ -435,7 +451,7 @@ export class Player {
 
   private async editCues(write: (id: string) => Promise<Cue[]>): Promise<void> {
     const id = this.track?.id
-    if (!id || !this.detail || this.editing) return
+    if (!id || !this.detail || this.editing || this.gridEditing) return
     this.editing = true
     this.editError = null
     try {
@@ -460,7 +476,107 @@ export class Player {
 
   quantised(seconds: number): number {
     if (!this.quantise) return seconds
-    return nearestBeat(seconds, this.detail?.beatgrid ?? null)
+    return nearestBeat(seconds, this.displayGrid)
+  }
+
+  get canEditGrid(): boolean {
+    return !!this.detail?.beatgrid?.times.length
+  }
+
+  beginGridEdit(): void {
+    const grid = this.detail?.beatgrid
+    if (!grid?.times.length || this.gridEditing) return
+    this.gridDraft = draftOf(grid)
+    this.gridDirty = false
+    this.gridEditing = true
+    this.editError = null
+  }
+
+  cancelGridEdit(): void {
+    this.gridEditing = false
+    this.gridDraft = null
+    this.gridDirty = false
+  }
+
+  setGridLink(on: boolean): void {
+    this.gridLink = on
+    storeFlag('gridLink', on)
+  }
+
+  private trackMs(): number {
+    const span = this.waveform ? this.waveform.length / this.waveform.rate : 0
+    return Math.max(this.duration, span) * 1000
+  }
+
+  private updateDraft(draft: GridDraft): void {
+    this.gridDraft = draft
+    this.gridDirty = true
+  }
+
+  /** Shifts `base` (the current draft by default) by `ms`, so drags can work from their starting grid. */
+  nudgeGrid(ms: number, base: GridDraft | null = this.gridDraft): void {
+    if (!this.gridEditing || !base) return
+    this.updateDraft(shiftGrid(base, ms, this.trackMs()))
+  }
+
+  private retempo(bpm: (current: number) => number, density = 1): void {
+    const draft = this.gridDraft
+    if (!this.gridEditing || !draft) return
+    const current = bpmAt(this.position, draft)
+    if (!(current > 0)) return
+    this.updateDraft(retempoGrid(draft, bpm(current), this.position * 1000, this.trackMs(), density))
+  }
+
+  adjustGridBpm(delta: number): void {
+    this.retempo((current) => current + delta)
+  }
+
+  halveGrid(): void {
+    this.retempo((current) => current / 2, 0.5)
+  }
+
+  doubleGrid(): void {
+    this.retempo((current) => current * 2, 2)
+  }
+
+  private movedCues(): CueMove[] {
+    if (!this.gridLink) return []
+    const before = new Map((this.detail?.cues ?? []).map((c) => [c.id, c]))
+    return this.displayCues
+      .filter((c) => {
+        const was = before.get(c.id)
+        return was && (was.start !== c.start || was.end !== c.end)
+      })
+      .map((c) => ({ id: c.id, start: c.start, end: c.end }))
+  }
+
+  async saveGrid(): Promise<void> {
+    const id = this.track?.id
+    const draft = this.gridDraft
+    if (!id || !this.detail || !draft || this.editing) return
+    if (!this.gridDirty) {
+      this.cancelGridEdit()
+      return
+    }
+    const grid = { times: draft.times.map((t) => Math.round(t)), beats: draft.beats, bpms: draft.bpms }
+    const moves = this.movedCues()
+    this.editing = true
+    this.editError = null
+    try {
+      const saved = await api.setBeatgrid(id, grid, moves)
+      if (this.track?.id !== id || !this.detail) {
+        detailCache.delete(id)
+        return
+      }
+      this.detail = { ...this.detail, beatgrid: saved.beatgrid, cues: saved.cues }
+      if (saved.bpm != null && this.track) this.track = { ...this.track, bpm: saved.bpm }
+      detailCache.set(id, Promise.resolve({ detail: this.detail, waveform: this.waveform }))
+      this.cancelGridEdit()
+    } catch (e) {
+      if (this.track?.id === id) this.editError = (e as Error).message
+    } finally {
+      this.editing = false
+    }
   }
 
   setMode(mode: WaveformMode): void {

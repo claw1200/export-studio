@@ -1,4 +1,4 @@
-import type { Cue, LibraryInfo, Track, TrackDetail, TreeItem } from './types'
+import type { Beatgrid, BeatgridSaved, Cue, CueMove, LibraryInfo, Track, TrackDetail, TreeItem } from './types'
 
 const call = window.api.call
 
@@ -19,6 +19,8 @@ export const api = {
   deleteCue: (id: string, cueId: string) => call<Cue[]>('cue.delete', { id, cueId }),
   setCueColor: (id: string, cueId: string, colorIndex: number | null) =>
     call<Cue[]>('cue.setColor', { id, cueId, colorIndex }),
+  setBeatgrid: (id: string, grid: Beatgrid, cues: CueMove[]) =>
+    call<BeatgridSaved>('beatgrid.set', { id, times: grid.times, beats: grid.beats, bpms: grid.bpms, cues }),
   onEvent: window.api.onEvent,
   showItemInFolder: window.api.showItemInFolder
 }
