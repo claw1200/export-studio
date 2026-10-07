@@ -179,7 +179,7 @@ class Library:
     def _open_snapshot(self) -> None:
         self.close()
         signature = _source_signature(self.src)
-        snap = Path(tempfile.mkdtemp(prefix="clubready-"))
+        snap = Path(tempfile.mkdtemp(prefix="exportstudio-"))
         for suf in DB_SUFFIXES:
             p = self.src.with_name(self.src.name + suf)
             if p.exists():

@@ -1,5 +1,5 @@
-appId: com.clubready.app
-productName: ClubReady
+appId: com.exportstudio.app
+productName: ExportStudio
 directories:
   buildResources: build
 files:
@@ -13,10 +13,10 @@ files:
 asarUnpack:
   - resources/**
 extraResources:
-  - from: ../engine/dist/clubready-engine
+  - from: ../engine/dist/exportstudio-engine
     to: engine
 win:
-  executableName: ClubReady
+  executableName: ExportStudio
   target: nsis
 nsis:
   artifactName: ${productName}-${version}-Windows-setup.${ext}

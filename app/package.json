@@ -1,6 +1,6 @@
 {
-  "name": "clubready",
-  "productName": "ClubReady",
+  "name": "exportstudio",
+  "productName": "ExportStudio",
   "version": "0.1.0",
   "description": "A modern library browser for rekordbox",
   "main": "./out/main/index.js",
@@ -15,7 +15,7 @@
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
-    "build:engine": "cd ../engine && uv run pyinstaller --noconfirm --onedir --name clubready-engine --collect-data pyrekordbox --collect-binaries sqlcipher3 --hidden-import sqlcipher3.dbapi2 --log-level WARN entry.py",
+    "build:engine": "cd ../engine && uv run pyinstaller --noconfirm --onedir --name exportstudio-engine --collect-data pyrekordbox --collect-binaries sqlcipher3 --hidden-import sqlcipher3.dbapi2 --log-level WARN entry.py",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && npm run build:engine && electron-builder --dir",
     "build:win": "npm run build && npm run build:engine && electron-builder --win",

@@ -21,7 +21,7 @@ wheels = [
 ]
 
 [[package]]
-name = "clubready-engine"
+name = "exportstudio-engine"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

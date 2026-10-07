@@ -6,7 +6,7 @@ import traceback
 
 from .library import Library
 
-log = logging.getLogger("clubready_engine")
+log = logging.getLogger("exportstudio_engine")
 
 _out = sys.stdout
 _out_lock = threading.Lock()

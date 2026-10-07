@@ -19,10 +19,10 @@ export class EngineError extends Error {
 function engineCommand(): { cmd: string; args: string[]; cwd: string } {
   if (is.dev) {
     const cwd = resolve(app.getAppPath(), '..', 'engine')
-    return { cmd: 'uv', args: ['run', '--quiet', 'clubready-engine'], cwd }
+    return { cmd: 'uv', args: ['run', '--quiet', 'exportstudio-engine'], cwd }
   }
   const dir = join(process.resourcesPath, 'engine')
-  const exe = process.platform === 'win32' ? 'clubready-engine.exe' : 'clubready-engine'
+  const exe = process.platform === 'win32' ? 'exportstudio-engine.exe' : 'exportstudio-engine'
   return { cmd: join(dir, exe), args: [], cwd: dir }
 }
 

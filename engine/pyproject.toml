@@ -1,7 +1,7 @@
 [project]
-name = "clubready-engine"
+name = "exportstudio-engine"
 version = "0.1.0"
-description = "Library engine for ClubReady: reads rekordbox 6/7 libraries via pyrekordbox"
+description = "Library engine for ExportStudio: reads rekordbox 6/7 libraries via pyrekordbox"
 readme = "README.md"
 authors = [
     { name = "claw1200", email = "carstenwood12@gmail.com" }
@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-clubready-engine = "clubready_engine:main"
+exportstudio-engine = "exportstudio_engine:main"
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]

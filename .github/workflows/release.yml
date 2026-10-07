@@ -131,7 +131,7 @@ jobs:
           set -euo pipefail
           chmod +x packaging/macos/notarize.sh
           shopt -s nullglob
-          dmgs=(app/dist/ClubReady-"${VERSION}"-macOS-*.dmg)
+          dmgs=(app/dist/ExportStudio-"${VERSION}"-macOS-*.dmg)
           if [[ ${#dmgs[@]} -eq 0 ]]; then
             echo "error: no macOS disk image found in app/dist" >&2
             exit 1
@@ -143,7 +143,7 @@ jobs:
       - name: Upload release assets
         uses: softprops/action-gh-release@v3
         with:
-          files: app/dist/ClubReady-${{ env.VERSION }}-macOS-*.dmg
+          files: app/dist/ExportStudio-${{ env.VERSION }}-macOS-*.dmg
           fail_on_unmatched_files: true
           overwrite_existing: true
 
@@ -198,6 +198,6 @@ jobs:
       - name: Upload release assets
         uses: softprops/action-gh-release@v3
         with:
-          files: app/dist/ClubReady-${{ env.VERSION }}-Windows-setup.exe
+          files: app/dist/ExportStudio-${{ env.VERSION }}-Windows-setup.exe
           fail_on_unmatched_files: true
           overwrite_existing: true

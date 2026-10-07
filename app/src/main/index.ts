@@ -50,7 +50,7 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.clubready.app')
+  electronApp.setAppUserModelId('com.exportstudio.app')
   nativeTheme.themeSource = 'dark'
 
   app.on('browser-window-created', (_, window) => {
