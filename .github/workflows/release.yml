@@ -1,0 +1,202 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build and upload (macOS)
+    runs-on: macos-latest
+    env:
+      MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Require Apple signing secrets
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in MACOS_CERTIFICATE_BASE64 MACOS_CERTIFICATE_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "error: set repo secret ${name} (same names as perfect-sidechain)" >&2
+              missing=1
+            fi
+          done
+          exit "${missing}"
+
+      - name: Import code signing certificate
+        run: |
+          KEYCHAIN_PATH="${RUNNER_TEMP}/build.keychain"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+
+          echo "${MACOS_CERTIFICATE_BASE64}" | base64 --decode > "${RUNNER_TEMP}/certificate.p12"
+          security import "${RUNNER_TEMP}/certificate.p12" \
+            -P "${MACOS_CERTIFICATE_PASSWORD}" \
+            -A -t cert -f pkcs12 \
+            -k "${KEYCHAIN_PATH}"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security list-keychains -d user -s "${KEYCHAIN_PATH}" login.keychain
+          security default-keychain -s "${KEYCHAIN_PATH}"
+          echo "CSC_KEYCHAIN=${KEYCHAIN_PATH}" >> "${GITHUB_ENV}"
+
+      - name: Resolve signing identity from keychain
+        run: |
+          set -uo pipefail
+          identities_app="$(security find-identity -v -p codesigning)"
+          identities_all="$(security find-identity -v -p basic)"
+          extract_identity() {
+            local pattern="$1"
+            local source="$2"
+            local line name
+            line="$(printf '%s\n' "${source}" | grep -F "${pattern}" | head -1 || true)"
+            [[ -n "${line}" ]] || return 0
+            name="${line#*\"}"
+            printf '%s' "${name%\"*}"
+          }
+          app_id="$(extract_identity 'Developer ID Application:' "${identities_app}")"
+          if [[ -z "${app_id}" ]]; then
+            app_id="$(extract_identity 'Developer ID Application:' "${identities_all}")"
+          fi
+          if [[ -z "${app_id}" ]]; then
+            echo "error: could not find a Developer ID Application identity in the keychain" >&2
+            echo "--- codesigning identities ---"
+            printf '%s\n' "${identities_app}"
+            echo "--- basic policy identities ---"
+            printf '%s\n' "${identities_all}"
+            exit 1
+          fi
+          {
+            echo "MACOS_APP_SIGN_IDENTITY<<EOF"
+            printf '%s\n' "${app_id}"
+            echo "EOF"
+          } >> "${GITHUB_ENV}"
+          echo "Application: ${app_id}"
+
+      - name: Resolve version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          if [ -z "${VERSION}" ]; then
+            echo "error: release tag is empty" >&2
+            exit 1
+          fi
+          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
+          echo "VERSION=${VERSION}"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: engine/uv.lock
+
+      - name: Install Python
+        working-directory: engine
+        run: uv python install 3.12
+
+      - name: Install app dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build macOS release
+        working-directory: app
+        run: |
+          npm run build:mac -- --publish never \
+            -c.extraMetadata.version="${VERSION}" \
+            -c.mac.forceCodeSigning=true
+
+      - name: Notarize disk image
+        run: |
+          set -euo pipefail
+          chmod +x packaging/macos/notarize.sh
+          shopt -s nullglob
+          dmgs=(app/dist/ClubReady-"${VERSION}"-macOS-*.dmg)
+          if [[ ${#dmgs[@]} -eq 0 ]]; then
+            echo "error: no macOS disk image found in app/dist" >&2
+            exit 1
+          fi
+          for dmg in "${dmgs[@]}"; do
+            ./packaging/macos/notarize.sh "${dmg}"
+          done
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v3
+        with:
+          files: app/dist/ClubReady-${{ env.VERSION }}-macOS-*.dmg
+          fail_on_unmatched_files: true
+          overwrite_existing: true
+
+  build-windows:
+    name: Build and upload (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve version
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          $version = $env:RELEASE_TAG -replace '^v',''
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            Write-Error "release tag is empty"
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+          Write-Host "VERSION=$version"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: engine/uv.lock
+
+      - name: Install Python
+        working-directory: engine
+        run: uv python install 3.12
+
+      - name: Install app dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build Windows release
+        working-directory: app
+        run: npm run build:win -- --publish never -c.extraMetadata.version="${{ env.VERSION }}"
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v3
+        with:
+          files: app/dist/ClubReady-${{ env.VERSION }}-Windows-setup.exe
+          fail_on_unmatched_files: true
+          overwrite_existing: true

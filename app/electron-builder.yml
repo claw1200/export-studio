@@ -19,15 +19,17 @@ win:
   executableName: ClubReady
   target: nsis
 nsis:
-  artifactName: ${productName}-${version}-setup.${ext}
+  artifactName: ${productName}-${version}-Windows-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
   target: dmg
   category: public.app-category.music
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
-  notarize: false
 dmg:
-  artifactName: ${productName}-${version}.${ext}
+  sign: true
+  artifactName: ${productName}-${version}-macOS-${arch}.${ext}
 npmRebuild: false
