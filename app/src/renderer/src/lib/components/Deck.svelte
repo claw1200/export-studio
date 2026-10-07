@@ -18,6 +18,7 @@
   import { cueColor, type WaveformMode } from '$lib/waveform'
   import WaveformDetail from './WaveformDetail.svelte'
   import WaveformOverview from './WaveformOverview.svelte'
+  import BpmField from './BpmField.svelte'
 
   const { library, player, keybinds } = getApp()
 
@@ -63,13 +64,11 @@
 
   const gridShortcut = $derived(keybinds.bindings['deck.gridEdit'][0])
   const gridTitle = $derived(
-    (player.gridEditing
-      ? 'Finish editing the beatgrid and save'
-      : !library.writable
-        ? 'Unlock editing to change the beatgrid'
-        : player.canEditGrid
-          ? 'Edit the beatgrid'
-          : 'This track has no beatgrid') + (gridShortcut ? ` (${chordLabel(gridShortcut)})` : '')
+    (!library.writable
+      ? 'Unlock editing to change the beatgrid'
+      : player.canEditGrid
+        ? 'Edit the beatgrid'
+        : 'This track has no beatgrid') + (gridShortcut ? ` (${chordLabel(gridShortcut)})` : '')
   )
 
   function pickColor(cue: Cue, colorIndex: number | null): void {
@@ -93,7 +92,7 @@
 
 <svelte:window
   onkeydown={(e) => {
-    if (e.key !== 'Escape') return
+    if (e.key !== 'Escape' || e.defaultPrevented) return
     if (colorPickerCueId) colorPickerCueId = null
     else if (player.gridEditing && !player.editing) player.cancelGridEdit()
   }}
@@ -101,7 +100,7 @@
 
 {#snippet gridButton(label: string, title: string, onclick: (e: MouseEvent) => void)}
   <button
-    class="tabular h-6 rounded px-1.5 font-mono text-[10.5px] font-semibold text-muted hover:bg-raised hover:text-fg disabled:opacity-40"
+    class="tabular h-6 min-w-7 rounded border border-line-soft px-1.5 font-mono text-[11px] font-semibold text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
     disabled={player.editing}
     {title}
     {onclick}
@@ -123,61 +122,6 @@
         {:else}
           Select a track to view its waveform
         {/if}
-      </div>
-    {/if}
-
-    {#if player.gridEditing}
-      <div
-        class="absolute top-2 left-2 flex items-center gap-0.5 rounded-md border border-line bg-bg/85 p-0.5 text-[10.5px] backdrop-blur"
-        role="toolbar"
-        aria-label="Beatgrid"
-      >
-        <span class="tabular px-1.5 font-mono font-semibold text-fg">{formatBpm(currentBpm) || '–'} BPM</span>
-        {@render gridButton('−', 'Lower the BPM by 0.01 (Shift: 0.1)', (e) =>
-          player.adjustGridBpm(e.shiftKey ? -0.1 : -0.01)
-        )}
-        {@render gridButton('+', 'Raise the BPM by 0.01 (Shift: 0.1)', (e) =>
-          player.adjustGridBpm(e.shiftKey ? 0.1 : 0.01)
-        )}
-        {@render gridButton('/2', 'Halve the BPM', () => player.halveGrid())}
-        {@render gridButton('×2', 'Double the BPM', () => player.doubleGrid())}
-        <span class="mx-0.5 h-4 w-px bg-line"></span>
-        <button
-          class={[
-            'grid size-6 place-items-center rounded transition',
-            player.gridLink ? 'bg-accent-soft text-accent' : 'text-faint hover:bg-raised hover:text-muted'
-          ]}
-          onclick={() => player.setGridLink(!player.gridLink)}
-          aria-pressed={player.gridLink}
-          aria-label="Move cues with the grid"
-          title={player.gridLink
-            ? 'Hot cues and memory cues move with the grid'
-            : 'Cues stay where they are when the grid moves'}
-        >
-          {#if player.gridLink}
-            <Link class="size-3.5" />
-          {:else}
-            <Unlink class="size-3.5" />
-          {/if}
-        </button>
-        <span class="mx-0.5 h-4 w-px bg-line"></span>
-        <button
-          class="h-6 rounded px-2 font-semibold text-muted hover:bg-raised hover:text-fg disabled:opacity-40"
-          disabled={player.editing}
-          onclick={() => player.cancelGridEdit()}
-          title="Discard grid changes (Esc)"
-        >
-          Cancel
-        </button>
-        <button
-          class="flex h-6 items-center gap-1 rounded bg-accent px-2 font-semibold text-bg hover:brightness-110 disabled:opacity-40"
-          disabled={player.editing}
-          onclick={saveGrid}
-          title={player.gridDirty ? 'Save the beatgrid to rekordbox' : 'No changes to save'}
-        >
-          {#if player.editing}<LoaderCircle class="size-3 animate-spin" />{/if}
-          Save
-        </button>
       </div>
     {/if}
 
@@ -212,31 +156,102 @@
   </div>
 
   <div class="flex items-center gap-4 px-4 py-3">
-    <div class="size-14 shrink-0 overflow-hidden rounded-md bg-raised shadow-lg shadow-black/40">
-      {#if track?.hasArtwork}
-        <img src={artworkUrl(track.id, 'm')} alt="" class="size-full object-cover" draggable="false" />
-      {:else}
-        <div class="grid size-full place-items-center text-faint"><Music class="size-5" /></div>
-      {/if}
-    </div>
-
-    <div class="w-64 min-w-0 shrink-0">
-      {#if track}
-        <div class="truncate text-[14px] font-semibold text-fg" title={track.title}>{track.title}</div>
-        <div class="truncate text-[12.5px] text-muted">{track.artist || 'Unknown artist'}</div>
-        <div class="tabular mt-1.5 flex items-center gap-1.5 text-[11px]">
-          <span class="rounded bg-raised px-1.5 py-0.5 font-semibold text-fg">{formatBpm(currentBpm)} BPM</span>
-          {#if track.key}
-            <span class="rounded bg-raised px-1.5 py-0.5 font-semibold" style:color={keyColor(track.key) ?? 'inherit'}
-              >{track.key}</span
-            >
-          {/if}
-          <span class="rounded bg-raised px-1.5 py-0.5 text-muted">{track.fileType}</span>
+    {#if player.gridEditing}
+      <div class="flex h-14 w-[328px] shrink-0 flex-col justify-between" role="toolbar" aria-label="Beatgrid editor">
+        <div class="flex items-center gap-1">
+          <span class="mr-auto flex items-baseline gap-1">
+            <BpmField bpm={currentBpm} />
+            <span class="text-[11px] font-medium text-faint">BPM</span>
+          </span>
+          {@render gridButton('−', 'Lower the BPM by 0.01 (Shift: 0.1)', (e) =>
+            player.adjustGridBpm(e.shiftKey ? -0.1 : -0.01)
+          )}
+          {@render gridButton('+', 'Raise the BPM by 0.01 (Shift: 0.1)', (e) =>
+            player.adjustGridBpm(e.shiftKey ? 0.1 : 0.01)
+          )}
+          {@render gridButton('/2', 'Halve the BPM', () => player.halveGrid())}
+          {@render gridButton('×2', 'Double the BPM', () => player.doubleGrid())}
         </div>
-      {:else}
-        <div class="text-[13px] text-faint">No track loaded</div>
-      {/if}
-    </div>
+        <div class="flex items-center gap-1">
+          {@render gridButton('Set', 'Move the nearest beat to the playhead and make it the downbeat', () =>
+            player.setDownbeatHere()
+          )}
+          <button
+            class={[
+              'grid size-6 place-items-center rounded border transition',
+              player.gridLink
+                ? 'border-transparent bg-accent-soft text-accent'
+                : 'border-line-soft text-faint hover:bg-hover hover:text-muted'
+            ]}
+            onclick={() => player.setGridLink(!player.gridLink)}
+            aria-pressed={player.gridLink}
+            aria-label="Move cues with the grid"
+            title={player.gridLink
+              ? 'Hot cues and memory cues move with the grid'
+              : 'Cues stay where they are when the grid moves'}
+          >
+            {#if player.gridLink}
+              <Link class="size-3.5" />
+            {:else}
+              <Unlink class="size-3.5" />
+            {/if}
+          </button>
+          <button
+            class="ml-auto h-6 rounded px-2 text-[11px] font-semibold text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
+            disabled={player.editing}
+            onclick={() => player.cancelGridEdit()}
+            title="Discard grid changes (Esc)"
+          >
+            Cancel
+          </button>
+          <button
+            class="flex h-6 items-center gap-1 rounded bg-accent px-2.5 text-[11px] font-semibold text-bg hover:brightness-110 disabled:opacity-40"
+            disabled={player.editing}
+            onclick={saveGrid}
+            title={player.gridDirty ? 'Save the beatgrid to rekordbox' : 'No changes to save'}
+          >
+            {#if player.editing}<LoaderCircle class="size-3 animate-spin" />{/if}
+            Save
+          </button>
+        </div>
+      </div>
+    {:else}
+      <div class="size-14 shrink-0 overflow-hidden rounded-md bg-raised shadow-lg shadow-black/40">
+        {#if track?.hasArtwork}
+          <img src={artworkUrl(track.id, 'm')} alt="" class="size-full object-cover" draggable="false" />
+        {:else}
+          <div class="grid size-full place-items-center text-faint"><Music class="size-5" /></div>
+        {/if}
+      </div>
+
+      <div class="w-64 min-w-0 shrink-0">
+        {#if track}
+          <div class="truncate text-[14px] font-semibold text-fg" title={track.title}>{track.title}</div>
+          <div class="truncate text-[12.5px] text-muted">{track.artist || 'Unknown artist'}</div>
+          <div class="tabular mt-1.5 flex items-center gap-1.5 text-[11px]">
+            <span class="rounded bg-raised px-1.5 py-0.5 font-semibold text-fg">{formatBpm(currentBpm)} BPM</span>
+            {#if track.key}
+              <span class="rounded bg-raised px-1.5 py-0.5 font-semibold" style:color={keyColor(track.key) ?? 'inherit'}
+                >{track.key}</span
+              >
+            {/if}
+            <span class="rounded bg-raised px-1.5 py-0.5 text-muted">{track.fileType}</span>
+            <button
+              class="ml-auto flex items-center gap-1 rounded border border-line-soft px-1.5 py-px font-semibold text-faint transition hover:bg-hover hover:text-muted disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-faint"
+              disabled={!gridEditable}
+              onclick={toggleGridEdit}
+              aria-label="Edit beatgrid"
+              title={gridTitle}
+            >
+              <Pencil class="size-2.5" />
+              Grid
+            </button>
+          </div>
+        {:else}
+          <div class="text-[13px] text-faint">No track loaded</div>
+        {/if}
+      </div>
+    {/if}
 
     <div class="h-12 min-w-0 flex-1">
       <WaveformOverview />
@@ -390,21 +405,7 @@
 
     <span class="ml-3 text-[11px] text-faint">{memoryCount} memory cues</span>
 
-    <div class="ml-auto flex items-center gap-1.5">
-      <button
-        class={[
-          'flex h-7 items-center rounded-md border px-2 text-[11px] font-semibold transition disabled:opacity-40',
-          player.gridEditing
-            ? 'border-transparent bg-accent-soft text-accent'
-            : 'border-line-soft text-faint hover:bg-hover hover:text-muted'
-        ]}
-        disabled={!player.gridEditing && !gridEditable}
-        onclick={toggleGridEdit}
-        aria-pressed={player.gridEditing}
-        title={gridTitle}
-      >
-        Grid
-      </button>
+    <div class="ml-auto flex items-center gap-3">
       <button
         class={[
           'flex h-7 items-center rounded-md border px-2 text-[11px] font-semibold transition',

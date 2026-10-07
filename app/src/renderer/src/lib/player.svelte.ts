@@ -1,5 +1,5 @@
 import { api, audioUrl } from './api'
-import { bpmAt, draftOf, type GridDraft, nearestBeat, remapTime, retempoGrid, shiftGrid } from './beat'
+import { bpmAt, draftOf, type GridDraft, nearestBeat, remapTime, retempoGrid, setDownbeat, shiftGrid } from './beat'
 import { Lru } from './lru'
 import { cachedWaveSamples, loadWaveSamples, type WaveSamples } from './peaks'
 import type { Cue, CueMove, Track, TrackDetail } from './types'
@@ -519,12 +519,22 @@ export class Player {
     this.updateDraft(shiftGrid(base, ms, this.trackMs()))
   }
 
-  private retempo(bpm: (current: number) => number, density = 1): void {
+  setDownbeatHere(): void {
     const draft = this.gridDraft
+    if (!this.gridEditing || !draft) return
+    this.updateDraft(setDownbeat(draft, this.position * 1000, this.trackMs()))
+  }
+
+  private retempo(bpm: (current: number) => number, density = 1, draft = this.gridDraft): void {
     if (!this.gridEditing || !draft) return
     const current = bpmAt(this.position, draft)
     if (!(current > 0)) return
     this.updateDraft(retempoGrid(draft, bpm(current), this.position * 1000, this.trackMs(), density))
+  }
+
+  /** Sets the tempo of `base` (the current draft by default), so drags can work from their starting grid. */
+  setGridBpm(bpm: number, base: GridDraft | null = this.gridDraft): void {
+    if (Number.isFinite(bpm) && bpm > 0) this.retempo(() => bpm, 1, base)
   }
 
   adjustGridBpm(delta: number): void {

@@ -175,6 +175,14 @@ export function shiftGrid(draft: GridDraft, ms: number, durationMs: number): Gri
   return fitToTrack({ ...draft, times: times.map((t) => t + offset) }, durationMs)
 }
 
+/** Moves the beat nearest `ms` onto `ms` and makes it a downbeat. */
+export function setDownbeat(draft: GridDraft, ms: number, durationMs: number): GridDraft {
+  if (!draft.times.length) return draft
+  const shifted = shiftGrid(draft, ms - draft.times[nearestBeatIndex(draft.times, ms)], durationMs)
+  const delta = 1 - shifted.beats[nearestBeatIndex(shifted.times, ms)]
+  return delta ? { ...shifted, beats: shifted.beats.map((b) => cycleBeat(b, delta)) } : shifted
+}
+
 /** Constant-tempo grid through the beat nearest `anchorMs`. `density` is draft beats per old draft beat. */
 export function retempoGrid(
   draft: GridDraft,
