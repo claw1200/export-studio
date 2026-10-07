@@ -1,3 +1,6 @@
+import { createSubscriber } from 'svelte/reactivity'
+import { fallSlice } from './dsp'
+import { poolSize, runJob } from './pool'
 import type { WaveSamples } from './peaks'
 import type { Beatgrid, Cue, TrackDetail } from './types'
 import { barBeatAt, countdownTo, firstIndexAtOrAfter } from './beat'
@@ -96,34 +99,223 @@ function pixelGrid(from: number, to: number, pw: number): { per: number; first: 
   return { per, first: Math.floor(from / per) }
 }
 
-function holdUntilPeak(current: number, next: number, fraction: number): number {
-  if (next > current) return current
-  return current + (next - current) * fraction
-}
-
 type ColumnSpan =
-  { kind: 'between'; index: number; next: number; fraction: number } | { kind: 'peak'; from: number; to: number }
+  | { kind: 'hold'; index: number; next: number; fraction: number }
+  | { kind: 'peak'; from: number; to: number }
 
 function columnSpan(count: number, start: number, end: number): ColumnSpan | null {
   if (!(end > start) || end <= 0 || start >= count) return null
   if (end - start <= 1) {
     const at = Math.min(count - 1, Math.max(0, (start + end) / 2))
     const index = at | 0
-    return { kind: 'between', index, next: Math.min(count - 1, index + 1), fraction: at - index }
+    return { kind: 'hold', index, next: Math.min(count - 1, index + 1), fraction: at - index }
   }
   return { kind: 'peak', from: Math.max(0, Math.floor(start)), to: Math.min(count, Math.ceil(end)) }
 }
 
-function readAmp(get: (i: number) => number, count: number, start: number, end: number): number {
+/** Slopes down toward the next block. A rise stays flat until the block boundary. */
+function fall(current: number, next: number, fraction: number): number {
+  if (next >= current) return current
+  return current + (next - current) * fraction
+}
+
+function readAmp(get: (i: number) => number, count: number, start: number, end: number, lerpDown: boolean): number {
   const span = columnSpan(count, start, end)
   if (!span) return NaN
-  if (span.kind === 'between') return holdUntilPeak(get(span.index), get(span.next), span.fraction)
+  if (span.kind === 'hold') {
+    return lerpDown ? fall(get(span.index), get(span.next), span.fraction) : get(span.index)
+  }
   let peak = 0
   for (let i = span.from; i < span.to; i++) {
     const value = get(i)
     if (value > peak) peak = value
   }
   return peak
+}
+
+interface FallKey {
+  source: Uint8Array
+  stride: number
+  blocks: number
+}
+
+interface FallReady extends FallKey {
+  data: Uint8Array
+}
+
+let fallReady: FallReady | null = null
+let fallJob: FallKey | null = null
+let fallWant: FallKey | null = null
+let fallTimer: ReturnType<typeof setTimeout> | null = null
+let fallGeneration = 0
+const fallListeners = new Set<() => void>()
+
+function onBandFall(listener: () => void): () => void {
+  fallListeners.add(listener)
+  return () => fallListeners.delete(listener)
+}
+
+const subscribeFall = createSubscriber((update) => onBandFall(update))
+
+export function trackBandFall(): void {
+  subscribeFall()
+}
+
+function logicalCount(src: number, stride: number): number {
+  return stride <= 1 ? src : Math.max(1, Math.floor(src / stride))
+}
+
+function decimateBands(bands: Uint8Array, stride: number): Uint8Array {
+  const src = bands.length / 3
+  const n = logicalCount(src, stride)
+  if (stride <= 1) return bands
+  const out = new Uint8Array(n * 3)
+  for (let i = 0; i < n; i++) {
+    const a = Math.min(src, Math.floor(i * stride))
+    const b = Math.min(src, Math.max(a + 1, Math.ceil((i + 1) * stride)))
+    for (let band = 0; band < 3; band++) {
+      let peak = 0
+      for (let j = a; j < b; j++) {
+        const value = bands[j * 3 + band]
+        if (value > peak) peak = value
+      }
+      out[i * 3 + band] = peak
+    }
+  }
+  return out
+}
+
+function sameKey(key: FallKey | null, source: Uint8Array, stride: number, blocks: number): boolean {
+  return !!key && key.source === source && key.stride === stride && key.blocks === blocks
+}
+
+function columnOf(src: Uint8Array, band: number, reach: number): Uint8Array {
+  const n = src.length / 3
+  const column = new Uint8Array(n + reach)
+  for (let i = 0; i < n; i++) column[i] = src[i * 3 + band]
+  const tail = n > 0 ? column[n - 1] : 0
+  column.fill(tail, n)
+  return column
+}
+
+async function computeFall(src: Uint8Array, blocks: number, live: () => boolean): Promise<Uint8Array | null> {
+  const n = src.length / 3
+  const reach = Math.max(1, Math.round(blocks))
+  if (n < 2) return null
+  const out = new Uint8Array(src.length)
+  const columns = [columnOf(src, 0, reach), columnOf(src, 1, reach), columnOf(src, 2, reach)]
+  const cores = poolSize()
+  const chunk = Math.ceil(n / cores)
+  const work: Array<{ band: number; start: number; count: number; left: number }> = []
+  for (let band = 0; band < 3; band++) {
+    for (let start = 0; start < n; start += chunk) {
+      work.push({ band, start, count: Math.min(chunk, n - start), left: Math.min(start, reach - 1) })
+    }
+  }
+  let next = 0
+  let active = 0
+  let failed: Error | null = null
+  await new Promise<void>((resolve, reject) => {
+    const finish = (): void => {
+      if (active > 0) return
+      if (failed) reject(failed)
+      else resolve()
+    }
+    const kick = (): void => {
+      if (failed) return finish()
+      if (!live()) return finish()
+      while (active < cores && next < work.length && live()) {
+        const item = work[next++]
+        const column = columns[item.band]
+        const copy = new Uint8Array(column.subarray(item.start - item.left, item.start + item.count + reach))
+        active++
+        runJob({ op: 'fall', column: copy, left: item.left, count: item.count, reach }, [copy.buffer]).then(
+          (response) => {
+            active--
+            if (!failed && live() && response.op === 'fall') {
+              const env = response.out
+              for (let i = 0; i < env.length; i++) out[(item.start + i) * 3 + item.band] = env[i]
+            }
+            if (active === 0 && (next >= work.length || !live() || failed)) finish()
+            else kick()
+          },
+          (err: unknown) => {
+            active--
+            failed = err instanceof Error ? err : new Error('fall failed')
+            finish()
+          }
+        )
+      }
+      if (active === 0) finish()
+    }
+    kick()
+  })
+  return live() ? out : null
+}
+
+function launchFall(): void {
+  fallTimer = null
+  const job = fallWant
+  fallWant = null
+  if (!job) return
+  if (sameKey(fallReady, job.source, job.stride, job.blocks)) return
+  const token = ++fallGeneration
+  fallJob = job
+  void (async () => {
+    const decimated = decimateBands(job.source, job.stride)
+    let data: Uint8Array | null = null
+    try {
+      data = await computeFall(decimated, job.blocks, () => token === fallGeneration)
+    } catch (err) {
+      if (token !== fallGeneration) return
+      console.warn('[waveform] fall workers failed', err)
+      data = fallSync(decimated, job.blocks)
+    }
+    if (!data || token !== fallGeneration) return
+    fallReady = { ...job, data }
+    fallJob = null
+    for (const listener of fallListeners) listener()
+  })()
+}
+
+function fallSync(src: Uint8Array, blocks: number): Uint8Array {
+  const n = src.length / 3
+  const reach = Math.max(1, Math.round(blocks))
+  const out = new Uint8Array(src.length)
+  for (let band = 0; band < 3; band++) {
+    const column = columnOf(src, band, reach)
+    const slice = fallSlice(column, 0, n, reach)
+    for (let i = 0; i < n; i++) out[i * 3 + band] = slice[i]
+  }
+  return out
+}
+
+function bandFall(source: Uint8Array, stride: number, blocks: number): Uint8Array | null {
+  if (blocks < 1 || source.length < 3) {
+    fallWant = null
+    if (fallTimer) clearTimeout(fallTimer)
+    fallTimer = null
+    fallGeneration++
+    fallJob = null
+    return null
+  }
+  if (sameKey(fallReady, source, stride, blocks)) return fallReady!.data
+  if (!sameKey(fallJob, source, stride, blocks) && !sameKey(fallWant, source, stride, blocks)) {
+    const retune =
+      (!!fallReady && fallReady.source === source) ||
+      (!!fallJob && fallJob.source === source) ||
+      (!!fallWant && fallWant.source === source)
+    fallWant = { source, stride, blocks }
+    if (retune) {
+      if (!fallTimer) fallTimer = setTimeout(launchFall, 80)
+    } else {
+      if (fallTimer) clearTimeout(fallTimer)
+      fallTimer = null
+      launchFall()
+    }
+  }
+  if (fallReady && fallReady.source === source && fallReady.stride === stride) return fallReady.data
+  return null
 }
 
 function readRgbColumn(
@@ -135,12 +327,7 @@ function readRgbColumn(
 ): { amp: number; color: number } | null {
   const span = columnSpan(count, start, end)
   if (!span) return null
-  if (span.kind === 'between') {
-    return {
-      amp: holdUntilPeak(heights[span.index], heights[span.next], span.fraction) / 255,
-      color: packColor(colors, span.index)
-    }
-  }
+  if (span.kind === 'hold') return { amp: heights[span.index] / 255, color: packColor(colors, span.index) }
   let peak = -1
   let peakIndex = span.from
   for (let i = span.from; i < span.to; i++) {
@@ -157,7 +344,8 @@ function paintColumns(
   pw: number,
   ph: number,
   anchor: 'bottom' | 'center',
-  colorAt: (x: number) => string
+  colorAt: (x: number) => string,
+  smooth = false
 ): void {
   const mid = ph / 2
   let x = 0
@@ -172,7 +360,7 @@ function paintColumns(
     ctx.fillStyle = color
     const x0 = x
     const right = end < pw ? end + 0.35 : end
-    if (anchor === 'center') {
+    if (anchor === 'center' && smooth) {
       ctx.beginPath()
       ctx.moveTo(x0, mid - colAmp[x0])
       for (let i = x0; i < end; i++) ctx.lineTo(i + 0.5, mid - colAmp[i])
@@ -180,11 +368,29 @@ function paintColumns(
       ctx.lineTo(right, mid + colAmp[end - 1])
       for (let i = end - 1; i >= x0; i--) ctx.lineTo(i + 0.5, mid + colAmp[i])
       ctx.closePath()
+    } else if (anchor === 'center') {
+      ctx.beginPath()
+      ctx.moveTo(x0, mid - colAmp[x0])
+      for (let i = x0; i < end - 1; i++) {
+        ctx.lineTo(i + 1, mid - colAmp[i])
+        ctx.lineTo(i + 1, mid - colAmp[i + 1])
+      }
+      ctx.lineTo(right, mid - colAmp[end - 1])
+      ctx.lineTo(right, mid + colAmp[end - 1])
+      for (let i = end - 1; i > x0; i--) {
+        ctx.lineTo(i, mid + colAmp[i])
+        ctx.lineTo(i, mid + colAmp[i - 1])
+      }
+      ctx.lineTo(x0, mid + colAmp[x0])
+      ctx.closePath()
     } else {
       ctx.beginPath()
       ctx.moveTo(x0, ph)
       ctx.lineTo(x0, ph - colAmp[x0])
-      for (let i = x0; i < end; i++) ctx.lineTo(i + 0.5, ph - colAmp[i])
+      for (let i = x0; i < end - 1; i++) {
+        ctx.lineTo(i + 1, ph - colAmp[i])
+        ctx.lineTo(i + 1, ph - colAmp[i + 1])
+      }
       ctx.lineTo(right, ph - colAmp[end - 1])
       ctx.lineTo(right, ph)
       ctx.closePath()
@@ -234,22 +440,39 @@ function drawAnalysisBands(
   to: number,
   pw: number,
   ph: number,
-  anchor: 'bottom' | 'center'
+  anchor: 'bottom' | 'center',
+  stride = 1,
+  fallBlocks = 0
 ): void {
-  const n = bands.length / 3
+  const prepared = fallBlocks >= 1 ? bandFall(bands, stride, fallBlocks) : null
+  const data = prepared ?? bands
+  const drawStride = prepared ? 1 : stride
+  const src = data.length / 3
+  const n = logicalCount(src, drawStride)
   const grid = pixelGrid(from, to, pw)
   if (!grid || n < 1) return
   fitColumns(pw)
   const { per, first } = grid
   const reach = anchor === 'center' ? ph / 2 : ph
+  const bandAt = (band: number, i: number): number => {
+    if (drawStride <= 1) return data[i * 3 + band] / 255
+    const a = Math.min(src, Math.floor(i * drawStride))
+    const b = Math.min(src, Math.max(a + 1, Math.ceil((i + 1) * drawStride)))
+    let peak = 0
+    for (let j = a; j < b; j++) {
+      const value = data[j * 3 + band]
+      if (value > peak) peak = value
+    }
+    return peak / 255
+  }
   for (const layer of BANDS_LOW_TO_HIGH) {
     for (let x = 0; x < pw; x++) {
       const start = (first + x) * per
-      const amp = readAmp((i) => bands[i * 3 + layer.band] / 255, n, start, start + per)
-      colAmp[x] = Number.isNaN(amp) ? NaN : Math.max(1, Math.round(amp * reach))
+      const amp = readAmp((i) => bandAt(layer.band, i), n, start, start + per, prepared != null)
+      colAmp[x] = Number.isNaN(amp) ? NaN : amp * reach
       colColor[x] = Number.isNaN(amp) ? -1 : 1
     }
-    paintColumns(ctx, pw, ph, anchor, () => layer.color)
+    paintColumns(ctx, pw, ph, anchor, () => layer.color, true)
   }
 }
 
@@ -325,6 +548,10 @@ export const CUE_POINT_COLOR = '#ff8a1f'
 let envUpper = new Float32Array(0)
 let envLower = new Float32Array(0)
 
+function waveStride(quality: number): number {
+  return quality >= 100 ? 1 : 100 / Math.max(1, quality)
+}
+
 function drawSampleWave(
   ctx: CanvasRenderingContext2D,
   wf: Waveform,
@@ -332,7 +559,8 @@ function drawSampleWave(
   from: number,
   to: number,
   pw: number,
-  ph: number
+  ph: number,
+  quality: number
 ): void {
   const span = to - from
   const data = samples.data
@@ -344,6 +572,7 @@ function drawSampleWave(
   }
   const upper = envUpper
   const lower = envLower
+  const stride = waveStride(quality)
   const sample0 = (from / wf.rate) * samples.rate
   const per = (span / wf.rate) * (samples.rate / pw)
   if (!(per > 0)) return
@@ -359,8 +588,18 @@ function drawSampleWave(
   }
 
   for (let x = 0; x < pw; x++) {
-    const a = (first + x) * per
-    const b = a + per
+    let a = (first + x) * per
+    let b = a + per
+    if (stride > 1) {
+      if (b - a <= stride) {
+        const bucket = Math.floor((a + b) / 2 / stride)
+        a = bucket * stride
+        b = a + stride
+      } else {
+        a = Math.floor(a / stride) * stride
+        b = Math.ceil(b / stride) * stride
+      }
+    }
     if (b <= 0 || a >= len - 1) {
       upper[x] = NaN
       continue
@@ -450,15 +689,27 @@ function paintLoops(frame: Frame): void {
  */
 const ANALYSIS_LAG_ENTRIES = 0
 
-function paintWave(frame: Frame, mode: WaveformMode, samples?: WaveSamples | null): void {
+function paintWave(
+  frame: Frame,
+  mode: WaveformMode,
+  samples: WaveSamples | null | undefined,
+  quality: number,
+  fallBlocks: number
+): void {
   const { ctx, wf, from, to, pw, ph, dpr } = frame
   const waveH = ph - 18 * dpr
   const entryFrom = from - ANALYSIS_LAG_ENTRIES
   const entryTo = to - ANALYSIS_LAG_ENTRIES
   ctx.save()
   ctx.translate(0, 9 * dpr)
-  if (mode === 'rgb' && samples) drawSampleWave(ctx, wf, samples, from, to, pw, waveH)
-  else if (mode === '3band' && wf.bands) drawAnalysisBands(ctx, wf.bands, entryFrom, entryTo, pw, waveH, 'center')
+  const custom = quality > 0 ? samples : null
+  if (mode === 'rgb' && custom) drawSampleWave(ctx, wf, custom, from, to, pw, waveH, quality)
+  else if (mode === '3band' && custom?.bands && custom.bandRate) {
+    const stride = waveStride(quality)
+    const scale = custom.bandRate / stride / wf.rate
+    drawAnalysisBands(ctx, custom.bands, entryFrom * scale, entryTo * scale, pw, waveH, 'center', stride, fallBlocks)
+  } else if (mode === '3band' && wf.bands)
+    drawAnalysisBands(ctx, wf.bands, entryFrom, entryTo, pw, waveH, 'center', 1, fallBlocks)
   else if (wf.rgbHeights && wf.rgbColors)
     drawAnalysisRgb(ctx, wf.rgbHeights, wf.rgbColors, entryFrom, entryTo, pw, waveH, 'center')
   ctx.restore()
@@ -633,7 +884,9 @@ export function drawDetail(
   pw: number,
   ph: number,
   dpr: number,
-  samples?: WaveSamples | null
+  samples?: WaveSamples | null,
+  quality = 0,
+  fallBlocks = 0
 ): void {
   ctx.clearRect(0, 0, pw, ph)
   const [from, to] = visibleRange(wf, view, pw / dpr)
@@ -649,7 +902,7 @@ export function drawDetail(
     toX: (seconds) => ((seconds * wf.rate - from) / (to - from)) * pw
   }
   paintLoops(frame)
-  paintWave(frame, mode, samples)
+  paintWave(frame, mode, samples, quality, fallBlocks)
   paintBeatGrid(frame)
   paintCues(frame)
   paintCuePoint(frame)

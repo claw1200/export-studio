@@ -35,6 +35,17 @@ function storeFlag(key: string, on: boolean): void {
   localStorage.setItem(key, on ? '1' : '0')
 }
 
+function storedUnit(key: string, fallback: number): number {
+  const raw = localStorage.getItem(key)
+  if (raw == null) return fallback
+  const n = Number(raw)
+  return Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : fallback
+}
+
+function storedWaveQuality(): number {
+  return storedUnit('waveQuality', 50)
+}
+
 export function loadDetail(id: string): Promise<DetailEntry> {
   const hit = detailCache.get(id)
   if (hit) return hit
@@ -59,7 +70,8 @@ export class Player {
   duration = $state(0)
   audioError = $state<string | null>(null)
   mode = $state<WaveformMode>((localStorage.getItem('waveformMode') as WaveformMode) || 'rgb')
-  hqRgb = $state(localStorage.getItem('hqRgb') !== '0')
+  waveQuality = $state(storedWaveQuality())
+  fallBlocks = $state(storedUnit('fallBlocks', 40))
   zoom = $state(Number(localStorage.getItem('waveformZoom')) || 1)
   volume = $state(storedVolume())
   muted = $state(storedFlag('muted'))
@@ -590,20 +602,34 @@ export class Player {
   }
 
   setMode(mode: WaveformMode): void {
+    if (this.mode === mode) return
     this.mode = mode
     localStorage.setItem('waveformMode', mode)
+    if (this.track) this.beginWave(this.token, this.track.id)
   }
 
-  setHqRgb(on: boolean): void {
-    if (this.hqRgb === on) return
-    this.hqRgb = on
-    storeFlag('hqRgb', on)
-    if (this.track) this.beginWave(this.token, this.track.id)
-    else if (!on) {
-      this.waveAbort?.abort()
-      this.waveAbort = null
-      this.wave = null
+  setWaveQuality(quality: number): void {
+    const q = Math.min(100, Math.max(0, Math.round(quality)))
+    if (this.waveQuality === q) return
+    const wasOff = this.waveQuality <= 0
+    this.waveQuality = q
+    localStorage.setItem('waveQuality', String(q))
+    if (!this.track) {
+      if (q <= 0) {
+        this.waveAbort?.abort()
+        this.waveAbort = null
+        this.wave = null
+      }
+      return
     }
+    if (q <= 0 || wasOff) this.beginWave(this.token, this.track.id)
+  }
+
+  setFallBlocks(blocks: number): void {
+    const n = Math.min(100, Math.max(0, Math.round(blocks)))
+    if (this.fallBlocks === n) return
+    this.fallBlocks = n
+    localStorage.setItem('fallBlocks', String(n))
   }
 
   setZoom(zoom: number): void {
@@ -613,7 +639,7 @@ export class Player {
 
   private beginWave(token: number, id: string): void {
     this.waveAbort?.abort()
-    if (!this.hqRgb) {
+    if (this.waveQuality <= 0) {
       this.waveAbort = null
       this.wave = null
       return
@@ -621,10 +647,11 @@ export class Player {
     const ctrl = new AbortController()
     this.waveAbort = ctrl
     const url = audioUrl(id)
+    const wantBands = this.mode === '3band'
     const cached = cachedWaveSamples(url)
     this.wave = cached
-    if (cached) return
-    void loadWaveSamples(url, ctrl.signal).then((samples) => {
+    if (cached && (!wantBands || cached.bands)) return
+    void loadWaveSamples(url, ctrl.signal, wantBands).then((samples) => {
       if (token === this.token && this.waveAbort === ctrl) this.wave = samples
     })
   }

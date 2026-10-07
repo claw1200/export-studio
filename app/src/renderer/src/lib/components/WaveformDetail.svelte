@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getApp } from '$lib/context'
   import type { GridDraft } from '$lib/beat'
-  import { drawDetail, setupCanvas } from '$lib/waveform'
+  import { drawDetail, setupCanvas, trackBandFall } from '$lib/waveform'
 
   const { player } = getApp()
 
@@ -11,6 +11,7 @@
   let gridDrag: { x: number; base: GridDraft } | null = null
 
   function paint(canvas: HTMLCanvasElement): void {
+    trackBandFall()
     if (!width || !height) return
     const ctx = setupCanvas(canvas, width, height)
     const wf = player.waveform
@@ -33,7 +34,9 @@
       canvas.width,
       canvas.height,
       window.devicePixelRatio || 1,
-      player.hqRgb ? player.wave : null
+      player.waveQuality > 0 ? player.wave : null,
+      player.waveQuality,
+      player.fallBlocks
     )
   }
 

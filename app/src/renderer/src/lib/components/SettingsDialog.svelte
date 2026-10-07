@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Keyboard, Plus, RotateCcw, Search, SlidersHorizontal, X } from '@lucide/svelte'
+  import { Keyboard, Plus, RotateCcw, Search, SlidersHorizontal, Wrench, X } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import { ACTION_IDS, ACTIONS, chordFromEvent, chordLabel, type ActionGroup, type ActionId } from '$lib/keymap'
   import type { CuePlacement } from '$lib/player.svelte'
@@ -8,10 +8,11 @@
 
   const { library, player, keybinds } = getApp()
 
-  type Section = 'general' | 'keyboard'
+  type Section = 'general' | 'keyboard' | 'developer'
   const SECTIONS: { id: Section; label: string; icon: typeof Keyboard }[] = [
     { id: 'general', label: 'General', icon: SlidersHorizontal },
-    { id: 'keyboard', label: 'Keyboard shortcuts', icon: Keyboard }
+    { id: 'keyboard', label: 'Keyboard shortcuts', icon: Keyboard },
+    { id: 'developer', label: 'Developer options', icon: Wrench }
   ]
   const GROUPS: ActionGroup[] = ['Playback', 'Cues', 'Library', 'App']
   const PLACEMENTS: { id: CuePlacement; label: string }[] = [
@@ -143,14 +144,53 @@
       </header>
 
       <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        {#if section === 'general'}
+        {#if section === 'developer'}
+          <div class="flex items-center gap-3 rounded-md px-2 py-2">
+            <span class="min-w-0 flex-1">
+              <span class="block text-[12.5px] font-medium">Fall blocks</span>
+              <span class="mt-0.5 block text-[11px] leading-snug text-faint">
+                How many blocks a 3-band fall slopes across. 0 keeps the steps.
+              </span>
+            </span>
+            <input
+              class="h-4 w-28 shrink-0 cursor-pointer accent-accent"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              aria-label="Fall blocks"
+              aria-valuetext={String(player.fallBlocks)}
+              value={player.fallBlocks}
+              oninput={(e) => player.setFallBlocks(Number(e.currentTarget.value))}
+            />
+            <span class="w-9 shrink-0 text-right font-mono text-[11px] text-muted tabular-nums">
+              {player.fallBlocks}
+            </span>
+          </div>
+        {:else if section === 'general'}
           <div class="flex flex-col gap-1">
-            {@render toggle(
-              'High quality RGB waveforms',
-              'Draw the detail waveform from the audio. Off uses the block style.',
-              player.hqRgb,
-              () => player.setHqRgb(!player.hqRgb)
-            )}
+            <div class="flex items-center gap-3 rounded-md px-2 py-2">
+              <span class="min-w-0 flex-1">
+                <span class="block text-[12.5px] font-medium">High quality waveforms</span>
+                <span class="mt-0.5 block text-[11px] leading-snug text-faint">
+                  Draw the detail waveform from the audio. Off uses the rekordbox analysis. Higher keeps more detail.
+                </span>
+              </span>
+              <input
+                class="h-4 w-28 shrink-0 cursor-pointer accent-accent"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                aria-label="High quality waveforms"
+                aria-valuetext={player.waveQuality === 0 ? 'Off' : `${player.waveQuality}%`}
+                value={player.waveQuality}
+                oninput={(e) => player.setWaveQuality(Number(e.currentTarget.value))}
+              />
+              <span class="w-9 shrink-0 text-right font-mono text-[11px] text-muted tabular-nums">
+                {player.waveQuality === 0 ? 'Off' : `${player.waveQuality}%`}
+              </span>
+            </div>
             {@render toggle(
               'Quantise',
               'Scrubbing, the cue point and new cues snap to the nearest beat.',
