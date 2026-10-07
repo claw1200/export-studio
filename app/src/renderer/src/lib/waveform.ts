@@ -1,6 +1,6 @@
 import type { WaveSamples } from './peaks'
 import type { Beatgrid, Cue, TrackDetail } from './types'
-import { firstIndexAtOrAfter } from './beat'
+import { barBeatAt, countdownTo, firstIndexAtOrAfter } from './beat'
 import {
   HOT_CUE_DEFAULT,
   hotCueLetter,
@@ -539,6 +539,73 @@ function paintPlayhead(frame: Frame): void {
   ctx.fillRect(x, 0, Math.max(1, dpr), ph)
 }
 
+function nextCue(cues: Cue[], seconds: number): Cue | null {
+  const ms = seconds * 1000 + 1
+  let next: Cue | null = null
+  for (const cue of cues) {
+    if (cue.start > ms && (!next || cue.start < next.start)) next = cue
+  }
+  return next
+}
+
+function paintPill(frame: Frame, y: number, text: string, cue: Cue | null): void {
+  const { ctx, pw, dpr } = frame
+  const height = Math.round(15 * dpr)
+  const pad = Math.round(5 * dpr)
+  const chip = cue ? Math.round(9 * dpr) : 0
+  const gap = cue ? Math.round(4 * dpr) : 0
+  const textWidth = Math.ceil(ctx.measureText(text).width)
+  const width = pad * 2 + chip + gap + textWidth
+  const left = Math.round(pw / 2 - width / 2)
+  const mid = y + height / 2
+
+  ctx.fillStyle = 'rgba(10,11,14,0.82)'
+  ctx.beginPath()
+  ctx.roundRect(left, y, width, height, 3 * dpr)
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)'
+  ctx.lineWidth = Math.max(1, dpr)
+  ctx.stroke()
+
+  if (cue) {
+    const cx = left + pad
+    ctx.fillStyle = cueColor(cue)
+    if (cue.kind === 'hot') {
+      ctx.fillRect(cx, mid - chip / 2, chip, chip)
+      ctx.save()
+      ctx.font = `800 ${Math.round(7.5 * dpr)}px "Inter Variable", system-ui, sans-serif`
+      ctx.textAlign = 'center'
+      ctx.fillStyle = 'rgba(0,0,0,0.85)'
+      ctx.fillText(hotCueLetter(cue.slot), cx + chip / 2, mid + 0.5 * dpr)
+      ctx.restore()
+    } else {
+      ctx.beginPath()
+      ctx.moveTo(cx, mid - chip / 2)
+      ctx.lineTo(cx + chip, mid - chip / 2)
+      ctx.lineTo(cx + chip / 2, mid + chip / 2)
+      ctx.closePath()
+      ctx.fill()
+    }
+  }
+
+  ctx.fillStyle = '#ffffff'
+  ctx.textAlign = 'left'
+  ctx.fillText(text, left + pad + chip + gap, mid + 0.5 * dpr)
+}
+
+function paintBeatCounters(frame: Frame): void {
+  const { ctx, view, ph, dpr } = frame
+  const position = barBeatAt(view.position, view.beatgrid)
+  const cue = nextCue(view.cues, view.position)
+  const countdown = cue ? countdownTo(view.position, cue.start / 1000, view.beatgrid) : null
+  if (!position && !countdown) return
+  ctx.font = `600 ${Math.round(10 * dpr)}px ui-monospace, "SF Mono", Menlo, Consolas, monospace`
+  ctx.textBaseline = 'middle'
+  const inset = Math.round(10 * dpr)
+  if (countdown) paintPill(frame, inset, `−${countdown}`, cue)
+  if (position) paintPill(frame, ph - inset - Math.round(15 * dpr), position, null)
+}
+
 export function drawDetail(
   ctx: CanvasRenderingContext2D,
   wf: Waveform,
@@ -568,4 +635,5 @@ export function drawDetail(
   paintCues(frame)
   paintCuePoint(frame)
   paintPlayhead(frame)
+  paintBeatCounters(frame)
 }

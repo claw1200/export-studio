@@ -48,6 +48,47 @@ function beatFromAnchor(ms: number, anchor: number, bpm: number): number {
   return snapped
 }
 
+const BEATS_PER_BAR = 4
+const barCounts = new WeakMap<Beatgrid, Int32Array>()
+
+function barsThrough(grid: Beatgrid): Int32Array {
+  let counts = barCounts.get(grid)
+  if (!counts) {
+    counts = new Int32Array(grid.beats.length)
+    let bars = 0
+    for (let i = 0; i < grid.beats.length; i++) {
+      if (grid.beats[i] === 1) bars++
+      counts[i] = bars
+    }
+    barCounts.set(grid, counts)
+  }
+  return counts
+}
+
+function beatIndexAt(grid: Beatgrid, ms: number): number {
+  return ms < grid.times[0] ? -1 : lastIndexAtOrBefore(grid.times, ms)
+}
+
+function nearestBeatIndex(times: readonly number[], ms: number): number {
+  const next = firstIndexAtOrAfter(times, ms)
+  if (next === 0) return 0
+  if (next === times.length) return times.length - 1
+  return ms - times[next - 1] <= times[next] - ms ? next - 1 : next
+}
+
+export function barBeatAt(seconds: number, grid: Beatgrid | null): string | null {
+  if (!grid?.times.length) return null
+  const index = beatIndexAt(grid, seconds * 1000)
+  if (index < 0) return null
+  return `${barsThrough(grid)[index]}.${grid.beats[index]}`
+}
+
+export function countdownTo(seconds: number, targetSeconds: number, grid: Beatgrid | null): string | null {
+  if (!grid?.times.length) return null
+  const beats = Math.max(0, nearestBeatIndex(grid.times, targetSeconds * 1000) - beatIndexAt(grid, seconds * 1000))
+  return `${Math.floor(beats / BEATS_PER_BAR)}.${beats % BEATS_PER_BAR}`
+}
+
 export function bpmAt(seconds: number, grid: Beatgrid | null, fallback = 0): number {
   if (!grid?.times.length) return fallback
   return grid.bpms[lastIndexAtOrBefore(grid.times, seconds * 1000)]
