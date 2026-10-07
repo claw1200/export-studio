@@ -709,7 +709,7 @@ function paintWave(
     const scale = custom.bandRate / stride / wf.rate
     drawAnalysisBands(ctx, custom.bands, entryFrom * scale, entryTo * scale, pw, waveH, 'center', stride, fallBlocks)
   } else if (mode === '3band' && wf.bands)
-    drawAnalysisBands(ctx, wf.bands, entryFrom, entryTo, pw, waveH, 'center', 1, fallBlocks)
+    drawAnalysisBands(ctx, wf.bands, entryFrom, entryTo, pw, waveH, 'center')
   else if (wf.rgbHeights && wf.rgbColors)
     drawAnalysisRgb(ctx, wf.rgbHeights, wf.rgbColors, entryFrom, entryTo, pw, waveH, 'center')
   ctx.restore()
