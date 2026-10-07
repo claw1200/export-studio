@@ -549,10 +549,6 @@ export class Player {
     if (Number.isFinite(bpm) && bpm > 0) this.retempo(() => bpm, 1, base)
   }
 
-  adjustGridBpm(delta: number): void {
-    this.retempo((current) => current + delta)
-  }
-
   halveGrid(): void {
     this.retempo((current) => current / 2, 0.5)
   }

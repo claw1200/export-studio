@@ -102,6 +102,7 @@
   <button
     class="tabular h-6 min-w-7 rounded border border-line-soft px-1.5 font-mono text-[11px] font-semibold text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
     disabled={player.editing}
+    aria-label={title}
     {title}
     {onclick}
   >
@@ -163,11 +164,11 @@
             <BpmField bpm={currentBpm} />
             <span class="text-[11px] font-medium text-faint">BPM</span>
           </span>
-          {@render gridButton('−', 'Lower the BPM by 0.01 (Shift: 0.1)', (e) =>
-            player.adjustGridBpm(e.shiftKey ? -0.1 : -0.01)
+          {@render gridButton('←', 'Shift the beatgrid left by 1 ms (Shift: 10 ms)', (e) =>
+            player.nudgeGrid(e.shiftKey ? -10 : -1)
           )}
-          {@render gridButton('+', 'Raise the BPM by 0.01 (Shift: 0.1)', (e) =>
-            player.adjustGridBpm(e.shiftKey ? 0.1 : 0.01)
+          {@render gridButton('→', 'Shift the beatgrid right by 1 ms (Shift: 10 ms)', (e) =>
+            player.nudgeGrid(e.shiftKey ? 10 : 1)
           )}
           {@render gridButton('/2', 'Halve the BPM', () => player.halveGrid())}
           {@render gridButton('×2', 'Double the BPM', () => player.doubleGrid())}
