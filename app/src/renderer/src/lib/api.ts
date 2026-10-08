@@ -3,7 +3,10 @@ import type {
   BeatgridSaved,
   Cue,
   CueMove,
+  ImportResult,
   LibraryInfo,
+  MissingScan,
+  RemoveResult,
   Track,
   TrackDetail,
   TrackEdit,
@@ -35,6 +38,11 @@ export const api = {
     call<BeatgridSaved>('beatgrid.set', { id, times: grid.times, beats: grid.beats, bpms: grid.bpms, cues }),
   updateTracks: (ids: string[], fields: TrackEdit, writeTags: boolean) =>
     call<TrackUpdate>('track.update', { ids, fields, writeTags }),
+  relocate: (moves: Record<string, string>) => call<Track[]>('track.relocate', { moves }),
+  findMissing: (ids: string[], directory: string) => call<MissingScan>('track.findMissing', { ids, directory }),
+  importTracks: (paths: string[], playlistId: string | null, artwork: boolean) =>
+    call<ImportResult>('track.import', { paths, playlistId, artwork }),
+  removeFromCollection: (ids: string[]) => call<RemoveResult>('track.removeFromCollection', { ids }),
   addToPlaylist: (id: string, trackIds: string[]) => call<string[]>('playlist.add', { id, trackIds }),
   removeFromPlaylist: (id: string, trackIds: string[]) => call<string[]>('playlist.remove', { id, trackIds }),
   moveInPlaylist: (id: string, trackIds: string[], index: number) =>
@@ -52,7 +60,8 @@ export const api = {
   usbSync: (volumeId: string, playlistIds: string[]) =>
     call<{ volumeId: string; tracks: number; playlists: number }>('usb.sync', { volumeId, playlistIds }),
   onEvent: window.api.onEvent,
-  showItemInFolder: window.api.showItemInFolder
+  showItemInFolder: window.api.showItemInFolder,
+  choosePath: window.api.choosePath
 }
 
 function mediaUrl(kind: 'art', id: string, query = ''): string {

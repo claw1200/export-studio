@@ -56,9 +56,34 @@ export interface NativeEngine {
   settle(): void
 }
 
+export interface NativeTrackAnalysisOptions {
+  grid: boolean
+  key: boolean
+  dynamic: boolean
+  minBpm: number
+  maxBpm: number
+  highPrecision: boolean
+  roundBpm: boolean
+}
+
+export interface NativeTrackAnalysis {
+  duration: number
+  /** 0 when no grid was found or asked for. */
+  bpm: number
+  /** Per beat: its number in the bar (1 to 4), tempo × 100, and time in ms. */
+  beatNumbers: Uint8Array
+  beatTempos: Uint16Array
+  beatTimes: Uint32Array
+  /** Tonic 0 is C. */
+  key?: { tonic: number; minor: boolean } | null
+  /** Eight bytes per 1/150 s: peak and RMS of the whole signal, then the low, mid and high bands. */
+  waveform: Uint8Array
+}
+
 export interface NativeModule {
   AudioEngine: new (decks: number, onEvent: (event: NativeDeckEvent) => void) => NativeEngine
   analyse(path: string, bands: boolean): Promise<NativeWave | null>
+  analyseTrack(path: string, options: NativeTrackAnalysisOptions): Promise<NativeTrackAnalysis>
 }
 
 /** Built by `npm run build:native` into resources/, which electron-builder unpacks from the asar. */

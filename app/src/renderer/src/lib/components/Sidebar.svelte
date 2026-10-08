@@ -14,9 +14,12 @@
     Pencil,
     Plus,
     Trash2,
-    HardDrive
+    HardDrive,
+    FilePlus,
+    FolderInput
   } from '@lucide/svelte'
   import { getApp } from '$lib/context'
+  import { droppedPaths, isFileDrag } from '$lib/library/drop'
   import { buildTree, type TreeNode } from '$lib/library/tree'
   import { menuAt, tidy, type MenuEntry, type MenuRequest } from '$lib/menu'
   import { SEPARATOR, unlockEntry } from '$lib/trackMenu'
@@ -84,17 +87,55 @@
   }
 
   function dragOver(e: DragEvent, type: SourceType, node: TreeNode): void {
-    if (!library.dragging) return
+    const files = !library.dragging && isFileDrag(e)
+    if (!library.dragging && !files) return
     const key = `${type}:${node.id}`
     if (node.kind === 'folder' && !expanded.has(key)) expandSoon(key, () => expanded.add(key))
-    if (!accepts(type, node)) return
+    if (files ? type !== 'playlist' || node.kind !== 'playlist' : !accepts(type, node)) return
     if (!library.writable) {
-      library.notify(`Unlock editing to add tracks to ${type === 'tag' ? 'tags' : 'playlists'}`)
+      library.notify(
+        files ? 'Unlock editing to import tracks' : `Unlock editing to add tracks to ${type === 'tag' ? 'tags' : 'playlists'}`
+      )
       return
     }
     e.preventDefault()
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
     dropKey = key
+  }
+
+  function collectionDragOver(e: DragEvent): void {
+    if (library.dragging || !isFileDrag(e)) return
+    if (!library.writable) {
+      library.notify('Unlock editing to import tracks')
+      return
+    }
+    e.preventDefault()
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+    dropKey = 'collection'
+  }
+
+  function collectionDrop(e: DragEvent): void {
+    dropKey = null
+    if (library.dragging || !isFileDrag(e) || !library.writable) return
+    e.preventDefault()
+    void library.importFiles(droppedPaths(e))
+  }
+
+  function importItems(): MenuEntry[] {
+    const locked = !library.writable
+    return [
+      { label: 'Import tracks…', icon: FilePlus, disabled: locked, onselect: () => void library.chooseImport('files') },
+      { label: 'Import folder…', icon: FolderInput, disabled: locked, onselect: () => void library.chooseImport('folder') }
+    ]
+  }
+
+  function collectionMenu(e: MouseEvent): void {
+    e.preventDefault()
+    menu = menuAt(
+      e,
+      'Collection',
+      tidy([...importItems(), !library.writable && SEPARATOR, !library.writable && unlockEntry(library, player)])
+    )
   }
 
   function dragLeave(e: DragEvent, key: string): void {
@@ -106,6 +147,12 @@
 
   function drop(e: DragEvent, type: SourceType, node: TreeNode): void {
     dropKey = null
+    if (!library.dragging && isFileDrag(e)) {
+      if (type !== 'playlist' || node.kind !== 'playlist' || !library.writable) return
+      e.preventDefault()
+      void library.importFiles(droppedPaths(e), node.id)
+      return
+    }
     const ids = library.dragging
     if (!ids || !library.writable || !accepts(type, node)) return
     e.preventDefault()
@@ -329,8 +376,8 @@
         <button
           class="flex flex-1 items-center gap-1 px-2 pb-1 text-[10.5px] font-semibold tracking-wider text-faint uppercase hover:text-muted"
           onclick={() => toggleSection(id)}
-          ondragover={() => {
-            if (library.dragging && collapsedSections.has(id)) {
+          ondragover={(e) => {
+            if ((library.dragging || isFileDrag(e)) && collapsedSections.has(id)) {
               expandSoon(sectionKey, () => collapsedSections.delete(id))
             }
           }}
@@ -364,9 +411,17 @@
   <button
     class={[
       'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] font-medium',
-      library.source.type === 'collection' ? 'bg-select text-fg' : 'text-muted hover:bg-hover hover:text-fg'
+      dropKey === 'collection'
+        ? 'bg-accent-soft text-fg ring-1 ring-accent/70 ring-inset'
+        : library.source.type === 'collection'
+          ? 'bg-select text-fg'
+          : 'text-muted hover:bg-hover hover:text-fg'
     ]}
     onclick={() => setSource({ type: 'collection' })}
+    oncontextmenu={collectionMenu}
+    ondragover={collectionDragOver}
+    ondragleave={(e) => dragLeave(e, 'collection')}
+    ondrop={collectionDrop}
   >
     <LibraryIcon class="size-4 text-accent" />
     <span class="flex-1">Collection</span>

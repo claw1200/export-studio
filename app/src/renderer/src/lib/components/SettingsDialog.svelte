@@ -1,16 +1,20 @@
 <script lang="ts">
-  import { Keyboard, Plus, RotateCcw, Search, SlidersHorizontal, Wrench, X } from '@lucide/svelte'
+  import { AudioWaveform, Keyboard, Plus, RotateCcw, Search, SlidersHorizontal, Wrench, X } from '@lucide/svelte'
+  import { BPM_RANGES, MAX_CONCURRENCY } from '$lib/analysis.svelte'
   import { getApp } from '$lib/context'
   import { ACTION_IDS, ACTIONS, chordFromEvent, chordLabel, type ActionGroup, type ActionId } from '$lib/keymap'
   import type { CuePlacement } from '$lib/player.svelte'
+  import type { GridMode } from '../../../../preload/analysis'
 
   let { onclose }: { onclose: () => void } = $props()
 
-  const { library, player, keybinds } = getApp()
+  const { library, player, keybinds, analysis } = getApp()
 
-  type Section = 'general' | 'keyboard' | 'developer'
+  type Section = 'general' | 'analysis' | 'keyboard' | 'developer'
+  type Choice = { id: string; label: string }
   const SECTIONS: { id: Section; label: string; icon: typeof Keyboard }[] = [
     { id: 'general', label: 'General', icon: SlidersHorizontal },
+    { id: 'analysis', label: 'Import & analysis', icon: AudioWaveform },
     { id: 'keyboard', label: 'Keyboard shortcuts', icon: Keyboard },
     { id: 'developer', label: 'Developer options', icon: Wrench }
   ]
@@ -19,6 +23,15 @@
     { id: 'playhead', label: 'Playhead' },
     { id: 'cuePoint', label: 'Cue point' }
   ]
+  const GRID_MODES: (Choice & { id: GridMode })[] = [
+    { id: 'normal', label: 'Normal' },
+    { id: 'dynamic', label: 'Dynamic' }
+  ]
+  const RANGES: Choice[] = BPM_RANGES.map(([lo, hi]) => ({ id: `${lo}-${hi}`, label: `${lo}–${hi}` }))
+  const CONCURRENCY: Choice[] = Array.from({ length: MAX_CONCURRENCY }, (_, i) => ({
+    id: String(i + 1),
+    label: String(i + 1)
+  }))
 
   let section = $state<Section>('general')
   let recording = $state<ActionId | null>(null)
@@ -231,6 +244,82 @@
               () => library.setWriteFileTags(!library.writeFileTags)
             )}
           </div>
+        {:else if section === 'analysis'}
+          {@const s = analysis.settings}
+          <section class="mb-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Import</h3>
+            {@render toggle(
+              'Analyse imported tracks',
+              'Work out the beatgrid, tempo and key of new tracks as soon as they are imported.',
+              s.auto,
+              () => analysis.set('auto', !s.auto)
+            )}
+            {@render toggle(
+              'Import artwork',
+              'Copy cover art embedded in the files into rekordbox.',
+              library.importArtwork,
+              () => library.setImportArtwork(!library.importArtwork)
+            )}
+          </section>
+
+          <section class="mb-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Beatgrid</h3>
+            {@render choice(
+              'Grid',
+              'Normal fits one tempo to the whole track. Dynamic follows tempo changes, for live recordings and tracks that speed up.',
+              GRID_MODES,
+              s.gridMode,
+              (id) => analysis.set('gridMode', id as GridMode)
+            )}
+            {@render choice(
+              'BPM range',
+              'The tempo is always picked inside this range, so half- and double-tempo readings land where you expect.',
+              RANGES,
+              `${s.minBpm}-${s.maxBpm}`,
+              (id) => {
+                const [lo, hi] = id.split('-').map(Number)
+                analysis.setRange(lo, hi)
+              }
+            )}
+            {@render toggle(
+              'High precision',
+              'Put each beat on the start of the kick or snare, to the millisecond. Off places beats from the onset curve, which is a little less exact.',
+              s.highPrecision,
+              () => analysis.set('highPrecision', !s.highPrecision)
+            )}
+            {@render toggle(
+              'Round BPM',
+              'Snap the tempo to a whole number when it is within 0.05 BPM of one, as most produced music is.',
+              s.roundBpm,
+              () => analysis.set('roundBpm', !s.roundBpm)
+            )}
+          </section>
+
+          <section class="mb-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Key and more</h3>
+            {@render toggle('Detect key', 'Work out the musical key as well as the beatgrid.', s.key, () =>
+              analysis.set('key', !s.key)
+            )}
+            {@render toggle(
+              'Replace existing analysis',
+              'When a selection mixes analysed and new tracks, replace the beatgrid, key and waveforms the analysed ones already have. Re-analyse always replaces them. Cues are always kept.',
+              s.overwrite,
+              () => analysis.set('overwrite', !s.overwrite)
+            )}
+            {@render choice(
+              'Tracks analysed at once',
+              'More is faster on machines with many cores, but leaves less for playback.',
+              CONCURRENCY,
+              String(s.concurrency),
+              (id) => analysis.set('concurrency', Number(id))
+            )}
+          </section>
+
+          <p class="px-2 text-[11px] leading-snug text-faint">
+            This is ExportStudio’s own analysis, not rekordbox’s. Tested on rekordbox libraries, it picks the same
+            tempo for about 96% of tracks, puts the beats within a few milliseconds of rekordbox’s, and finds the same
+            key for most.
+          </p>
         {:else}
           {#each groups as { group, ids } (group)}
             <section class="mb-5 last:mb-0">
@@ -291,6 +380,31 @@
       ></span>
     </span>
   </button>
+{/snippet}
+
+{#snippet choice(label: string, description: string, options: Choice[], current: string, pick: (id: string) => void)}
+  <div class="flex items-start gap-3 rounded-md px-2 py-2">
+    <span class="min-w-0 flex-1">
+      <span class="block text-[12.5px] font-medium">{label}</span>
+      <span class="mt-0.5 block text-[11px] leading-snug text-faint">{description}</span>
+    </span>
+    <div
+      class="flex shrink-0 rounded-md border border-line bg-bg p-0.5 text-[11px] font-semibold tabular-nums"
+      role="radiogroup"
+      aria-label={label}
+    >
+      {#each options as o (o.id)}
+        <button
+          class={['rounded px-2 py-1', current === o.id ? 'bg-raised text-fg' : 'text-faint hover:text-muted']}
+          role="radio"
+          aria-checked={current === o.id}
+          onclick={() => pick(o.id)}
+        >
+          {o.label}
+        </button>
+      {/each}
+    </div>
+  </div>
 {/snippet}
 
 {#snippet shortcutRow(id: ActionId)}

@@ -16,8 +16,10 @@ MONO_TAG = "PWV3"
 BEATGRID_TAG = "PQTZ"
 EXTENDED_BEATGRID_TAG = "PQT2"
 HOT_CUE_TAG = "PCO2"
+PATH_TAG = "PPTH"
 FILE_LENGTH_OFFSET = 8
 TAG_LENGTH_OFFSET = 8
+PATH_LENGTH_OFFSET = 12
 PQT2_ANCHORS_OFFSET = 24
 
 RGB_BITS = 0x7
@@ -166,6 +168,15 @@ def clear_extended_beatgrid(tag: memoryview) -> bytes:
     header[PQT2_ANCHORS_OFFSET:] = bytes(len_header - PQT2_ANCHORS_OFFSET)
     struct.pack_into(">I", header, TAG_LENGTH_OFFSET, len_header)
     return bytes(header)
+
+
+def build_path(tag: memoryview, audio_path: str) -> bytes:
+    len_header = struct.unpack_from(">I", tag, 4)[0]
+    body = audio_path.encode("utf-16-be") + b"\0\0"
+    header = bytearray(tag[:len_header])
+    struct.pack_into(">I", header, TAG_LENGTH_OFFSET, len_header + len(body))
+    struct.pack_into(">I", header, PATH_LENGTH_OFFSET, len(body))
+    return bytes(header) + body
 
 
 def write_tags(path: Path, replace: dict[str, bytes]) -> None:

@@ -65,6 +65,9 @@ export const ACTIONS = {
   'library.selectAll': { label: 'Select all tracks', group: 'Library' },
   'library.editInfo': { label: 'Edit track info', group: 'Library' },
   'library.removeFromPlaylist': { label: 'Remove from playlist', group: 'Library' },
+  'library.removeFromCollection': { label: 'Remove from collection', group: 'Library' },
+  'library.import': { label: 'Import tracks', group: 'Library', fields: 'always' },
+  'library.analyse': { label: 'Analyse selected tracks', group: 'Library' },
   'app.settings': { label: 'Settings', group: 'App', fields: 'always' }
 } satisfies Record<string, ActionSpec>
 
@@ -109,6 +112,9 @@ export const DEFAULT_BINDINGS: Record<ActionId, readonly string[]> = {
   'library.selectAll': ['Mod+KeyA'],
   'library.editInfo': ['Mod+KeyI'],
   'library.removeFromPlaylist': ['Mod+Backspace', 'Delete'],
+  'library.removeFromCollection': ['Mod+Shift+Backspace'],
+  'library.import': ['Mod+KeyO'],
+  'library.analyse': [],
   'app.settings': ['Mod+Comma']
 }
 

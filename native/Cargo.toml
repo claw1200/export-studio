@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/es-decode", "crates/es-deck", "crates/es-wave", "crates/es-node"]
+members = ["crates/es-decode", "crates/es-deck", "crates/es-wave", "crates/es-analyse", "crates/es-node"]
 
 [workspace.package]
 edition = "2021"
@@ -11,6 +11,7 @@ publish = false
 es-decode = { path = "crates/es-decode" }
 es-deck = { path = "crates/es-deck" }
 es-wave = { path = "crates/es-wave" }
+es-analyse = { path = "crates/es-analyse" }
 symphonia = { version = "0.5", default-features = false, features = [
   "mp3",
   "aac",

@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 [dependencies]
 es-deck.workspace = true
 es-wave.workspace = true
+es-analyse.workspace = true
 napi.workspace = true
 napi-derive.workspace = true
 

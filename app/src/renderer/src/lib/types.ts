@@ -23,6 +23,9 @@ export interface Track {
   bitDepth: number
   fileType: string
   path: string
+  /** A local file that isn't on disk at `path`. Streaming tracks are never missing. */
+  missing: boolean
+  streaming: boolean
   fileSize: number
   hasArtwork: boolean
   trackNo: number
@@ -50,6 +53,27 @@ export type TrackEdit = Partial<Pick<Track, EditableField>>
 export interface TrackUpdate {
   tracks: Track[]
   tagErrors: string[]
+}
+
+export interface MissingScan {
+  matches: { id: string; path: string | null }[]
+  scanned: number
+}
+
+export interface ImportResult {
+  /** Rows for tracks that are new to the collection, or came back to it. */
+  tracks: Track[]
+  /** Every imported or already present track, in the order given. */
+  ids: string[]
+  skipped: number
+  failed: { path: string; error: string }[]
+  /** The playlist's tracks after the import, when one was given. */
+  playlist: string[] | null
+}
+
+export interface RemoveResult {
+  removed: string[]
+  playlists: TreeItem[]
 }
 
 export interface TreeItem {
@@ -102,7 +126,6 @@ export interface WaveformPayload {
 
 export interface TrackDetail {
   id: string
-  fileExists: boolean
   cues: Cue[]
   beatgrid: Beatgrid | null
   waveform: WaveformPayload

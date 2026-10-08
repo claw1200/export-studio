@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { AlertTriangle } from '@lucide/svelte'
+  import { AlertTriangle, LoaderCircle, X } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import { formatSize, formatTotal } from '$lib/format'
 
-  const { library, player } = getApp()
+  const { library, player, analysis } = getApp()
 
   const totals = $derived.by(() => {
     let duration = 0
@@ -43,7 +43,33 @@
     </span>
   {/if}
 
-  <span class="ml-auto truncate" title={library.info?.dbPath}>
+  {#if analysis.running && analysis.progress}
+    {@const { total, done, failed } = analysis.progress}
+    <span class="ml-auto flex items-center gap-2 text-muted" role="status">
+      <LoaderCircle class="size-3 animate-spin text-accent" />
+      <span>Analysing {Math.min(done + failed + 1, total).toLocaleString()} of {total.toLocaleString()}</span>
+      <span class="h-1 w-20 overflow-hidden rounded-full bg-line">
+        <span
+          class="block h-full rounded-full bg-accent transition-[width]"
+          style:width="{(100 * (done + failed)) / Math.max(total, 1)}%"
+        ></span>
+      </span>
+      {#if failed}
+        <span class="text-warn" title={analysis.lastError ?? undefined}>{failed} failed</span>
+      {/if}
+      <button
+        type="button"
+        class="grid size-4 place-items-center rounded text-faint hover:bg-hover hover:text-fg"
+        title="Stop analysing"
+        aria-label="Stop analysing"
+        onclick={() => analysis.cancel()}
+      >
+        <X class="size-3" />
+      </button>
+    </span>
+  {/if}
+
+  <span class="truncate {analysis.running ? '' : 'ml-auto'}" title={library.info?.dbPath}>
     {library.info?.rekordboxRunning ? 'rekordbox is running' : 'rekordbox is closed'}
     {#if library.info}
       · {library.writable ? 'editing' : 'read-only'}

@@ -52,6 +52,16 @@ export class TrackSession {
     }
   }
 
+  close(): void {
+    this.token++
+    this.track = null
+    this.detail = null
+    this.waveform = null
+    this.loading = false
+    this.error = null
+    this.editError = null
+  }
+
   async refresh(): Promise<void> {
     const id = this.track?.id
     if (!id) return

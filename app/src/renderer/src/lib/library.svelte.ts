@@ -2,7 +2,7 @@ import { api } from './api'
 import { clearDetailCache } from './deck/session.svelte'
 import { newestFirst, type SortKey, sortTracks, type TrackSort } from './library/sort'
 import { buildTree } from './library/tree'
-import type { LibraryInfo, Source, SyncProgress, Track, TrackEdit, TreeItem, Volume } from './types'
+import type { ImportResult, LibraryInfo, Source, SyncProgress, Track, TrackEdit, TreeItem, Volume } from './types'
 
 export const TRACK_DRAG_TYPE = 'application/x-exportstudio-tracks'
 
@@ -41,10 +41,14 @@ export class Library {
 
   editError = $state<string | null>(null)
   writeFileTags = $state(localStorage.getItem('writeFileTags') === '1')
+  importArtwork = $state(localStorage.getItem('importArtwork') !== '0')
+  importing = $state(false)
   renamingId = $state<string | null>(null)
   dragging = $state.raw<string[] | null>(null)
   private noticeTimer: ReturnType<typeof setTimeout> | undefined
   private trackListeners = new Set<(tracks: Track[]) => void>()
+  private importListeners = new Set<(tracks: Track[]) => void>()
+  private removeListeners = new Set<(ids: string[]) => void>()
 
   byId = $derived(new Map([...this.tracks, ...this.deviceTracks].map((t) => [t.id, t])))
   playlistById = $derived(new Map(this.playlists.map((p) => [p.id, p])))
@@ -52,6 +56,7 @@ export class Library {
   historyTree = $derived(buildTree(this.histories))
   tagTree = $derived(buildTree(this.myTags))
   tagNames = $derived(new Map(this.myTags.map((t) => [t.id, t.name])))
+  missingTracks = $derived(this.tracks.filter((t) => t.missing))
   tagCounts = $derived.by(() => {
     const counts = new Map<string, number>()
     for (const t of this.tracks) for (const id of t.myTags) counts.set(id, (counts.get(id) ?? 0) + 1)
@@ -256,9 +261,30 @@ export class Library {
     localStorage.setItem('writeFileTags', on ? '1' : '0')
   }
 
+  setImportArtwork(on: boolean): void {
+    this.importArtwork = on
+    localStorage.setItem('importArtwork', on ? '1' : '0')
+  }
+
   onTracksUpdated(listener: (tracks: Track[]) => void): () => void {
     this.trackListeners.add(listener)
     return () => this.trackListeners.delete(listener)
+  }
+
+  /** Called with the tracks an import added to the collection. */
+  onImported(listener: (tracks: Track[]) => void): () => void {
+    this.importListeners.add(listener)
+    return () => this.importListeners.delete(listener)
+  }
+
+  onRemoved(listener: (ids: string[]) => void): () => void {
+    this.removeListeners.add(listener)
+    return () => this.removeListeners.delete(listener)
+  }
+
+  /** Apply rows from outside an edit, such as finished analysis. */
+  updateRows(rows: Track[]): void {
+    this.applyTracks(rows)
   }
 
   notify(message: string): void {
@@ -291,6 +317,14 @@ export class Library {
     for (const listener of this.trackListeners) listener(rows)
   }
 
+  setMissing(id: string, missing: boolean): void {
+    const track = this.byId.get(id)
+    if (!track || track.missing === missing) return
+    const fresh = { ...track, missing }
+    if (id.startsWith('usb:')) this.deviceTracks = this.deviceTracks.map((t) => (t.id === id ? fresh : t))
+    else this.applyTracks([fresh])
+  }
+
   private applyPlaylistIds(id: string, ids: string[]): void {
     this.playlists = this.playlists.map((p) => (p.id === id ? { ...p, count: ids.length } : p))
     if (this.source.type === 'playlist' && this.source.id === id) this.sourceIds = ids
@@ -316,6 +350,110 @@ export class Library {
       const files = failed.length === 1 ? 'one file' : `${failed.length} files`
       this.notify(`Saved to rekordbox, but couldn’t write tags to ${files}: ${failed[0]}`)
     }
+    return true
+  }
+
+  async relocate(moves: Record<string, string>): Promise<boolean> {
+    if (!Object.keys(moves).length) return true
+    const result = await this.edit(() => api.relocate(moves))
+    if (!result) return false
+    clearDetailCache()
+    this.applyTracks(result)
+    return true
+  }
+
+  async locate(track: Track): Promise<void> {
+    if (!this.writable) return this.notify(READ_ONLY)
+    const folder = track.path.replace(/[\\/][^\\/]*$/, '')
+    const path = await api.choosePath('audio', folder || undefined)
+    if (path) await this.relocate({ [track.id]: path })
+  }
+
+  /** Ask for files or a folder and import them, into the open playlist when there is one. */
+  async chooseImport(kind: 'files' | 'folder'): Promise<void> {
+    if (!this.writable) return this.notify('Unlock editing to import tracks')
+    const paths = await window.api.chooseImport(kind)
+    const playlist = this.sourcePlaylist?.kind === 'playlist' ? this.sourcePlaylist.id : null
+    await this.importFiles(paths, playlist)
+  }
+
+  /**
+   * Import files and folders into the collection. With a playlist they are added to it too, at the
+   * end or just before `beforeId` when that is given.
+   */
+  async importFiles(paths: string[], playlistId: string | null = null, beforeId?: string | null): Promise<void> {
+    if (!paths.length) return
+    if (!this.writable) return this.notify('Unlock editing to import tracks')
+    if (this.importing) return this.notify('Wait for the current import to finish')
+    this.importing = true
+    try {
+      const files = await window.api.expandPaths(paths)
+      if (!files.length) return this.notify('No audio files that rekordbox can import')
+      const result = await this.edit(() => api.importTracks(files, playlistId, this.importArtwork))
+      if (!result) return
+      const known = new Set(this.tracks.map((t) => t.id))
+      const fresh = result.tracks.filter((t) => !known.has(t.id))
+      if (fresh.length) this.tracks = [...this.tracks, ...fresh]
+      this.applyTracks(result.tracks.filter((t) => known.has(t.id)))
+      if (playlistId && result.playlist) {
+        this.applyPlaylistIds(playlistId, result.playlist)
+        if (beforeId !== undefined && result.ids.length) await this.moveInPlaylist(playlistId, result.ids, beforeId)
+      }
+      this.notify(this.importSummary(result, playlistId))
+      if (result.tracks.length) for (const listener of this.importListeners) listener(result.tracks)
+    } finally {
+      this.importing = false
+    }
+  }
+
+  private importSummary(result: ImportResult, playlistId: string | null): string {
+    const count = (n: number): string => (n === 1 ? 'one track' : `${n} tracks`)
+    const into = playlistId ? ` into ${this.playlistById.get(playlistId)?.name ?? 'the playlist'}` : ''
+    const parts: string[] = []
+    if (result.tracks.length) parts.push(`Imported ${count(result.tracks.length)}${into}.`)
+    else if (playlistId && result.skipped) parts.push(`Added ${count(result.skipped)}${into}.`)
+    if (result.skipped) {
+      parts.push(result.skipped === 1 ? 'One was already in the collection.' : `${result.skipped} were already in the collection.`)
+    }
+    if (result.failed.length) {
+      const first = result.failed[0]
+      const name = first.path.split(/[\\/]/).pop()
+      const files = result.failed.length === 1 ? 'One file' : `${result.failed.length} files`
+      parts.push(`${files} couldn’t be imported (${name}: ${first.error}).`)
+    }
+    return parts.join(' ') || 'Nothing to import'
+  }
+
+  /** Remove tracks from the collection and every playlist, optionally moving their files to the Trash. */
+  async removeFromCollection(ids: string[], trash = false): Promise<boolean> {
+    const local = ids.filter((id) => !id.startsWith('usb:'))
+    if (!local.length) {
+      this.notify('Device tracks follow the playlist synced to that volume')
+      return false
+    }
+    const paths = local
+      .map((id) => this.byId.get(id))
+      .filter((t): t is Track => !!t && !t.missing && !t.streaming && !!t.path)
+      .map((t) => t.path)
+    const result = await this.edit(() => api.removeFromCollection(local))
+    if (!result) return false
+    const gone = new Set(result.removed)
+    this.tracks = this.tracks.filter((t) => !gone.has(t.id))
+    this.playlists = result.playlists
+    if (this.sourceIds) this.sourceIds = this.sourceIds.filter((id) => !gone.has(id))
+    this.selection = new Set([...this.selection].filter((id) => !gone.has(id)))
+    if (this.selectedId && gone.has(this.selectedId)) this.selectedId = null
+    for (const listener of this.removeListeners) listener(result.removed)
+    const count = gone.size === 1 ? 'one track' : `${gone.size} tracks`
+    if (trash && paths.length) {
+      const failed = await window.api.trash(paths)
+      if (failed.length) {
+        const files = failed.length === 1 ? 'one file' : `${failed.length} files`
+        this.notify(`Removed ${count}, but couldn’t move ${files} to the Trash`)
+        return true
+      }
+    }
+    this.notify(`Removed ${count} from the collection`)
     return true
   }
 

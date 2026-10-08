@@ -1,4 +1,7 @@
+import base64
 import logging
+import os
+import re
 import shutil
 import tempfile
 import time
@@ -14,6 +17,7 @@ from pyrekordbox.utils import get_rekordbox_pid
 from sqlalchemy import event, select
 from sqlalchemy.orm import aliased
 
+from . import anlz_build, artwork
 from . import tags as file_tags
 from . import waveform
 
@@ -34,6 +38,13 @@ MAX_GRID_BPM = 300
 BEATS_PER_BAR = 4
 ANLZ_BACKUP_DIR = Path.home() / ".exportstudio" / "anlz-backup"
 NORMAL_PLAYLIST = 0
+STREAMING_URI = re.compile(r"^[a-z][a-z0-9+.-]+:", re.IGNORECASE)
+IMPORT_SUFFIXES = {".mp3", ".m4a", ".flac", ".wav", ".aif", ".aiff"}
+ANALYSED = 105
+PHRASE_TAG = "PSSI"
+CAMELOT = re.compile(r"(1[0-2]|[1-9])[AB]")
+TONICS = ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
+ENHARMONIC = {"Db": "C#", "Eb": "D#", "F#": "Gb", "Ab": "G#", "Bb": "A#"}
 
 TEXT_COLUMNS = {"title": "Title", "comment": "Commnt"}
 NUMBER_COLUMNS = {
@@ -144,6 +155,22 @@ def _check_grid(times: list[int], beats: list[int], bpms: list[float]) -> None:
         raise ValueError(f"Tempo must be between {MIN_GRID_BPM} and {MAX_GRID_BPM} BPM")
 
 
+def _is_local(path: str) -> bool:
+    return bool(path) and not STREAMING_URI.match(path)
+
+
+def _pick_candidate(candidates: list[Path], size: int | None) -> Path | None:
+    if len(candidates) <= 1 or not size:
+        return candidates[0] if candidates else None
+    for path in candidates:
+        try:
+            if path.stat().st_size == size:
+                return path
+        except OSError:
+            continue
+    return candidates[0]
+
+
 def _back_up_once(content_id: str, paths: list[Path]) -> None:
     folder = ANLZ_BACKUP_DIR / content_id
     folder.mkdir(parents=True, exist_ok=True)
@@ -211,6 +238,56 @@ def _renumber(db: Rekordbox6Database, songs: list[t.DjmdSongPlaylist]) -> None:
 
 def _ordered_songs(playlist: t.DjmdPlaylist) -> list[t.DjmdSongPlaylist]:
     return sorted(playlist.Songs, key=lambda s: s.TrackNo or 0)
+
+
+def _name_resolver(db: Rekordbox6Database):
+    """Look up artist, album, genre and label rows by name, adding any that are missing."""
+    names: dict[tuple, str] = {}
+
+    def named_id(table, add: str, name: str) -> str | None:
+        if not name:
+            return None
+        key = (table, name)
+        if key not in names:
+            row = db.query(table).filter_by(Name=name).first()
+            names[key] = (row or getattr(db, add)(name)).ID
+        return names[key]
+
+    return named_id
+
+
+def _key_names(tonic: int, minor: bool) -> list[str]:
+    """Names a key may be stored under: Camelot first, then the classic name and its enharmonic."""
+    root = (tonic + 3) % 12 if minor else tonic
+    camelot = f"{(7 * root + 7) % 12 + 1}{'A' if minor else 'B'}"
+    suffix = "m" if minor else ""
+    names = [camelot, TONICS[tonic] + suffix]
+    if TONICS[tonic] in ENHARMONIC:
+        names.append(ENHARMONIC[TONICS[tonic]] + suffix)
+    return names
+
+
+def _stored_path(path: Path) -> str:
+    return str(path).replace("\\", "/")
+
+
+def _import_fields(info: dict, named_id) -> dict:
+    fields = info["fields"]
+    out = {
+        "Length": info["length"] or None,
+        "BitRate": info["bitrate"] or None,
+        "SampleRate": info["sampleRate"] or None,
+        "BitDepth": info["bitDepth"] or None,
+        "ReleaseYear": fields.get("year") if 0 < fields.get("year", 0) <= 9999 else None,
+        "TrackNo": fields.get("trackNo") if 0 < fields.get("trackNo", 0) <= 9999 else None,
+    }
+    for name, column in TEXT_COLUMNS.items():
+        if fields.get(name):
+            out[column] = fields[name]
+    for name, (table, column, add) in NAMED_COLUMNS.items():
+        if fields.get(name):
+            out[column] = named_id(table, add, fields[name])
+    return {k: v for k, v in out.items() if v is not None}
 
 
 class Library:
@@ -402,6 +479,8 @@ class Library:
                 "bitDepth": depth or 0,
                 "fileType": FILE_TYPES.get(ftype) or Path(path).suffix.lstrip(".").upper(),
                 "path": path,
+                "missing": _is_local(path) and not Path(path).is_file(),
+                "streaming": bool(path) and not _is_local(path),
                 "fileSize": size or 0,
                 "hasArtwork": bool(image),
                 "trackNo": track_no or 0,
@@ -428,10 +507,16 @@ class Library:
         pl = self.db.get_playlist(ID=playlist_id)
         if pl is None or pl.is_folder:
             return []
+        C = t.DjmdContent
         if pl.is_smart_playlist:
-            return [cid for (cid,) in self.db.get_playlist_contents(pl, t.DjmdContent.ID).all()]
+            return [cid for (cid,) in self.db.get_playlist_contents(pl, C.ID).filter(C.rb_local_deleted == 0).all()]
         SP = t.DjmdSongPlaylist
-        stmt = select(SP.ContentID).where(SP.PlaylistID == playlist_id).order_by(SP.TrackNo)
+        stmt = (
+            select(SP.ContentID)
+            .join(C, C.ID == SP.ContentID)
+            .where(SP.PlaylistID == playlist_id, C.rb_local_deleted == 0)
+            .order_by(SP.TrackNo)
+        )
         return [cid for (cid,) in self.db.session.execute(stmt)]
 
     def histories(self) -> list[dict]:
@@ -448,8 +533,13 @@ class Library:
         ]
 
     def history_tracks(self, history_id: str) -> list[str]:
-        SH = t.DjmdSongHistory
-        stmt = select(SH.ContentID).where(SH.HistoryID == history_id).order_by(SH.TrackNo)
+        SH, C = t.DjmdSongHistory, t.DjmdContent
+        stmt = (
+            select(SH.ContentID)
+            .join(C, C.ID == SH.ContentID)
+            .where(SH.HistoryID == history_id, C.rb_local_deleted == 0)
+            .order_by(SH.TrackNo)
+        )
         return [cid for (cid,) in self.db.session.execute(stmt)]
 
     def my_tags(self) -> list[dict]:
@@ -649,16 +739,7 @@ class Library:
         contents = [self._content(cid) for cid in dict.fromkeys(ids)]
         file_fields = {k: v for k, v in fields.items() if k in file_tags.FILE_FIELDS}
         errors: list[str] = []
-        names: dict[tuple, str] = {}
-
-        def named_id(table, add: str, name: str) -> str | None:
-            if not name:
-                return None
-            key = (table, name)
-            if key not in names:
-                row = db.query(table).filter_by(Name=name).first()
-                names[key] = (row or getattr(db, add)(name)).ID
-            return names[key]
+        named_id = _name_resolver(db)
 
         def update() -> None:
             for content in contents:
@@ -684,6 +765,305 @@ class Library:
         if fields and contents:
             _commit(db, update)
         return {"tracks": self.tracks(ids=[c.ID for c in contents]), "tagErrors": errors}
+
+    def relocate_tracks(self, moves: dict[str, str]) -> list[dict]:
+        db = self._writable_db()
+        plan: list[tuple[t.DjmdContent, Path, str]] = []
+        for content_id, raw in moves.items():
+            target = Path(raw)
+            if not target.is_absolute() or not target.is_file():
+                raise FileNotFoundError(f"Can't find {target.name or raw}")
+            plan.append((self._content(content_id), target, str(target).replace("\\", "/")))
+
+        writes: dict[Path, dict[str, bytes]] = {}
+        for content, _, stored in plan:
+            dat = self._anlz_path(content)
+            if dat is None:
+                continue
+            files = []
+            for kind in ("DAT", "EXT", "2EX"):
+                anlz = dat.with_suffix(f".{kind}")
+                if not anlz.is_file():
+                    continue
+                tags = waveform.read_tags(anlz)
+                if waveform.PATH_TAG in tags:
+                    writes[anlz] = {waveform.PATH_TAG: waveform.build_path(tags[waveform.PATH_TAG][0], stored)}
+                    files.append(anlz)
+            if files:
+                _back_up_once(content.ID, files)
+        previous = {path: path.read_bytes() for path in writes}
+
+        def update() -> None:
+            for content, target, stored in plan:
+                old = content.FolderPath
+                _set(content, "FolderPath", stored)
+                if content.OrgFolderPath == old:
+                    _set(content, "OrgFolderPath", stored)
+                _set(content, "FileNameL", target.name)
+                _set(content, "FileSize", target.stat().st_size)
+
+        try:
+            for path, replace in writes.items():
+                waveform.write_tags(path, replace)
+            _commit(db, update)
+        except Exception:
+            for path, data in previous.items():
+                try:
+                    path.write_bytes(data)
+                except OSError:
+                    log.exception("Could not restore %s", path)
+            raise
+        self._content_cache.clear()
+        return self.tracks(ids=[content.ID for content, _, _ in plan])
+
+    def find_missing(self, ids: list[str], directory: str) -> dict:
+        """Look under `directory` for files with the same name as each missing track."""
+        root = Path(directory)
+        if not root.is_dir():
+            raise FileNotFoundError(f"Can't open the folder {directory}")
+        wanted: dict[str, list[tuple[str, int | None]]] = defaultdict(list)
+        for content_id in dict.fromkeys(ids):
+            content = self._content(content_id)
+            stored = content.FolderPath or ""
+            path = Path(stored)
+            if not _is_local(stored) or path.is_file():
+                continue
+            name = path.name or content.FileNameL or ""
+            if name:
+                wanted[name.casefold()].append((content.ID, content.FileSize))
+
+        found: dict[str, list[Path]] = defaultdict(list)
+        scanned = 0
+        if wanted:
+            for folder, dirs, files in os.walk(root):
+                dirs[:] = [d for d in dirs if not d.startswith(".")]
+                for name in files:
+                    scanned += 1
+                    key = name.casefold()
+                    if key in wanted:
+                        found[key].append(Path(folder, name))
+
+        matches = []
+        for key, rows in wanted.items():
+            for content_id, size in rows:
+                pick = _pick_candidate(found.get(key, []), size)
+                matches.append({"id": content_id, "path": str(pick) if pick else None})
+        return {"matches": matches, "scanned": scanned}
+
+    def import_tracks(self, paths: list[str], playlist_id: str | None = None, import_artwork: bool = True) -> dict:
+        """Add audio files to the collection, and optionally to the end of a playlist.
+
+        Files already in the collection are not added twice, but still go into the playlist. A track
+        that was removed from the collection comes back with its cues and analysis.
+        """
+        db = self._writable_db()
+        pl = self._editable_playlist(db, playlist_id) if playlist_id else None
+        C = t.DjmdContent
+        failed: list[dict] = []
+        wanted: list[tuple[Path, str]] = []
+        for raw in dict.fromkeys(paths):
+            path = Path(raw)
+            if path.suffix.lower() not in IMPORT_SUFFIXES:
+                failed.append({"path": raw, "error": f"rekordbox can't import {path.suffix or 'this'} files"})
+            elif not path.is_absolute() or not path.is_file():
+                failed.append({"path": raw, "error": "File not found"})
+            else:
+                wanted.append((path, _stored_path(path)))
+
+        rows: dict[str, list[t.DjmdContent]] = defaultdict(list)
+        stored = [s for _, s in wanted]
+        for i in range(0, len(stored), 500):
+            for row in db.query(C).filter(C.FolderPath.in_(stored[i : i + 500])):
+                rows[row.FolderPath].append(row)
+
+        infos: dict[str, dict] = {}
+        for path, key in wanted:
+            if any(not r.rb_local_deleted for r in rows.get(key, [])):
+                continue
+            try:
+                infos[key] = file_tags.read(path)
+            except Exception as e:
+                log.warning("Could not read tags from %s: %s", path, e)
+                infos[key] = {"fields": {}, "artwork": None, "length": 0, "bitrate": 0, "sampleRate": 0, "bitDepth": 0}
+
+        ordered: list[str] = []
+        added: list[str] = []
+        skipped = 0
+        named_id = _name_resolver(db)
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        def create() -> None:
+            nonlocal skipped
+            for path, key in wanted:
+                existing = rows.get(key, [])
+                live = next((r for r in existing if not r.rb_local_deleted), None)
+                if live is not None:
+                    skipped += 1
+                    ordered.append(str(live.ID))
+                    continue
+                if existing:
+                    content = existing[0]
+                    content.rb_local_deleted = 0
+                    _set(content, "FileSize", path.stat().st_size)
+                    _set(content, "StockDate", today)
+                else:
+                    info = infos[key]
+                    fields = _import_fields(info, named_id)
+                    fields.setdefault("Title", path.stem)
+                    content = db.add_content(key, **fields)
+                    content.StockDate = today
+                    content.DateCreated = today
+                    if import_artwork and info["artwork"]:
+                        try:
+                            content.ImagePath = artwork.save(info["artwork"], self.share_dir, content.UUID)
+                        except Exception as e:
+                            log.warning("Could not save artwork for %s: %s", path, e)
+                cid = str(content.ID)
+                ordered.append(cid)
+                added.append(cid)
+            if pl is not None:
+                present = {s.ContentID for s in pl.Songs}
+                for cid in dict.fromkeys(ordered):
+                    if cid not in present:
+                        db.add_to_playlist(pl, cid)
+
+        if wanted:
+            _commit(db, create)
+        self._content_cache.clear()
+        return {
+            "tracks": self.tracks(ids=added) if added else [],
+            "ids": list(dict.fromkeys(ordered)),
+            "skipped": skipped,
+            "failed": failed,
+            "playlist": self.playlist_tracks(pl.ID) if pl is not None else None,
+        }
+
+    def remove_from_collection(self, ids: list[str]) -> dict:
+        """Remove tracks from the collection the way rekordbox does: out of every playlist, with the
+        row marked deleted. Cues, tags, history and analysis files stay, as rekordbox leaves them."""
+        db = self._writable_db()
+        contents = [self._content(cid) for cid in dict.fromkeys(ids)]
+        drop = {c.ID for c in contents}
+        SP = t.DjmdSongPlaylist
+        playlist_ids = [
+            pid for (pid,) in db.session.execute(select(SP.PlaylistID).where(SP.ContentID.in_(drop)).distinct())
+        ]
+
+        def remove() -> None:
+            for pid in playlist_ids:
+                pl = db.get_playlist(ID=pid)
+                if pl is None:
+                    continue
+                songs = _ordered_songs(pl)
+                for song in songs:
+                    if song.ContentID in drop:
+                        db.delete(song)
+                _renumber(db, [s for s in songs if s.ContentID not in drop])
+            for content in contents:
+                _set(content, "rb_local_deleted", 1)
+
+        if contents:
+            _commit(db, remove)
+        self._content_cache.clear()
+        return {"removed": sorted(drop), "playlists": self.playlists()}
+
+    def apply_analysis(self, content_id: str, result: dict, options: dict) -> dict:
+        """Write an analysis from the native analyser: the ANLZ files, BPM, key and analysed flag.
+
+        A grid, key or waveform the track already has is kept unless `options["overwrite"]`. Cues
+        in existing files are always kept; phrases go when the grid they were counted on changes.
+        """
+        db = self._writable_db()
+        content = self._content(content_id)
+        overwrite = bool(options.get("overwrite"))
+        beats = [(int(n), int(tempo), int(ms)) for n, tempo, ms in result.get("beats") or []]
+        features = anlz_build.features_from_bytes(base64.b64decode(result.get("waveform") or ""))
+        audio_name = Path(content.FolderPath or "").name
+
+        relative = content.AnalysisDataPath or (
+            f"/PIONEER/USBANLZ/{content.UUID[:3]}/{content.UUID[3:]}/ANLZ0000.DAT"
+        )
+        dat = self.share_dir / relative.strip("/\\")
+        paths = {kind: dat.with_suffix(f".{kind}") for kind in anlz_build.WAVE_TAGS}
+        existing = {kind: waveform.read_tags(p) for kind, p in paths.items() if p.is_file()}
+        has_grid = bool(waveform.decode_beatgrid(existing.get("DAT")))
+        write_grid = bool(options.get("grid", True)) and bool(beats) and (overwrite or not has_grid)
+        key = result.get("key")
+        write_key = bool(options.get("key", True)) and key is not None and (overwrite or not content.KeyID)
+
+        fresh = anlz_build.new_files(audio_name, beats if write_grid else [], features)
+        waves = anlz_build.wave_tags(features) if len(features) else {}
+        writes: dict[Path, bytes] = {}
+        for kind, path in paths.items():
+            tags = existing.get(kind)
+            if tags is None:
+                writes[path] = fresh[kind]
+                continue
+            replace = {k: waves[k] for k in anlz_build.WAVE_TAGS[kind] if k in waves and (overwrite or k not in tags)}
+            drop: set[str] = set()
+            if write_grid and kind == "DAT":
+                replace[waveform.BEATGRID_TAG] = anlz_build.beatgrid_tag(beats)
+            if write_grid and kind == "EXT":
+                if waveform.EXTENDED_BEATGRID_TAG in tags:
+                    replace[waveform.EXTENDED_BEATGRID_TAG] = waveform.clear_extended_beatgrid(
+                        tags[waveform.EXTENDED_BEATGRID_TAG][0]
+                    )
+                drop.add(PHRASE_TAG)
+            if replace or drop:
+                writes[path] = anlz_build.patch_file(path.read_bytes(), replace, drop)
+
+        if existing:
+            _back_up_once(content.ID, [p for k, p in paths.items() if k in existing])
+        previous = {path: path.read_bytes() if path.is_file() else None for path in writes}
+
+        def update() -> None:
+            if write_grid:
+                _set(content, "BPM", int(round(float(result["bpm"]) * 100)))
+            if write_key:
+                _set(content, "KeyID", self._key_id(db, int(key["tonic"]), bool(key["minor"])))
+            _set(content, "AnalysisDataPath", relative)
+            _set(content, "Analysed", ANALYSED)
+            duration = int(round(float(result.get("duration") or 0)))
+            if duration and not content.Length:
+                _set(content, "Length", duration)
+            updated = str(content.AnalysisUpdated or "0")
+            content.AnalysisUpdated = str(int(updated) + 1 if updated.isdigit() else 1)
+
+        try:
+            for path, data in writes.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_name(path.name + ".tmp")
+                tmp.write_bytes(data)
+                os.replace(tmp, path)
+            _commit(db, update)
+        except Exception:
+            for path, data in previous.items():
+                try:
+                    if data is None:
+                        path.unlink(missing_ok=True)
+                    else:
+                        path.write_bytes(data)
+                except OSError:
+                    log.exception("Could not restore %s", path)
+            raise
+        self._content_cache.clear()
+        return self.tracks(ids=[content.ID])[0]
+
+    def _key_id(self, db: Rekordbox6Database, tonic: int, minor: bool) -> str:
+        """The key row for a key, in whichever notation the library already uses, added if missing."""
+        rows = db.query(t.DjmdKey).all()
+        names = _key_names(tonic, minor)
+        for row in rows:
+            if row.ScaleName in names:
+                return row.ID
+        camelot = sum(1 for row in rows if CAMELOT.fullmatch(row.ScaleName or ""))
+        name = names[0] if camelot * 2 >= len(rows) else names[1]
+        row = t.DjmdKey.create(
+            ID=str(db.generate_unused_id(t.DjmdKey)), ScaleName=name, Seq=len(rows) + 1, UUID=str(uuid4())
+        )
+        db.add(row)
+        db.flush()
+        return row.ID
 
     def _editable_playlist(self, db: Rekordbox6Database, playlist_id: str) -> t.DjmdPlaylist:
         pl = db.get_playlist(ID=playlist_id)

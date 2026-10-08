@@ -264,3 +264,84 @@ impl Task for Analyse {
 pub fn analyse(path: String, bands: bool) -> AsyncTask<Analyse> {
     AsyncTask::new(Analyse { path, bands })
 }
+
+#[napi(object)]
+pub struct TrackAnalysisOptionsJs {
+    pub grid: bool,
+    pub key: bool,
+    pub dynamic: bool,
+    pub min_bpm: f64,
+    pub max_bpm: f64,
+    pub high_precision: bool,
+    pub round_bpm: bool,
+}
+
+#[napi(object)]
+pub struct KeyJs {
+    /// 0 is C.
+    pub tonic: u32,
+    pub minor: bool,
+}
+
+#[napi(object)]
+pub struct TrackAnalysisJs {
+    pub duration: f64,
+    /// 0 when no grid was found or asked for.
+    pub bpm: f64,
+    /// Per beat: its number in the bar (1 to 4), tempo × 100, and time in ms.
+    pub beat_numbers: Uint8Array,
+    pub beat_tempos: Uint16Array,
+    pub beat_times: Uint32Array,
+    pub key: Option<KeyJs>,
+    /// Eight bytes per 1/150 s: peak and RMS of the whole signal, then the low, mid and high bands.
+    pub waveform: Uint8Array,
+}
+
+pub struct AnalyseTrack {
+    path: String,
+    options: es_analyse::Options,
+}
+
+impl Task for AnalyseTrack {
+    type Output = es_analyse::Analysis;
+    type JsValue = TrackAnalysisJs;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        es_analyse::analyse_file(Path::new(&self.path), &self.options)
+            .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))
+    }
+
+    fn resolve(&mut self, _env: Env, a: Self::Output) -> Result<Self::JsValue> {
+        Ok(TrackAnalysisJs {
+            duration: a.duration,
+            bpm: a.bpm,
+            beat_numbers: Uint8Array::new(a.beats.iter().map(|b| b.number).collect()),
+            beat_tempos: Uint16Array::new(a.beats.iter().map(|b| b.tempo_x100).collect()),
+            beat_times: Uint32Array::new(a.beats.iter().map(|b| b.time_ms).collect()),
+            key: a.key.map(|k| KeyJs {
+                tonic: k.tonic as u32,
+                minor: k.minor,
+            }),
+            waveform: Uint8Array::new(a.waveform),
+        })
+    }
+}
+
+/// Beatgrid, tempo, key and waveform loudness for a file, worked out off the main thread.
+#[napi(ts_return_type = "Promise<TrackAnalysisJs>")]
+pub fn analyse_track(path: String, options: TrackAnalysisOptionsJs) -> AsyncTask<AnalyseTrack> {
+    AsyncTask::new(AnalyseTrack {
+        path,
+        options: es_analyse::Options {
+            grid: options.grid,
+            key: options.key,
+            tempo: es_analyse::TempoOptions {
+                min_bpm: options.min_bpm,
+                max_bpm: options.max_bpm.max(options.min_bpm + 1.0),
+                dynamic: options.dynamic,
+                high_precision: options.high_precision,
+                round_bpm: options.round_bpm,
+            },
+        },
+    })
+}

@@ -6,20 +6,27 @@
   import { formatBpm, formatDuration, keyColor, TRACK_COLORS } from '$lib/format'
   import { chordLabel } from '$lib/keymap'
   import { TRACK_DRAG_TYPE } from '$lib/library.svelte'
+  import { droppedPaths, isFileDrag } from '$lib/library/drop'
   import type { SortKey } from '$lib/library/sort'
   import { menuAt, type MenuEntry, type MenuRequest } from '$lib/menu'
-  import { trackMenu } from '$lib/trackMenu'
+  import { trackMenu, type TrackMenuShortcut } from '$lib/trackMenu'
   import type { Track } from '$lib/types'
   import ContextMenu from './ContextMenu.svelte'
 
   let {
     onselect,
     onactivate,
-    onedit
+    onedit,
+    onautorelocate,
+    onremove,
+    onanalyse
   }: {
     onselect: (track: Track) => void
     onactivate: (track: Track) => void
     onedit: (tracks: Track[]) => void
+    onautorelocate: (tracks: Track[]) => void
+    onremove: (tracks: Track[]) => void
+    onanalyse: (tracks: Track[]) => void
   } = $props()
 
   const { library, player, keybinds } = getApp()
@@ -236,7 +243,7 @@
 
   let rowMenu = $state<MenuRequest | null>(null)
 
-  function shortcut(id: 'library.editInfo' | 'library.removeFromPlaylist'): string | undefined {
+  function shortcut(id: TrackMenuShortcut): string | undefined {
     const chord = keybinds.bindings[id][0]
     return chord ? chordLabel(chord) : undefined
   }
@@ -245,7 +252,17 @@
     e.preventDefault()
     pendingCollapse = null
     if (!library.selection.has(track.id)) onselect(track)
-    rowMenu = menuAt(e, 'Track', trackMenu(library, player, library.selectedTracks, { edit: onedit, shortcut }))
+    rowMenu = menuAt(
+      e,
+      'Track',
+      trackMenu(library, player, library.selectedTracks, {
+        edit: onedit,
+        autoRelocate: onautorelocate,
+        remove: onremove,
+        analyse: onanalyse,
+        shortcut
+      })
+    )
   }
 
   let ghost = $state<HTMLDivElement>()
@@ -298,8 +315,53 @@
     void library.moveInPlaylist(playlist.id, ids, list[index]?.id ?? null)
   }
 
+  let rowsEl = $state<HTMLDivElement>()
+  let fileDrop = $state(false)
+  const fileTarget = $derived(
+    library.source.type === 'collection' ? 'collection' : library.sourcePlaylist?.kind === 'playlist' ? 'playlist' : null
+  )
+
+  function fileDragOver(e: DragEvent): void {
+    if (library.dragging || !fileTarget || !isFileDrag(e)) return
+    e.preventDefault()
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+    fileDrop = true
+    if (fileTarget === 'playlist' && library.canReorder && rowsEl) {
+      const top = rowsEl.getBoundingClientRect().top
+      dropIndex = Math.max(0, Math.min(list.length, Math.round((e.clientY - top) / ROW)))
+    }
+  }
+
+  function fileDragLeave(e: DragEvent): void {
+    const into = e.relatedTarget
+    if (into instanceof Node && (e.currentTarget as HTMLElement).contains(into)) return
+    fileDrop = false
+    if (!library.dragging) dropIndex = null
+  }
+
+  function fileDropped(e: DragEvent): void {
+    if (!fileDrop) return
+    e.preventDefault()
+    fileDrop = false
+    const index = dropIndex
+    dropIndex = null
+    const paths = droppedPaths(e)
+    const playlist = library.sourcePlaylist
+    if (fileTarget === 'playlist' && playlist) {
+      const before = index === null ? undefined : (list[index]?.id ?? null)
+      void library.importFiles(paths, playlist.id, before)
+    } else {
+      void library.importFiles(paths)
+    }
+  }
+
+  function viewportDragOver(e: DragEvent): void {
+    fileDragOver(e)
+    autoScroll(e)
+  }
+
   function autoScroll(e: DragEvent): void {
-    if (!library.dragging || !library.canReorder || !viewport) return
+    if (!(library.dragging || fileDrop) || !library.canReorder || !viewport) return
     const rect = viewport.getBoundingClientRect()
     if (e.clientY < rect.top + ROW + AUTOSCROLL_EDGE) viewport.scrollTop -= AUTOSCROLL_STEP
     else if (e.clientY > rect.bottom - AUTOSCROLL_EDGE) viewport.scrollTop += AUTOSCROLL_STEP
@@ -323,7 +385,7 @@
     {#if player.track?.id === track.id}
       <AudioLines class={['ml-auto size-3.5 text-accent', player.playing && 'animate-pulse']} />
     {:else}
-      <span class="text-faint">{library.positions.get(track.id) ?? index + 1}</span>
+      <span class={track.missing ? 'text-warn/70' : 'text-faint'}>{library.positions.get(track.id) ?? index + 1}</span>
     {/if}
   {:else if column.id === 'color'}
     {#if TRACK_COLORS[track.color]}
@@ -345,14 +407,14 @@
       </span>
     {/if}
   {:else if column.id === 'title'}
-    <span class="truncate font-medium text-fg">{track.title}</span>
+    <span class={['truncate font-medium', track.missing ? 'text-warn' : 'text-fg']}>{track.title}</span>
     {#if track.remixer}
-      <span class="ml-1.5 truncate text-faint">{track.remixer}</span>
+      <span class={['ml-1.5 truncate', track.missing ? 'text-warn/70' : 'text-faint']}>{track.remixer}</span>
     {/if}
   {:else if column.id === 'bpm'}
-    <span class="text-fg/90">{formatBpm(track.bpm)}</span>
+    <span class={track.missing ? 'text-warn' : 'text-fg/90'}>{formatBpm(track.bpm)}</span>
   {:else if column.id === 'key'}
-    <span class="font-medium" style:color={keyColor(track.key) ?? 'inherit'}>{track.key}</span>
+    <span class="font-medium" style:color={(!track.missing && keyColor(track.key)) || 'inherit'}>{track.key}</span>
   {:else if column.id === 'duration'}
     {formatDuration(track.duration)}
   {:else if column.id === 'rating'}
@@ -365,7 +427,14 @@
       {/each}
     </span>
   {:else if column.id === 'fileType'}
-    <span class="rounded border border-line px-1 py-px text-[10px] font-medium text-faint">{track.fileType}</span>
+    <span
+      class={[
+        'rounded border px-1 py-px text-[10px] font-medium',
+        track.missing ? 'border-warn/40 text-warn' : 'border-line text-faint'
+      ]}
+    >
+      {track.fileType}
+    </span>
   {:else}
     <span class="truncate">{track[column.id as keyof Track]}</span>
   {/if}
@@ -378,7 +447,9 @@
     class="tabular relative h-full overflow-auto"
     role="presentation"
     onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}
-    ondragover={autoScroll}
+    ondragover={viewportDragOver}
+    ondragleave={fileDragLeave}
+    ondrop={fileDropped}
   >
     <div style:min-width="max(100%, {minWidth}px)">
       <div
@@ -429,6 +500,7 @@
       </div>
 
       <div
+        bind:this={rowsEl}
         class="relative"
         style:height="{list.length * ROW}px"
         role="rowgroup"
@@ -442,8 +514,9 @@
             {@const selected = library.selection.has(track.id)}
             <div
               class={[
-                'grid cursor-default items-center text-[12.5px] text-muted',
-                selected ? 'bg-select text-fg' : 'hover:bg-surface',
+                'grid cursor-default items-center text-[12.5px]',
+                selected ? 'bg-select' : 'hover:bg-surface',
+                track.missing ? 'text-warn' : selected ? 'text-fg' : 'text-muted',
                 library.canReorder && dragged.has(track.id) && 'opacity-40'
               ]}
               style:grid-template-columns={template}
@@ -451,6 +524,7 @@
               role="row"
               tabindex="-1"
               aria-selected={selected}
+              title={track.missing ? 'Audio file not found. Right-click to relocate it.' : undefined}
               draggable={library.source.type !== 'device'}
               onmousedown={(e) => rowMousedown(e, track)}
               onmouseup={(e) => rowMouseup(e, track)}
@@ -489,6 +563,16 @@
       {/if}
     </div>
   </div>
+
+  {#if fileDrop && dropIndex === null}
+    <div
+      class="pointer-events-none absolute inset-0 z-20 grid place-items-center bg-accent-soft/40 ring-2 ring-accent/70 ring-inset"
+    >
+      <span class="rounded-md bg-raised px-3 py-1.5 text-[12.5px] font-medium text-fg shadow-lg">
+        Import into {library.sourceTitle}
+      </span>
+    </div>
+  {/if}
 
   {#if drag}
     <div class="fixed inset-0 z-50 cursor-col-resize"></div>

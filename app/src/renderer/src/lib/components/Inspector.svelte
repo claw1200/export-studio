@@ -258,12 +258,12 @@
 
     {#await detailPromise}
       {@render cues(null)}
-      {@render file(null)}
+      {@render file()}
     {:then detail}
       {@render cues(player.detail?.id === detail.id ? player.detail : detail)}
-      {@render file(detail)}
+      {@render file()}
     {:catch}
-      {@render file(null)}
+      {@render file()}
     {/await}
   {:else}
     <div class="grid h-full place-items-center p-6 text-center text-[12px] text-faint">
@@ -335,10 +335,10 @@
   {/if}
 {/snippet}
 
-{#snippet file(detail: TrackDetail | null)}
+{#snippet file()}
   {#if track}
     <div class="mt-auto border-t border-line-soft px-4 py-3">
-      {#if detail && !detail.fileExists}
+      {#if track.missing}
         <p class="mb-2 flex items-center gap-1.5 text-[11px] text-danger">
           <AlertTriangle class="size-3.5" /> File missing on disk
         </p>

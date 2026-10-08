@@ -22,7 +22,9 @@ import type { Beatgrid, Cue, Track, TrackDetail } from './types'
 import type { Waveform } from './waveform/data'
 
 const CUE_HIT_TOLERANCE = 0.05
+/** Matches the error the audio bridge sends when a track's file can't be resolved. */
 const FILE_MISSING = 'Audio file not found'
+const STREAMING = 'Streaming tracks can’t be played here'
 
 export type CuePlacement = 'playhead' | 'cuePoint'
 
@@ -54,8 +56,14 @@ export class Player {
   previewAt = $state<number | null>(null)
   private holding = $state.raw<(Hold & { key: HoldKey }) | null>(null)
   private previewOwner: string | null = null
+  private fileListeners = new Set<(id: string, missing: boolean) => void>()
 
   constructor() {
+    this.deck.onSettled = () => {
+      const id = this.track?.id
+      const missing = this.fileMissing
+      if (id && missing !== null) for (const listener of this.fileListeners) listener(id, missing)
+    }
     api.onEvent((event) => {
       if (event !== 'library.locked') return
       this.grid.cancel()
@@ -107,8 +115,24 @@ export class Player {
     return this.deck.loop
   }
 
+  /** Whether the deck's track file is missing, as found by the latest attempt to load it. Null until it is known. */
+  get fileMissing(): boolean | null {
+    const track = this.track
+    if (!track) return null
+    if (track.streaming) return false
+    if (this.deck.error === FILE_MISSING) return true
+    return this.deck.ready ? false : null
+  }
+
+  /** Hears whether the deck's track file was found, each time a load finishes. */
+  onFileChecked(listener: (id: string, missing: boolean) => void): () => void {
+    this.fileListeners.add(listener)
+    return () => this.fileListeners.delete(listener)
+  }
+
   get audioError(): string | null {
-    if (this.detail && !this.detail.fileExists) return FILE_MISSING
+    if (this.track?.streaming) return STREAMING
+    if (this.fileMissing) return FILE_MISSING
     return this.session.error ?? this.deck.error
   }
 
@@ -138,10 +162,32 @@ export class Player {
   }
 
   async load(track: Track, autoplay = false): Promise<void> {
-    if (this.track?.id === track.id) {
+    if (this.track?.id === track.id && !this.fileMissing) {
       if (autoplay) this.play()
       return
     }
+    await this.open(track, autoplay)
+  }
+
+  /** Load the deck's track again, e.g. after its audio file was relocated. */
+  async reopen(track: Track): Promise<void> {
+    if (this.track?.id === track.id) await this.open(track, false)
+  }
+
+  /** Empty the deck, e.g. when its track leaves the collection. */
+  eject(): void {
+    if (!this.track) return
+    this.cuePoint = 0
+    this.holding = null
+    this.previewOwner = null
+    this.previewAt = null
+    this.grid.cancel()
+    this.deck.unload()
+    this.session.close()
+    this.display.reload()
+  }
+
+  private async open(track: Track, autoplay: boolean): Promise<void> {
     this.cuePoint = 0
     this.holding = null
     this.previewOwner = null

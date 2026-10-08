@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte'
   import { getApp } from '$lib/context'
 
   let {
@@ -7,7 +8,8 @@
     confirmLabel,
     danger = false,
     onconfirm,
-    onclose
+    onclose,
+    children
   }: {
     title: string
     message: string
@@ -15,6 +17,7 @@
     danger?: boolean
     onconfirm: () => void
     onclose: () => void
+    children?: Snippet
   } = $props()
 
   const { keybinds } = getApp()
@@ -44,6 +47,7 @@
   >
     <h2 class="text-[13.5px] font-semibold">{title}</h2>
     <p class="mt-1.5 text-[12.5px] leading-relaxed text-muted">{message}</p>
+    {@render children?.()}
     <div class="mt-5 flex justify-end gap-2">
       <button value="cancel" class="h-7 rounded-md px-3 text-[12.5px] text-muted hover:bg-hover hover:text-fg">
         Cancel

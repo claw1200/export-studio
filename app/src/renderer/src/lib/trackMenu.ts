@@ -1,4 +1,6 @@
 import {
+  AudioWaveform,
+  FileSearch,
   Folder,
   FolderSearch,
   ListMinus,
@@ -8,8 +10,10 @@ import {
   Palette,
   Pencil,
   Plus,
+  ScanSearch,
   Star,
-  Tag
+  Tag,
+  Trash2
 } from '@lucide/svelte'
 import { TRACK_COLORS } from './format'
 import type { Library } from './library.svelte'
@@ -18,9 +22,18 @@ import { tidy, type MenuEntry } from './menu'
 import type { Player } from './player.svelte'
 import type { Track, TrackEdit } from './types'
 
+export type TrackMenuShortcut =
+  | 'library.editInfo'
+  | 'library.removeFromPlaylist'
+  | 'library.removeFromCollection'
+  | 'library.analyse'
+
 export interface TrackMenuActions {
   edit: (tracks: Track[]) => void
-  shortcut: (id: 'library.editInfo' | 'library.removeFromPlaylist') => string | undefined
+  autoRelocate: (tracks: Track[]) => void
+  remove: (tracks: Track[]) => void
+  analyse: (tracks: Track[]) => void
+  shortcut: (id: TrackMenuShortcut) => string | undefined
 }
 
 export const SEPARATOR: MenuEntry = { kind: 'separator' }
@@ -87,6 +100,9 @@ export function trackMenu(library: Library, player: Player, tracks: Track[], act
   const update = (fields: TrackEdit): void => void library.updateTracks(ids, fields)
   const color = shared(tracks, 'color')
   const rating = shared(tracks, 'rating')
+  const missing = tracks.filter((t) => t.missing && !t.id.startsWith('usb:'))
+  const device = tracks.some((t) => t.id.startsWith('usb:'))
+  const analysable = tracks.filter((t) => !t.missing && !t.streaming)
 
   return tidy([
     tracks.length > 1 && { kind: 'header', label: `${tracks.length} tracks` },
@@ -143,7 +159,43 @@ export function trackMenu(library: Library, player: Player, tracks: Track[], act
       }))
     },
     SEPARATOR,
-    single && { label: REVEAL_LABEL, icon: FolderSearch, onselect: () => window.api.showItemInFolder(single.path) },
+    single &&
+      missing.length > 0 && {
+        label: 'Relocate…',
+        icon: FileSearch,
+        disabled: locked,
+        onselect: () => void library.locate(single)
+      },
+    missing.length > 0 && {
+      label: missing.length === 1 ? 'Auto-relocate…' : `Auto-relocate ${missing.length} tracks…`,
+      icon: ScanSearch,
+      disabled: locked,
+      onselect: () => actions.autoRelocate(missing)
+    },
+    single &&
+      !single.missing && {
+        label: REVEAL_LABEL,
+        icon: FolderSearch,
+        onselect: () => window.api.showItemInFolder(single.path)
+      },
+    !device && SEPARATOR,
+    !device && {
+      label:
+        (analysable.length && analysable.every((t) => t.analysed) ? 'Re-analyse' : 'Analyse') +
+        (analysable.length > 1 ? ` ${analysable.length} tracks` : ''),
+      icon: AudioWaveform,
+      shortcut: actions.shortcut('library.analyse'),
+      disabled: locked || !analysable.length,
+      onselect: () => actions.analyse(analysable)
+    },
+    !device && {
+      label: single ? 'Remove from collection…' : `Remove ${tracks.length} tracks from collection…`,
+      icon: Trash2,
+      danger: true,
+      shortcut: actions.shortcut('library.removeFromCollection'),
+      disabled: locked,
+      onselect: () => actions.remove(tracks)
+    },
     locked && SEPARATOR,
     locked && unlockEntry(library, player)
   ])

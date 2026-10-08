@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from mutagen import File as open_audio
@@ -102,6 +103,78 @@ def _write_vorbis(audio, fields: dict) -> None:
             audio.tags[key] = [text]
         elif key in audio.tags:
             del audio.tags[key]
+
+
+def _first_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else ""
+    if isinstance(value, MP4FreeForm) or isinstance(value, bytes):
+        value = bytes(value).decode("utf-8", "replace")
+    if hasattr(value, "text"):
+        value = value.text[0] if value.text else ""
+    return str(value).strip()
+
+
+def _number(text: str) -> int:
+    match = re.match(r"\s*(\d+)", text or "")
+    return int(match.group(1)) if match else 0
+
+
+def _read_id3(tags: ID3) -> tuple[dict, bytes | None]:
+    fields = {name: _first_text(tags.get(frame.__name__)) for name, frame in ID3_FRAMES.items()}
+    comments = tags.getall("COMM")
+    fields["comment"] = _first_text(comments[0]) if comments else ""
+    pictures = tags.getall("APIC")
+    front = next((p for p in pictures if p.type == 3), pictures[0] if pictures else None)
+    return fields, front.data if front else None
+
+
+def _read_mp4(tags) -> tuple[dict, bytes | None]:
+    fields = {name: _first_text(tags.get(key)) for name, key in MP4_KEYS.items()}
+    fields.update({name: _first_text(tags.get(key)) for name, key in MP4_FREEFORM.items()})
+    track = tags.get("trkn")
+    fields["trackNo"] = str(track[0][0]) if track else ""
+    covers = tags.get("covr") or []
+    return fields, bytes(covers[0]) if covers else None
+
+
+def _read_vorbis(audio) -> tuple[dict, bytes | None]:
+    tags = audio.tags or {}
+    fields = {name: _first_text(tags.get(key)) for name, key in VORBIS_KEYS.items()}
+    pictures = list(getattr(audio, "pictures", []) or [])
+    front = next((p for p in pictures if p.type == 3), pictures[0] if pictures else None)
+    return fields, front.data if front else None
+
+
+def read(path: Path) -> dict:
+    """Read the track fields, stream info and front cover from an audio file's own tags."""
+    audio = open_audio(path)
+    if audio is None:
+        raise ValueError(f"Unsupported file type: {path.suffix}")
+    fields: dict = {}
+    art: bytes | None = None
+    if isinstance(audio, MP4):
+        if audio.tags is not None:
+            fields, art = _read_mp4(audio.tags)
+    elif isinstance(audio, FLAC):
+        fields, art = _read_vorbis(audio)
+    elif isinstance(audio.tags, ID3):
+        fields, art = _read_id3(audio.tags)
+    fields = {name: value for name, value in fields.items() if value}
+    for name in ("year", "trackNo"):
+        if name in fields:
+            fields[name] = _number(fields[name])
+    info = audio.info
+    return {
+        "fields": fields,
+        "artwork": art,
+        "length": int(round(getattr(info, "length", 0) or 0)),
+        "bitrate": int(round((getattr(info, "bitrate", 0) or 0) / 1000)),
+        "sampleRate": int(getattr(info, "sample_rate", 0) or 0),
+        "bitDepth": int(getattr(info, "bits_per_sample", 0) or 0),
+    }
 
 
 def write(path: Path, fields: dict) -> None:

@@ -1,6 +1,23 @@
 <script lang="ts">
-  import { RefreshCw, Search, X, PanelRight, Lock, LockOpen, Settings, Volume1, Volume2, VolumeX } from '@lucide/svelte'
+  import {
+    RefreshCw,
+    Search,
+    X,
+    PanelRight,
+    Lock,
+    LockOpen,
+    Settings,
+    Volume1,
+    Volume2,
+    VolumeX,
+    FilePlus,
+    FolderInput,
+    Import
+  } from '@lucide/svelte'
   import { getApp } from '$lib/context'
+  import { chordLabel } from '$lib/keymap'
+  import type { MenuRequest } from '$lib/menu'
+  import ContextMenu from './ContextMenu.svelte'
   import SettingsDialog from './SettingsDialog.svelte'
 
   let {
@@ -15,8 +32,40 @@
   const silent = $derived(player.output.muted || player.output.volume === 0)
   const isMac = window.api.platform === 'darwin'
   let settingsOpen = $state(false)
+  let importMenu = $state<MenuRequest | null>(null)
 
-  $effect(() => keybinds.register({ 'app.settings': () => (settingsOpen = true) }))
+  $effect(() =>
+    keybinds.register({
+      'app.settings': () => (settingsOpen = true),
+      'library.import': () => void library.chooseImport('files')
+    })
+  )
+
+  $effect(() =>
+    window.api.onMenu((command) => {
+      if (command === 'settings') settingsOpen = true
+      else void library.chooseImport(command === 'import.folder' ? 'folder' : 'files')
+    })
+  )
+
+  function openImportMenu(e: MouseEvent): void {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const shortcut = keybinds.bindings['library.import'][0]
+    importMenu = {
+      x: rect.left,
+      y: rect.bottom + 4,
+      label: 'Import',
+      items: [
+        {
+          label: 'Import tracks…',
+          icon: FilePlus,
+          shortcut: shortcut ? chordLabel(shortcut) : undefined,
+          onselect: () => void library.chooseImport('files')
+        },
+        { label: 'Import folder…', icon: FolderInput, onselect: () => void library.chooseImport('folder') }
+      ]
+    }
+  }
 
   const snapshotLabel = $derived(
     library.info?.snapshotTime
@@ -44,6 +93,10 @@
 
 {#if settingsOpen}
   <SettingsDialog onclose={() => (settingsOpen = false)} />
+{/if}
+
+{#if importMenu}
+  <ContextMenu menu={importMenu} onclose={() => (importMenu = null)} />
 {/if}
 
 <header
@@ -120,6 +173,21 @@
           <Lock class="size-3" />
         {/if}
         {library.writable ? 'Editing' : 'Read-only'}
+      </button>
+      <button
+        class="no-drag flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-faint hover:bg-hover hover:text-muted disabled:opacity-50 disabled:hover:bg-transparent"
+        onclick={openImportMenu}
+        disabled={library.importing}
+        aria-haspopup="menu"
+        aria-expanded={!!importMenu}
+        title={library.writable ? 'Import tracks into the collection' : 'Unlock editing to import tracks'}
+      >
+        {#if library.importing}
+          <RefreshCw class="size-3 animate-spin" />
+        {:else}
+          <Import class="size-3" />
+        {/if}
+        Import
       </button>
     {/if}
 

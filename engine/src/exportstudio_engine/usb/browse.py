@@ -85,6 +85,8 @@ def track_row(volume: Path, track: DeviceTrack) -> dict:
         "bitDepth": track.bit_depth,
         "fileType": FILE_TYPES.get(track.file_type) or Path(track.filename or track.path).suffix.lstrip(".").upper(),
         "path": path,
+        "missing": audio is None or not audio.is_file(),
+        "streaming": False,
         "fileSize": track.file_size,
         "hasArtwork": False,
         "trackNo": track.track_no,

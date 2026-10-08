@@ -38,6 +38,11 @@ export class AudioBridge {
     }
   }
 
+  /** The native addon, shared with the track analyser. Null when it failed to load. */
+  addon(): NativeModule | null {
+    return this.native
+  }
+
   register(): void {
     ipcMain.handle('audio:status', (): AudioStatus => {
       if (!this.failure) this.open()

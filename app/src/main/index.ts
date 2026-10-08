@@ -1,13 +1,18 @@
-import { app, shell, BrowserWindow, ipcMain, nativeTheme } from 'electron'
+import { app, shell, BrowserWindow, dialog, ipcMain, nativeTheme, type OpenDialogOptions } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { AnalysisQueue } from './analysis'
 import { AudioBridge } from './audio/bridge'
 import { Engine } from './engine'
+import { buildMenu, registerFiles } from './files'
 import { handleMediaProtocol, registerMediaScheme } from './media'
+
+const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'aac', 'mp4', 'flac', 'wav', 'aif', 'aiff', 'ogg', 'alac']
 
 const engine = new Engine()
 const audio = new AudioBridge(engine)
+const analysis = new AnalysisQueue(engine, () => audio.addon())
 registerMediaScheme()
 
 function createWindow(): BrowserWindow {
@@ -62,6 +67,9 @@ app.whenReady().then(() => {
   engine.start().catch((err) => console.error('[engine] failed to start', err))
   handleMediaProtocol(engine)
   audio.register()
+  analysis.register()
+  buildMenu()
+  registerFiles()
 
   ipcMain.handle('engine:call', async (_e, method: string, params?: unknown) => {
     try {
@@ -72,6 +80,20 @@ app.whenReady().then(() => {
     }
   })
   ipcMain.handle('shell:showItem', (_e, path: string) => shell.showItemInFolder(path))
+  ipcMain.handle('dialog:choose', async (e, kind: 'audio' | 'folder', defaultPath?: string) => {
+    const options: OpenDialogOptions =
+      kind === 'audio'
+        ? {
+            title: 'Locate audio file',
+            properties: ['openFile'],
+            filters: [{ name: 'Audio', extensions: AUDIO_EXTENSIONS }]
+          }
+        : { title: 'Choose a folder to search', properties: ['openDirectory'] }
+    if (defaultPath) options.defaultPath = defaultPath
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
 
   createWindow()
 

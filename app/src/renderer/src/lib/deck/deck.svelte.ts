@@ -33,6 +33,8 @@ export class Deck {
   tempo = $state(1)
   /** Keep the key when the tempo changes. */
   masterTempo = $state(false)
+  /** Called when a load finishes, with the engine's error if it failed. */
+  onSettled: ((error: string | null) => void) | null = null
 
   private request = 0
   private sent = 0
@@ -202,12 +204,14 @@ export class Deck {
       this.ready = false
       this.playing = false
       this.pending = null
+      this.onSettled?.(this.error)
       return
     }
     this.ready = true
     if (event.sampleRate > 0 && event.totalFrames > 0) this.duration = event.totalFrames / event.sampleRate
     this.anchor = { ...NO_ANCHOR, sampleRate: event.sampleRate, at: performance.now(), rate: this.tempo }
     this.flush()
+    this.onSettled?.(null)
   }
 
   /** Replays what happened while the track loaded. */

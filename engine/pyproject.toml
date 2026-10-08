@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "mutagen>=1.48.1",
     "numpy>=2.0",
+    "pillow>=11",
     "pyrekordbox>=0.4.4",
 ]
 

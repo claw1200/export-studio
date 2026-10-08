@@ -1,11 +1,13 @@
 <script lang="ts">
   import { LoaderCircle, AlertTriangle } from '@lucide/svelte'
   import { setApp } from '$lib/context'
+  import { Analysis } from '$lib/analysis.svelte'
   import { Library } from '$lib/library.svelte'
   import { Player } from '$lib/player.svelte'
   import { Keybinds } from '$lib/keybinds.svelte'
   import { HOT_CUE_ACTIONS } from '$lib/keymap'
   import { HOT_CUE_KINDS } from '$lib/format'
+  import { isFileDrag } from '$lib/library/drop'
   import type { Track } from '$lib/types'
   import TitleBar from '$lib/components/TitleBar.svelte'
   import Sidebar from '$lib/components/Sidebar.svelte'
@@ -14,11 +16,29 @@
   import Inspector from '$lib/components/Inspector.svelte'
   import StatusBar from '$lib/components/StatusBar.svelte'
   import TrackEditDialog from '$lib/components/TrackEditDialog.svelte'
+  import RelocateDialog from '$lib/components/RelocateDialog.svelte'
+  import RemoveDialog from '$lib/components/RemoveDialog.svelte'
 
   const library = new Library()
   const player = new Player()
   const keybinds = new Keybinds()
-  setApp({ library, player, keybinds })
+  const analysis = new Analysis()
+  setApp({ library, player, keybinds, analysis })
+
+  library.onImported((tracks) => analysis.afterImport(tracks))
+  library.onRemoved((ids) => {
+    if (player.track && ids.includes(player.track.id)) player.eject()
+  })
+  analysis.onFinished((track) => {
+    if (!track) return
+    library.updateRows([track])
+    if (player.track?.id === track.id) void player.refreshDetail()
+  })
+  analysis.onBatchDone((analysed, failed, error) => {
+    if (!failed) return
+    const count = failed === 1 ? 'one track' : `${failed} tracks`
+    library.notify(`Analysed ${analysed}, but couldn’t analyse ${count}: ${error ?? 'unknown error'}`)
+  })
 
   const PANELS = {
     sidebar: { min: 180, max: 400, fallback: 240 },
@@ -88,10 +108,35 @@
   library.onTracksUpdated((rows) => {
     const loaded = player.track
     const fresh = loaded && rows.find((t) => t.id === loaded.id)
-    if (fresh) player.track = fresh
+    if (!fresh) return
+    if (fresh.path !== loaded.path) void player.reopen(fresh)
+    else player.track = fresh
   })
 
+  player.onFileChecked((id, missing) => library.setMissing(id, missing))
+
   let editing = $state.raw<Track[] | null>(null)
+  let relocating = $state.raw<Track[] | null>(null)
+  let removing = $state.raw<Track[] | null>(null)
+
+  function remove(tracks: Track[]): void {
+    const local = tracks.filter((t) => !t.id.startsWith('usb:'))
+    if (!local.length) return
+    if (!library.writable) library.notify('Unlock editing to remove tracks')
+    else removing = local
+  }
+
+  function analyse(tracks: Track[]): void {
+    if (!tracks.length) return
+    if (!library.writable) library.notify('Unlock editing to analyse tracks')
+    else analysis.analyse(tracks)
+  }
+
+  function autoRelocate(tracks: Track[]): void {
+    if (!tracks.length) return
+    if (!library.writable) library.notify('Unlock editing to relocate tracks')
+    else relocating = tracks
+  }
 
   function edit(tracks: Track[]): void {
     if (!tracks.length) return
@@ -192,12 +237,23 @@
       'library.reload': reload,
       'library.selectAll': () => library.selectAll(),
       'library.editInfo': () => edit(library.selectedTracks),
-      'library.removeFromPlaylist': removeSelectedFromPlaylist
+      'library.removeFromPlaylist': removeSelectedFromPlaylist,
+      'library.removeFromCollection': () => remove(library.selectedTracks),
+      'library.analyse': () => analyse(library.selectedTracks)
     })
   )
 </script>
 
 <svelte:window
+  ondragover={(e) => {
+    if (isFileDrag(e) && !e.defaultPrevented) {
+      e.preventDefault()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'none'
+    }
+  }}
+  ondrop={(e) => {
+    if (isFileDrag(e)) e.preventDefault()
+  }}
   onkeydown={keybinds.keydown}
   onkeyup={keybinds.keyup}
   onblur={keybinds.releaseAll}
@@ -274,7 +330,15 @@
         {@render panelHandle('sidebar', 'right')}
       </div>
       <main class="min-w-0 flex-1 bg-bg">
-        <TrackTable bind:this={table} onselect={select} onactivate={activate} onedit={edit} />
+        <TrackTable
+          bind:this={table}
+          onselect={select}
+          onactivate={activate}
+          onedit={edit}
+          onautorelocate={autoRelocate}
+          onremove={remove}
+          onanalyse={analyse}
+        />
       </main>
       {#if inspectorOpen}
         <div class="relative h-full shrink-0" style:width="{inspectorWidth}px">
@@ -292,5 +356,13 @@
 
   {#if editing}
     <TrackEditDialog tracks={editing} onclose={() => (editing = null)} />
+  {/if}
+
+  {#if relocating}
+    <RelocateDialog tracks={relocating} onclose={() => (relocating = null)} />
+  {/if}
+
+  {#if removing}
+    <RemoveDialog tracks={removing} onclose={() => (removing = null)} />
   {/if}
 </div>
