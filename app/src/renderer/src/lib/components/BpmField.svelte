@@ -42,7 +42,7 @@
 <input
   bind:this={input}
   class={[
-    'tabular w-[76px] rounded border bg-transparent px-1 py-0.5 font-mono text-[15px] font-semibold text-fg outline-none',
+    'tabular w-[76px] rounded border bg-transparent px-1 py-0.5 font-mono text-[15px] font-semibold text-fg',
     typing
       ? 'cursor-text border-accent/60 bg-bg'
       : 'cursor-ns-resize touch-none border-transparent select-none hover:border-line-soft'

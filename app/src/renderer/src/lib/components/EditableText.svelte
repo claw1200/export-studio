@@ -53,7 +53,7 @@
   }
 
   const fieldClass =
-    'w-full min-w-0 rounded border border-accent/60 bg-bg px-1.5 py-0.5 text-fg select-text focus:outline-none'
+    'w-full min-w-0 rounded border border-accent/60 bg-bg px-1.5 py-0.5 text-fg select-text'
 </script>
 
 {#if editing}

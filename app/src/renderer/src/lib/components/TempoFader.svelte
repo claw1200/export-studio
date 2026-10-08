@@ -77,7 +77,7 @@
   <div class="flex flex-col items-center text-[10px] leading-none font-semibold text-faint">
     <span aria-hidden="true">−</span>
     <div
-      class="relative my-1 w-5 flex-1 cursor-ns-resize touch-none rounded outline-none focus-visible:ring-1 focus-visible:ring-accent"
+      class="relative my-1 w-5 flex-1 cursor-ns-resize touch-none rounded"
       role="slider"
       tabindex="0"
       aria-label="Tempo"

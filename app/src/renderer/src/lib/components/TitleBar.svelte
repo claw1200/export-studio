@@ -60,7 +60,7 @@
       type="search"
       placeholder="Search {library.sourceTitle}"
       spellcheck="false"
-      class="h-7 w-full rounded-md border border-line bg-surface pr-7 pl-8 text-[12.5px] text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+      class="h-7 w-full rounded-md border border-line bg-surface pr-7 pl-8 text-[12.5px] text-fg placeholder:text-faint focus:border-accent/60 [&::-webkit-search-cancel-button]:hidden"
       onkeydown={(e) => {
         if (e.key === 'Escape') {
           library.query = ''

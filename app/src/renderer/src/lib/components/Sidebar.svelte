@@ -223,7 +223,7 @@
           value={node.name}
           spellcheck="false"
           aria-label="Playlist name"
-          class="h-5.5 min-w-0 flex-1 rounded border border-accent/60 bg-bg px-1.5 text-[12.5px] text-fg focus:outline-none"
+          class="h-5.5 min-w-0 flex-1 rounded border border-accent/60 bg-bg px-1.5 text-[12.5px] text-fg"
           onkeydown={(e) => renameKey(e, node)}
           onblur={(e) => commitRename(node, e.currentTarget.value)}
         />

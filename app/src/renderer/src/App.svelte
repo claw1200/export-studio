@@ -151,21 +151,11 @@
     if (e.target.closest('input, textarea, select, [contenteditable]')) return
     const active = document.activeElement
     if (active instanceof HTMLElement && isTypingTarget(active)) active.blur()
-    if (e.target.closest('[draggable="true"]')) return
-    if (e.target.closest('button, a, [tabindex]')) e.preventDefault()
-  }
-
-  function blurFocusedControl(): void {
-    const active = document.activeElement
-    if (active instanceof HTMLElement && active !== document.body && !isTypingTarget(active)) active.blur()
   }
 
   $effect(() =>
     keybinds.register({
-      'deck.playPause': () => {
-        blurFocusedControl()
-        player.toggle()
-      },
+      'deck.playPause': () => player.toggle(),
       'deck.cue': { down: () => player.cueDown(), up: () => player.cueUp() },
       'deck.loopIn': () => player.setLoopIn(),
       'deck.loopOut': () => player.setLoopOut(),

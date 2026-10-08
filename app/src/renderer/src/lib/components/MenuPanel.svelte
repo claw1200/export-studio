@@ -109,7 +109,7 @@
 <div
   bind:this={panel}
   {@attach place}
-  class="fixed z-50 max-h-[calc(100vh-16px)] min-w-44 overflow-y-auto rounded-lg border border-line bg-surface p-1 shadow-xl shadow-black/40 focus:outline-none"
+  class="fixed z-50 max-h-[calc(100vh-16px)] min-w-44 overflow-y-auto rounded-lg border border-line bg-surface p-1 shadow-xl shadow-black/40"
   style:left="{x}px"
   style:top="{y}px"
   role="menu"
@@ -132,7 +132,7 @@
         data-item
         data-index={index}
         class={[
-          'flex w-full max-w-72 items-center gap-2 rounded-md px-2 py-1 text-left text-[12.5px] focus:outline-none disabled:cursor-default disabled:text-faint',
+          'flex w-full max-w-72 items-center gap-2 rounded-md px-2 py-1 text-left text-[12.5px] disabled:cursor-default disabled:text-faint',
           item.danger ? 'text-danger' : 'text-fg',
           open?.index === index ? 'bg-hover' : 'enabled:hover:bg-hover enabled:focus:bg-hover'
         ]}

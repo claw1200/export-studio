@@ -158,7 +158,7 @@
   }
 
   const inputClass =
-    'h-7 w-full rounded-md border border-line bg-bg px-2 text-[12.5px] text-fg placeholder:text-faint select-text focus:border-accent/60 focus:outline-none disabled:opacity-50'
+    'h-7 w-full rounded-md border border-line bg-bg px-2 text-[12.5px] text-fg placeholder:text-faint select-text focus:border-accent/60 disabled:opacity-50'
 </script>
 
 <dialog
