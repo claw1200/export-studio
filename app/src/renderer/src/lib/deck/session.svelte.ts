@@ -1,7 +1,7 @@
 import { api } from '../api'
 import { Lru } from '../lru'
 import type { Track, TrackDetail } from '../types'
-import { decodeWaveform, type Waveform } from '../waveform'
+import { decodeWaveform, type Waveform } from '../waveform/data'
 
 type DetailEntry = { detail: TrackDetail; waveform: Waveform | null }
 const detailCache = new Lru<string, Promise<DetailEntry>>(24)

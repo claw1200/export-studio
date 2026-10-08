@@ -41,7 +41,7 @@ fn the_callback_does_not_allocate() {
     let mut buffer = vec![0.0_f32; 512 * 2];
     // The first callback builds its level smoother; everything after is steady state.
     rig.sink.pull_into(&mut buffer);
-    for round in 0..200 {
+    for round in 0..400 {
         if round == 50 {
             rig.engine.seek(0, 2000.0);
         }
@@ -50,6 +50,16 @@ fn the_callback_does_not_allocate() {
         }
         if round == 150 {
             rig.engine.play(0);
+        }
+        if round == 200 {
+            rig.engine.set_tempo(0, 1.08);
+        }
+        if round == 260 {
+            rig.engine.set_master_tempo(0, true);
+        }
+        if round == 320 {
+            rig.engine.set_tempo(0, 0.92);
+            rig.engine.seek(0, 1000.0);
         }
         COUNTING.with(|c| c.set(true));
         rig.sink.pull_into(&mut buffer);

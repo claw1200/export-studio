@@ -12,7 +12,7 @@
   } = $props()
 
   const { library, player, keybinds } = getApp()
-  const silent = $derived(player.muted || player.volume === 0)
+  const silent = $derived(player.output.muted || player.output.volume === 0)
   const isMac = window.api.platform === 'darwin'
   let settingsOpen = $state(false)
 
@@ -126,14 +126,14 @@
     <div class="no-drag flex h-7 items-center rounded-md pr-1.5">
       <button
         class="grid size-6 place-items-center rounded text-faint hover:bg-hover hover:text-fg"
-        onclick={() => player.toggleMute()}
+        onclick={() => player.output.toggleMute()}
         aria-label={silent ? 'Unmute' : 'Mute'}
         aria-pressed={silent}
         title={silent ? 'Unmute' : 'Mute'}
       >
         {#if silent}
           <VolumeX class="size-3.5" />
-        {:else if player.volume < 0.5}
+        {:else if player.output.volume < 0.5}
           <Volume1 class="size-3.5" />
         {:else}
           <Volume2 class="size-3.5" />
@@ -146,9 +146,9 @@
         max="1"
         step="0.01"
         aria-label="Volume"
-        aria-valuetext="{Math.round(player.volume * 100)}%"
-        title="Volume {Math.round(player.volume * 100)}%"
-        bind:value={() => player.volume, (v) => player.setVolume(v)}
+        aria-valuetext="{Math.round(player.output.volume * 100)}%"
+        title="Volume {Math.round(player.output.volume * 100)}%"
+        bind:value={() => player.output.volume, (v) => player.output.setVolume(v)}
       />
     </div>
 

@@ -1,3 +1,5 @@
+import type { Cue } from './types'
+
 export function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00'
   const s = Math.floor(seconds)
@@ -84,3 +86,12 @@ export function hotCuePaletteColor(index: number | null): string | null {
 export const HOT_CUE_DEFAULT = '#2be36c'
 export const LOOP_DEFAULT = '#ff9a1f'
 export const MEMORY_CUE_DEFAULT = '#ff3b4e'
+
+/** A cue's colour as rekordbox shows it: its own, or the default for its kind. */
+export function cueColor(cue: Cue): string {
+  if (cue.kind === 'hot') {
+    return hotCuePaletteColor(cue.colorIndex) ?? cue.rgb ?? (cue.end != null ? LOOP_DEFAULT : HOT_CUE_DEFAULT)
+  }
+  if (cue.color != null && TRACK_COLORS[cue.color]) return TRACK_COLORS[cue.color].hex
+  return MEMORY_CUE_DEFAULT
+}

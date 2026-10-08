@@ -29,7 +29,7 @@
     if (!typing) return
     typing = false
     const value = Number(text.trim().replace(',', '.'))
-    if (value > 0) player.setGridBpm(value)
+    if (value > 0) player.grid.setBpm(value)
   }
 
   function endDrag(): void {
@@ -55,17 +55,17 @@
   value={typing ? text : formatBpm(bpm) || '–'}
   oninput={(e) => (text = e.currentTarget.value)}
   onpointerdown={(e) => {
-    if (typing || e.button !== 0 || !player.gridDraft) return
+    if (typing || e.button !== 0 || !player.grid.draft) return
     e.preventDefault()
     e.currentTarget.setPointerCapture(e.pointerId)
-    drag = { y: e.clientY, bpm, base: player.gridDraft, moved: false }
+    drag = { y: e.clientY, bpm, base: player.grid.draft, moved: false }
   }}
   onpointermove={(e) => {
     if (!drag) return
     const dy = drag.y - e.clientY
     if (!drag.moved && Math.abs(dy) < DRAG_THRESHOLD) return
     drag.moved = true
-    player.setGridBpm(drag.bpm + dy * (e.shiftKey ? FINE_BPM_PER_PIXEL : BPM_PER_PIXEL), drag.base)
+    player.grid.setBpm(drag.bpm + dy * (e.shiftKey ? FINE_BPM_PER_PIXEL : BPM_PER_PIXEL), drag.base)
   }}
   onmousedown={(e) => {
     if (!typing) e.preventDefault()

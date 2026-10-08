@@ -15,6 +15,10 @@ export type DeckCommand =
   | { op: 'setLoop'; deck: number; inMs: number; outMs: number; enter: boolean }
   | { op: 'setLooping'; deck: number; on: boolean }
   | { op: 'clearLoop'; deck: number }
+  /** Playback speed as a multiple of the file's: 1.06 is +6%. */
+  | { op: 'tempo'; deck: number; tempo: number }
+  /** Keep the key when the tempo changes. */
+  | { op: 'masterTempo'; deck: number; on: boolean }
   | { op: 'volume'; gain: number }
 
 /** One deck as the engine last reported it. Frames are at `sampleRate`. */
@@ -31,6 +35,8 @@ export interface DeckTick {
   loopInFrames: number
   loopOutFrames: number
   looping: boolean
+  tempo: number
+  masterTempo: boolean
 }
 
 /** Every deck at one instant. `seq` is the last command the engine had applied when it was taken. */

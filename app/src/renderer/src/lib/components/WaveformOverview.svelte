@@ -1,7 +1,9 @@
 <script lang="ts">
   import { getApp } from '$lib/context'
-  import { formatClock, hotCueLetter } from '$lib/format'
-  import { CUE_POINT_COLOR, cueColor, drawOverview, LOOP_ACTIVE_COLOR, setupCanvas } from '$lib/waveform'
+  import { cueColor, formatClock, hotCueLetter } from '$lib/format'
+  import { setupCanvas } from '$lib/waveform/canvas'
+  import { CUE_POINT_COLOR, LOOP_ACTIVE_COLOR } from '$lib/waveform/colors'
+  import { drawOverview } from '$lib/waveform/overview'
   import type { Cue } from '$lib/types'
 
   const { player } = getApp()
@@ -16,7 +18,7 @@
   function paint(canvas: HTMLCanvasElement): void {
     if (!width || !height) return
     const ctx = setupCanvas(canvas, width, height)
-    if (player.waveform) drawOverview(ctx, player.waveform, player.mode, canvas.width, canvas.height)
+    if (player.waveform) drawOverview(ctx, player.waveform, player.display.mode, canvas.width, canvas.height)
     else ctx.clearRect(0, 0, canvas.width, canvas.height)
   }
 

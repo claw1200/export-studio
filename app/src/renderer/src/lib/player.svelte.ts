@@ -1,10 +1,13 @@
 import { api } from './api'
-import { bpmAt, type GridDraft, nearestBeat } from './beat'
+import { bpmAt, nearestBeat } from './beat'
 import { CueEditor } from './deck/cues.svelte'
 import { Deck, type DeckLoop } from './deck/deck.svelte'
 import { GridEditor } from './deck/grid.svelte'
 import { TrackSession } from './deck/session.svelte'
-import { clampUnit, storedFlag, storedPercent, storedVolume, storeFlag } from './deck/stored'
+import { WaveformDisplay } from './deck/display.svelte'
+import { Output } from './deck/output.svelte'
+import { storedFlag, storeFlag } from './deck/stored'
+import { TempoControl } from './deck/tempo.svelte'
 import {
   beatLoop,
   CUE_TOLERANCE,
@@ -15,11 +18,8 @@ import {
   resizeLoop,
   type TransportState
 } from './deck/transport'
-import { WaveLoader, type WaveSamples } from './deck/waves.svelte'
 import type { Beatgrid, Cue, Track, TrackDetail } from './types'
-import type { Waveform, WaveformMode } from './waveform'
-
-export { clearDetailCache, loadDetail } from './deck/session.svelte'
+import type { Waveform } from './waveform/data'
 
 const CUE_HIT_TOLERANCE = 0.05
 const FILE_MISSING = 'Audio file not found'
@@ -30,26 +30,23 @@ export type CuePlacement = 'playhead' | 'cuePoint'
 type HoldKey = 'cue' | number
 
 /**
- * The deck as the interface sees it: transport and cue behaviour on top of the engine deck, the
- * track's library detail, cue and beatgrid editing, and the waveform display settings.
+ * The deck as the interface sees it: CDJ transport, cue and loop behaviour on top of the engine
+ * deck. The loaded track's detail, cue and beatgrid editing, tempo, output level and waveform
+ * display are its parts, used directly.
  */
 export class Player {
   readonly session = new TrackSession()
   readonly deck = new Deck(0)
-  readonly waves = new WaveLoader()
   readonly grid = new GridEditor(
     this.session,
     () => this.position,
     () => this.trackMs()
   )
   readonly cues = new CueEditor(this.session, this.grid)
+  readonly tempo = new TempoControl(this.deck)
+  readonly output = new Output(this.deck)
+  readonly display = new WaveformDisplay(() => this.track?.id ?? null)
 
-  mode = $state<WaveformMode>((localStorage.getItem('waveformMode') as WaveformMode) || 'rgb')
-  waveQuality = $state(storedPercent('waveQuality', 50))
-  fallBlocks = $state(storedPercent('fallBlocks', 40))
-  zoom = $state(Number(localStorage.getItem('waveformZoom')) || 1)
-  volume = $state(storedVolume())
-  muted = $state(storedFlag('muted'))
   quantise = $state(storedFlag('quantise'))
   cuePlacement = $state<CuePlacement>(localStorage.getItem('cuePlacement') === 'cuePoint' ? 'cuePoint' : 'playhead')
   /** Also the loop in point: LOOP OUT closes a loop from here. */
@@ -57,11 +54,8 @@ export class Player {
   previewAt = $state<number | null>(null)
   private holding = $state.raw<(Hold & { key: HoldKey }) | null>(null)
   private previewOwner: string | null = null
-  private unmuteVolume = 1
 
   constructor() {
-    this.unmuteVolume = this.volume > 0 ? this.volume : 1
-    this.deck.setVolume(this.muted ? 0 : this.volume)
     api.onEvent((event) => {
       if (event !== 'library.locked') return
       this.grid.cancel()
@@ -83,10 +77,6 @@ export class Player {
 
   get waveform(): Waveform | null {
     return this.session.waveform
-  }
-
-  get wave(): WaveSamples | null {
-    return this.waves.samples
   }
 
   get loading(): boolean {
@@ -126,32 +116,12 @@ export class Player {
     return !!this.holding
   }
 
-  get gridEditing(): boolean {
-    return this.grid.editing
-  }
-
-  get gridDraft(): GridDraft | null {
-    return this.grid.draft
-  }
-
-  get gridDirty(): boolean {
-    return this.grid.dirty
-  }
-
-  get gridLink(): boolean {
-    return this.grid.link
-  }
-
   get displayGrid(): Beatgrid | null {
     return this.grid.grid
   }
 
   get displayCues(): Cue[] {
     return this.grid.cues
-  }
-
-  get canEditGrid(): boolean {
-    return this.grid.canEdit
   }
 
   get atCue(): boolean {
@@ -180,7 +150,7 @@ export class Player {
     this.deck.load(track.id, track.duration)
     if (autoplay) this.deck.play()
     const opened = this.session.open(track)
-    this.beginWave()
+    this.display.reload()
     await opened
   }
 
@@ -424,21 +394,13 @@ export class Player {
 
   deleteCueAtPlayhead(): Promise<void> {
     const cue = this.cueAtPlayhead()
-    return cue ? this.deleteCue(cue) : Promise.resolve()
+    return cue ? this.cues.deleteCue(cue) : Promise.resolve()
   }
 
   private cueHitTolerance(): number {
     if (!this.quantise) return CUE_HIT_TOLERANCE
     const bpm = bpmAt(this.position, this.displayGrid, this.track?.bpm ?? 0)
     return bpm > 0 ? 30 / bpm : CUE_HIT_TOLERANCE
-  }
-
-  deleteCue(cue: Cue): Promise<void> {
-    return this.cues.deleteCue(cue)
-  }
-
-  setCueColor(cue: Cue, colorIndex: number | null): Promise<void> {
-    return this.cues.setCueColor(cue, colorIndex)
   }
 
   setQuantise(on: boolean): void {
@@ -451,103 +413,8 @@ export class Player {
     return nearestBeat(seconds, this.displayGrid)
   }
 
-  beginGridEdit(): void {
-    this.grid.begin()
-  }
-
-  cancelGridEdit(): void {
-    this.grid.cancel()
-  }
-
-  setGridLink(on: boolean): void {
-    this.grid.setLink(on)
-  }
-
   private trackMs(): number {
     const span = this.waveform ? this.waveform.length / this.waveform.rate : 0
     return Math.max(this.duration, span) * 1000
-  }
-
-  /** Shifts `base` (the current draft by default) by `ms`, so drags can work from their starting grid. */
-  nudgeGrid(ms: number, base?: GridDraft | null): void {
-    this.grid.nudge(ms, base === undefined ? this.grid.draft : base)
-  }
-
-  setDownbeatHere(): void {
-    this.grid.setDownbeatHere()
-  }
-
-  /** Sets the tempo of `base` (the current draft by default), so drags can work from their starting grid. */
-  setGridBpm(bpm: number, base?: GridDraft | null): void {
-    this.grid.setBpm(bpm, base === undefined ? this.grid.draft : base)
-  }
-
-  halveGrid(): void {
-    this.grid.halve()
-  }
-
-  doubleGrid(): void {
-    this.grid.double()
-  }
-
-  saveGrid(): Promise<void> {
-    return this.grid.save()
-  }
-
-  setMode(mode: WaveformMode): void {
-    if (this.mode === mode) return
-    this.mode = mode
-    localStorage.setItem('waveformMode', mode)
-    this.beginWave()
-  }
-
-  setWaveQuality(quality: number): void {
-    const q = Math.min(100, Math.max(0, Math.round(quality)))
-    if (this.waveQuality === q) return
-    const wasOff = this.waveQuality <= 0
-    this.waveQuality = q
-    localStorage.setItem('waveQuality', String(q))
-    if (q <= 0 || wasOff) this.beginWave()
-  }
-
-  setFallBlocks(blocks: number): void {
-    const n = Math.min(100, Math.max(0, Math.round(blocks)))
-    if (this.fallBlocks === n) return
-    this.fallBlocks = n
-    localStorage.setItem('fallBlocks', String(n))
-  }
-
-  setZoom(zoom: number): void {
-    this.zoom = Math.max(0.25, Math.min(64, zoom))
-    localStorage.setItem('waveformZoom', String(this.zoom))
-  }
-
-  private beginWave(): void {
-    const id = this.track?.id
-    if (!id || this.waveQuality <= 0) this.waves.clear()
-    else this.waves.load(id, this.mode === '3band')
-  }
-
-  setVolume(volume: number): void {
-    const v = clampUnit(volume)
-    this.volume = v
-    if (v > 0) {
-      this.unmuteVolume = v
-      this.muted = false
-    }
-    this.deck.setVolume(this.muted ? 0 : v)
-    localStorage.setItem('volume', String(v))
-    storeFlag('muted', this.muted)
-  }
-
-  toggleMute(): void {
-    if (this.muted || this.volume === 0) {
-      this.muted = false
-      this.setVolume(this.unmuteVolume > 0 ? this.unmuteVolume : 1)
-      return
-    }
-    this.muted = true
-    this.deck.setVolume(0)
-    storeFlag('muted', true)
   }
 }

@@ -29,14 +29,14 @@ function spawn(): Worker {
 }
 
 function dispatch(worker: Worker, job: Waiter): void {
-  const onMessage = (event: MessageEvent<ComputeResponse>) => {
+  const onMessage = (event: MessageEvent<ComputeResponse>): void => {
     cleanup()
     idle.push(worker)
     if (event.data.op === 'error') job.reject(new Error(event.data.message))
     else job.resolve(event.data)
     pump()
   }
-  const onError = (event: ErrorEvent) => {
+  const onError = (event: ErrorEvent): void => {
     event.preventDefault()
     cleanup()
     live--

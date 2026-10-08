@@ -30,10 +30,14 @@ pub struct DeckClock {
     loop_in: AtomicU64,
     loop_out: AtomicU64,
     looping: AtomicBool,
+    /// The bits of an `f64`; zero (as on a new clock) means normal speed.
+    tempo: AtomicU64,
+    /// Time-stretch at a changed tempo rather than resample, so the key stays the same.
+    master_tempo: AtomicBool,
 }
 
 /// One deck at one instant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct DeckSnapshot {
     pub position_frames: u64,
     pub total_frames: u64,
@@ -46,6 +50,8 @@ pub struct DeckSnapshot {
     pub loop_in_frames: u64,
     pub loop_out_frames: u64,
     pub looping: bool,
+    pub tempo: f64,
+    pub master_tempo: bool,
 }
 
 impl DeckClock {
@@ -63,6 +69,8 @@ impl DeckClock {
             loop_in_frames,
             loop_out_frames,
             looping: self.looping(),
+            tempo: self.tempo(),
+            master_tempo: self.master_tempo(),
         }
     }
 
@@ -225,5 +233,27 @@ impl DeckClock {
         } else {
             None
         }
+    }
+
+    /// Playback speed as a multiple of the file's.
+    pub fn tempo(&self) -> f64 {
+        let tempo = f64::from_bits(self.tempo.load(Ordering::Relaxed));
+        if tempo > 0.0 {
+            tempo
+        } else {
+            1.0
+        }
+    }
+
+    pub fn set_tempo(&self, tempo: f64) {
+        self.tempo.store(tempo.to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn master_tempo(&self) -> bool {
+        self.master_tempo.load(Ordering::Acquire)
+    }
+
+    pub fn set_master_tempo(&self, on: bool) {
+        self.master_tempo.store(on, Ordering::Release);
     }
 }

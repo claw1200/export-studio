@@ -22,6 +22,8 @@ export interface NativeSnapshot {
   loopInFrames: number
   loopOutFrames: number
   looping: boolean
+  tempo: number
+  masterTempo: boolean
 }
 
 export interface NativeWave {
@@ -46,6 +48,8 @@ export interface NativeEngine {
   setLoop(deck: number, inMs: number, outMs: number, enter: boolean): void
   setLooping(deck: number, on: boolean): void
   clearLoop(deck: number): void
+  setTempo(deck: number, tempo: number): void
+  setMasterTempo(deck: number, on: boolean): void
   setVolume(gain: number): void
   snapshot(deck: number): NativeSnapshot | null
   anySounding(): boolean

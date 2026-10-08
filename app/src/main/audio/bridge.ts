@@ -113,6 +113,12 @@ export class AudioBridge {
       case 'clearLoop':
         engine.clearLoop(command.deck)
         break
+      case 'tempo':
+        engine.setTempo(command.deck, command.tempo)
+        break
+      case 'masterTempo':
+        engine.setMasterTempo(command.deck, command.on)
+        break
       case 'volume':
         engine.setVolume(command.gain)
         break

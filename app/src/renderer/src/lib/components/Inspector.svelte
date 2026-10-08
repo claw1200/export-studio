@@ -2,9 +2,17 @@
   import { Music, FolderSearch, Repeat, AlertTriangle, X, Pencil, Star } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import { api, artworkUrl } from '$lib/api'
-  import { formatBpm, formatClock, formatDuration, formatSize, hotCueLetter, keyColor, TRACK_COLORS } from '$lib/format'
-  import { loadDetail } from '$lib/player.svelte'
-  import { cueColor } from '$lib/waveform'
+  import {
+    cueColor,
+    formatBpm,
+    formatClock,
+    formatDuration,
+    formatSize,
+    hotCueLetter,
+    keyColor,
+    TRACK_COLORS
+  } from '$lib/format'
+  import { loadDetail } from '$lib/deck/session.svelte'
   import type { Cue, EditableField, Track, TrackDetail } from '$lib/types'
   import EditableText from './EditableText.svelte'
 
@@ -310,7 +318,7 @@
                 <button
                   class="mr-1 grid size-5 shrink-0 place-items-center rounded text-faint hover:bg-hover hover:text-danger disabled:hidden"
                   disabled={player.editing}
-                  onclick={() => player.deleteCue(cue)}
+                  onclick={() => player.cues.deleteCue(cue)}
                   aria-label={removeCueLabel(cue)}
                   title="Remove cue"
                 >

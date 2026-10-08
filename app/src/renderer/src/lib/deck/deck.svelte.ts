@@ -29,6 +29,10 @@ export class Deck {
   duration = $state(0)
   loop = $state.raw<DeckLoop | null>(null)
   error = $state<string | null>(null)
+  /** Playback speed as a multiple of the file's. Kept across loads. */
+  tempo = $state(1)
+  /** Keep the key when the tempo changes. */
+  masterTempo = $state(false)
 
   private request = 0
   private sent = 0
@@ -158,6 +162,20 @@ export class Deck {
     if (this.ready) this.send({ op: 'clearLoop', deck: this.index })
   }
 
+  setTempo(tempo: number): void {
+    if (!(tempo > 0) || tempo === this.tempo) return
+    this.tempo = tempo
+    // Re-anchor here so the playhead carries on at the new speed from where it is drawn.
+    const now = performance.now()
+    this.anchor = { ...pinned(this.anchor, this.position, now), playing: this.anchor.playing, rate: tempo }
+    this.send({ op: 'tempo', deck: this.index, tempo })
+  }
+
+  setMasterTempo(on: boolean): void {
+    this.masterTempo = on
+    this.send({ op: 'masterTempo', deck: this.index, on })
+  }
+
   setVolume(gain: number): void {
     this.send({ op: 'volume', gain })
   }
@@ -188,7 +206,7 @@ export class Deck {
     }
     this.ready = true
     if (event.sampleRate > 0 && event.totalFrames > 0) this.duration = event.totalFrames / event.sampleRate
-    this.anchor = { ...NO_ANCHOR, sampleRate: event.sampleRate, at: performance.now() }
+    this.anchor = { ...NO_ANCHOR, sampleRate: event.sampleRate, at: performance.now(), rate: this.tempo }
     this.flush()
   }
 
@@ -214,6 +232,8 @@ export class Deck {
     if (!deck || !this.ready || !deck.loaded || deck.loadId !== this.request) return
     const now = performance.now()
     if (this.playing !== deck.playing) this.playing = deck.playing
+    if (this.tempo !== deck.tempo) this.tempo = deck.tempo
+    if (this.masterTempo !== deck.masterTempo) this.masterTempo = deck.masterTempo
     if (deck.loopOutFrames > deck.loopInFrames && deck.sampleRate > 0) {
       const start = deck.loopInFrames / deck.sampleRate
       const end = deck.loopOutFrames / deck.sampleRate
@@ -227,7 +247,7 @@ export class Deck {
       sampleRate: deck.sampleRate,
       playing: deck.playing && !deck.scrubbing,
       generation: deck.generation,
-      rate: 1,
+      rate: deck.tempo,
       loop: this.activeLoop()
     }
     if (this.scrubbing) return

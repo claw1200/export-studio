@@ -17,6 +17,7 @@ mod reader;
 mod scrub;
 mod sink;
 mod smooth;
+mod tempo;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -26,10 +27,12 @@ pub use block::{BLOCK_FRAMES, RING_BLOCKS};
 pub use clock::DeckSnapshot;
 pub use fade::FADE_FRAMES;
 pub use sink::{CpalSink, NullSink, Render, Sink};
+pub use tempo::{MAX_TEMPO, MIN_TEMPO};
 
 use clock::DeckClock;
 use reader::DeckReader;
 use smooth::Smoothed;
+use tempo::Stretcher;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -91,11 +94,14 @@ impl Engine {
         let clocks: Vec<Arc<DeckClock>> =
             (0..decks).map(|_| Arc::new(DeckClock::default())).collect();
         let mut producers = Vec::with_capacity(decks);
+        let mut stretchers = Vec::with_capacity(decks);
         let mut readers = Vec::with_capacity(decks);
         for clock in &clocks {
             let (producer, consumer) = rtrb::RingBuffer::<block::Block>::new(RING_BLOCKS);
+            let (stretcher_in, stretcher_out) = rtrb::RingBuffer::<Box<Stretcher>>::new(1);
             producers.push(producer);
-            readers.push(DeckReader::new(consumer, Arc::clone(clock)));
+            stretchers.push(stretcher_in);
+            readers.push(DeckReader::new(consumer, Arc::clone(clock), stretcher_out));
         }
 
         let master = Arc::new(AtomicU32::new(1.0_f32.to_bits()));
@@ -121,6 +127,11 @@ impl Engine {
         let sink = open(render)?;
         let sample_rate = sink.sample_rate();
         rate.store(sample_rate, Ordering::Relaxed);
+        // The stretcher is sized for the device rate, which is only known now. Each callback
+        // takes its deck's from here; the slot holds exactly one, so the push cannot fail.
+        for mut slot in stretchers {
+            let _ = slot.push(Box::new(Stretcher::new(sample_rate)));
+        }
 
         let mut handles = Vec::with_capacity(decks);
         for (id, (clock, producer)) in clocks.into_iter().zip(producers).enumerate() {
@@ -340,6 +351,37 @@ impl Engine {
     pub fn clear_loop(&self, deck: DeckId) {
         if let Some(handle) = self.deck(deck) {
             handle.clock().set_loop(None);
+        }
+    }
+
+    /// Playback speed as a multiple of the file's, heard from the next callback. A deck keeps its
+    /// tempo across loads, as a pitch fader stays where it was left.
+    pub fn set_tempo(&self, deck: DeckId, tempo: f64) {
+        let Some(handle) = self.deck(deck) else {
+            return;
+        };
+        let tempo = if tempo.is_finite() {
+            tempo.clamp(MIN_TEMPO, MAX_TEMPO)
+        } else {
+            1.0
+        };
+        handle.clock().set_tempo(tempo);
+    }
+
+    /// Master tempo: keep the key when the tempo changes. Switching requeues from the playhead,
+    /// since the stretcher has to be primed with audio the ring has already passed.
+    pub fn set_master_tempo(&self, deck: DeckId, on: bool) {
+        let Some(handle) = self.deck(deck) else {
+            return;
+        };
+        let clock = handle.clock();
+        if clock.master_tempo() == on {
+            return;
+        }
+        clock.set_master_tempo(on);
+        if clock.loaded() && !clock.scrubbing() {
+            self.seek_frames(deck, clock.position());
+            handle.send(deck::Command::Wake);
         }
     }
 

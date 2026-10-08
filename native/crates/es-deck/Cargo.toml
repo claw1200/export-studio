@@ -9,3 +9,4 @@ es-decode.workspace = true
 cpal.workspace = true
 rtrb.workspace = true
 thiserror.workspace = true
+signalsmith-stretch = "0.1.3"

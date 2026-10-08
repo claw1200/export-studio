@@ -38,6 +38,8 @@ pub struct DeckSnapshotJs {
     pub loop_in_frames: f64,
     pub loop_out_frames: f64,
     pub looping: bool,
+    pub tempo: f64,
+    pub master_tempo: bool,
 }
 
 impl From<DeckSnapshot> for DeckSnapshotJs {
@@ -54,6 +56,8 @@ impl From<DeckSnapshot> for DeckSnapshotJs {
             loop_in_frames: s.loop_in_frames as f64,
             loop_out_frames: s.loop_out_frames as f64,
             looping: s.looping,
+            tempo: s.tempo,
+            master_tempo: s.master_tempo,
         }
     }
 }
@@ -185,6 +189,17 @@ impl AudioEngine {
     #[napi]
     pub fn clear_loop(&self, deck: u32) {
         self.engine.clear_loop(deck_index(deck));
+    }
+
+    /// Playback speed as a multiple of the file's.
+    #[napi]
+    pub fn set_tempo(&self, deck: u32, tempo: f64) {
+        self.engine.set_tempo(deck_index(deck), tempo);
+    }
+
+    #[napi]
+    pub fn set_master_tempo(&self, deck: u32, on: bool) {
+        self.engine.set_master_tempo(deck_index(deck), on);
     }
 
     #[napi]

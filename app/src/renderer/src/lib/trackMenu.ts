@@ -12,7 +12,8 @@ import {
   Tag
 } from '@lucide/svelte'
 import { TRACK_COLORS } from './format'
-import type { Library, TreeNode } from './library.svelte'
+import type { Library } from './library.svelte'
+import type { TreeNode } from './library/tree'
 import { tidy, type MenuEntry } from './menu'
 import type { Player } from './player.svelte'
 import type { Track, TrackEdit } from './types'

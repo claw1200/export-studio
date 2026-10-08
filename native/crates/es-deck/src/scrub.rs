@@ -6,6 +6,7 @@
 //! quiet because a low-pass filter tracks the speed.
 
 use crate::block::BLOCK_FRAMES;
+use crate::tempo::catmull_rom;
 
 /// Seconds of decoded audio kept either side of the head.
 pub const WINDOW_REACH: f64 = 2.0;
@@ -124,14 +125,9 @@ impl PcmWindow {
             self.frame(i + 1),
             self.frame(i + 2),
         ];
-        let curve = |a: f32, b: f32, c: f32, d: f32| {
-            b + 0.5
-                * t
-                * (c - a + t * (2.0 * a - 5.0 * b + 4.0 * c - d + t * (3.0 * (b - c) + d - a)))
-        };
         (
-            curve(p[0].0, p[1].0, p[2].0, p[3].0),
-            curve(p[0].1, p[1].1, p[2].1, p[3].1),
+            catmull_rom([p[0].0, p[1].0, p[2].0, p[3].0], t),
+            catmull_rom([p[0].1, p[1].1, p[2].1, p[3].1], t),
         )
     }
 }

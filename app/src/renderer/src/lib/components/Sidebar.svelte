@@ -16,7 +16,7 @@
     Trash2
   } from '@lucide/svelte'
   import { getApp } from '$lib/context'
-  import type { TreeNode } from '$lib/library.svelte'
+  import type { TreeNode } from '$lib/library/tree'
   import { menuAt, tidy, type MenuEntry, type MenuRequest } from '$lib/menu'
   import { SEPARATOR, unlockEntry } from '$lib/trackMenu'
   import type { Source } from '$lib/types'

@@ -1,81 +1,13 @@
 import { api } from './api'
-import { clearDetailCache } from './player.svelte'
+import { clearDetailCache } from './deck/session.svelte'
+import { newestFirst, type SortKey, sortTracks, type TrackSort } from './library/sort'
+import { buildTree } from './library/tree'
 import type { LibraryInfo, Source, Track, TrackEdit, TreeItem } from './types'
 
 export const TRACK_DRAG_TYPE = 'application/x-exportstudio-tracks'
 
 const READ_ONLY = 'Unlock editing to change the library'
 const NOTICE_MS = 6000
-
-export type SortKey =
-  | 'title'
-  | 'artist'
-  | 'album'
-  | 'genre'
-  | 'label'
-  | 'bpm'
-  | 'key'
-  | 'duration'
-  | 'rating'
-  | 'color'
-  | 'dateAdded'
-  | 'playCount'
-  | 'year'
-  | 'bitrate'
-  | 'fileType'
-  | 'comment'
-  | 'remixer'
-  | 'position'
-
-export interface TreeNode extends TreeItem {
-  children: TreeNode[]
-}
-
-export function buildTree(items: TreeItem[]): TreeNode[] {
-  const nodes = new Map<string, TreeNode>(items.map((i) => [i.id, { ...i, children: [] }]))
-  const roots: TreeNode[] = []
-  for (const node of nodes.values()) {
-    const parent = nodes.get(node.parentId)
-    if (parent) parent.children.push(node)
-    else roots.push(node)
-  }
-  const sort = (list: TreeNode[]): TreeNode[] => {
-    list.sort((a, b) => a.seq - b.seq)
-    for (const n of list) sort(n.children)
-    return list
-  }
-  return sort(roots)
-}
-
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
-
-function camelotRank(key: string): number {
-  const m = /^(\d{1,2})([AB])$/i.exec(key)
-  if (!m) return key ? 1000 : 2000
-  return Number(m[1]) * 2 + (m[2].toUpperCase() === 'B' ? 1 : 0)
-}
-
-function compare(a: Track, b: Track, key: Exclude<SortKey, 'position'>): number {
-  switch (key) {
-    case 'bpm':
-    case 'duration':
-    case 'rating':
-    case 'playCount':
-    case 'year':
-    case 'bitrate':
-    case 'color':
-      return a[key] - b[key]
-    case 'key':
-      return camelotRank(a.key) - camelotRank(b.key)
-    default: {
-      const av = a[key]
-      const bv = b[key]
-      if (!av && bv) return 1
-      if (av && !bv) return -1
-      return collator.compare(av, bv)
-    }
-  }
-}
 
 export class Library {
   tracks = $state.raw<Track[]>([])
@@ -96,7 +28,7 @@ export class Library {
   sourceIds = $state.raw<string[] | null>(null)
   sourceLoading = $state(false)
   query = $state('')
-  sort = $state.raw<{ key: SortKey; dir: 1 | -1 } | null>(null)
+  sort = $state.raw<TrackSort | null>(null)
   selectedId = $state<string | null>(null)
   selection = $state.raw<ReadonlySet<string>>(new Set())
   private anchorId: string | null = null
@@ -163,18 +95,8 @@ export class Library {
         return terms.every((term) => h.includes(term))
       })
     }
-    const sort = this.sort
-    if (sort) {
-      const { key, dir } = sort
-      const positions = this.positions
-      const order =
-        key === 'position'
-          ? (a: Track, b: Track) => (positions.get(a.id) ?? 0) - (positions.get(b.id) ?? 0)
-          : (a: Track, b: Track) => compare(a, b, key)
-      list = [...list].sort((a, b) => order(a, b) * dir || collator.compare(a.title, b.title))
-    } else if (this.source.type === 'collection' || this.source.type === 'tag') {
-      list = [...list].sort((a, b) => collator.compare(b.dateAdded, a.dateAdded))
-    }
+    if (this.sort) return sortTracks(list, this.sort, this.positions)
+    if (this.source.type === 'collection' || this.source.type === 'tag') return newestFirst(list)
     return list
   })
 

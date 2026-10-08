@@ -1,7 +1,7 @@
 // Builds the Rust audio engine and copies it to resources/native/es_node.node.
 // Usage: node scripts/build-native.mjs [--debug] [--target <rust-triple>]
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, mkdirSync } from 'node:fs'
+import { copyFileSync, mkdirSync, rmSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -20,5 +20,8 @@ const file = platform === 'win32' ? 'es_node.dll' : platform === 'darwin' ? 'lib
 const built = join(native, 'target', ...(target ? [target] : []), debug ? 'debug' : 'release', file)
 const out = join(app, 'resources', 'native')
 mkdirSync(out, { recursive: true })
+// A new file rather than an overwrite: macOS kills any process that loads a signed library
+// rewritten in place, since its cached signature no longer matches.
+rmSync(join(out, 'es_node.node'), { force: true })
 copyFileSync(built, join(out, 'es_node.node'))
 console.log(`[native] ${built} -> ${join(out, 'es_node.node')}`)

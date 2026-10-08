@@ -159,12 +159,12 @@
               max="100"
               step="1"
               aria-label="Fall blocks"
-              aria-valuetext={String(player.fallBlocks)}
-              value={player.fallBlocks}
-              oninput={(e) => player.setFallBlocks(Number(e.currentTarget.value))}
+              aria-valuetext={String(player.display.fallBlocks)}
+              value={player.display.fallBlocks}
+              oninput={(e) => player.display.setFallBlocks(Number(e.currentTarget.value))}
             />
             <span class="w-9 shrink-0 text-right font-mono text-[11px] text-muted tabular-nums">
-              {player.fallBlocks}
+              {player.display.fallBlocks}
             </span>
           </div>
         {:else if section === 'general'}
@@ -183,12 +183,12 @@
                 max="100"
                 step="1"
                 aria-label="High quality waveforms"
-                aria-valuetext={player.waveQuality === 0 ? 'Off' : `${player.waveQuality}%`}
-                value={player.waveQuality}
-                oninput={(e) => player.setWaveQuality(Number(e.currentTarget.value))}
+                aria-valuetext={player.display.quality === 0 ? 'Off' : `${player.display.quality}%`}
+                value={player.display.quality}
+                oninput={(e) => player.display.setQuality(Number(e.currentTarget.value))}
               />
               <span class="w-9 shrink-0 text-right font-mono text-[11px] text-muted tabular-nums">
-                {player.waveQuality === 0 ? 'Off' : `${player.waveQuality}%`}
+                {player.display.quality === 0 ? 'Off' : `${player.display.quality}%`}
               </span>
             </div>
             {@render toggle(

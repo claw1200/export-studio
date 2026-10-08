@@ -1,7 +1,9 @@
 <script lang="ts">
   import { getApp } from '$lib/context'
   import type { GridDraft } from '$lib/beat'
-  import { drawDetail, setupCanvas, trackBandFall } from '$lib/waveform'
+  import { setupCanvas } from '$lib/waveform/canvas'
+  import { drawDetail } from '$lib/waveform/detail'
+  import { trackBandFall } from '$lib/waveform/fall'
 
   const { player } = getApp()
 
@@ -22,32 +24,32 @@
     drawDetail(
       ctx,
       wf,
-      player.mode,
+      player.display.mode,
       {
         position: player.position,
-        zoom: player.zoom,
+        zoom: player.display.zoom,
         cues: player.displayCues,
         beatgrid: player.displayGrid,
         cuePoint: player.track ? player.cuePoint : null,
         loop: player.loop,
-        gridEditing: player.gridEditing
+        gridEditing: player.grid.editing
       },
       canvas.width,
       canvas.height,
       window.devicePixelRatio || 1,
-      player.waveQuality > 0 ? player.wave : null,
-      player.waveQuality,
-      player.fallBlocks
+      player.display.quality > 0 ? player.display.samples : null,
+      player.display.quality,
+      player.display.fallBlocks
     )
   }
 
-  const secondsPerPixel = (): number => (player.waveform ? 1 / (player.waveform.rate * player.zoom) : 0)
+  const secondsPerPixel = (): number => (player.waveform ? 1 / (player.waveform.rate * player.display.zoom) : 0)
 
   function onwheel(e: WheelEvent): void {
     if (!player.waveform) return
     e.preventDefault()
     const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
-    player.setZoom(player.zoom * Math.exp(-delta * 0.01))
+    player.display.setZoom(player.display.zoom * Math.exp(-delta * 0.01))
   }
 
   function release(): void {
@@ -61,20 +63,20 @@
 <div
   class={[
     'relative h-full w-full touch-none',
-    player.gridEditing ? 'cursor-ew-resize' : 'cursor-grab active:cursor-grabbing'
+    player.grid.editing ? 'cursor-ew-resize' : 'cursor-grab active:cursor-grabbing'
   ]}
   bind:clientWidth={width}
   bind:clientHeight={height}
   role="slider"
   tabindex="-1"
-  aria-label={player.gridEditing ? 'Beatgrid' : 'Waveform'}
+  aria-label={player.grid.editing ? 'Beatgrid' : 'Waveform'}
   aria-valuenow={Math.round(player.position)}
   {onwheel}
   onpointerdown={(e) => {
     if (!player.waveform || e.button !== 0) return
     e.currentTarget.setPointerCapture(e.pointerId)
-    if (player.gridEditing) {
-      if (player.gridDraft) gridDrag = { x: e.clientX, base: player.gridDraft }
+    if (player.grid.editing) {
+      if (player.grid.draft) gridDrag = { x: e.clientX, base: player.grid.draft }
       return
     }
     drag = { x: e.clientX, position: player.position }
@@ -82,7 +84,7 @@
   }}
   onpointermove={(e) => {
     if (gridDrag) {
-      player.nudgeGrid((e.clientX - gridDrag.x) * secondsPerPixel() * 1000, gridDrag.base)
+      player.grid.nudge((e.clientX - gridDrag.x) * secondsPerPixel() * 1000, gridDrag.base)
       return
     }
     if (!drag) return
