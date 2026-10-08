@@ -126,14 +126,18 @@ export class Deck {
     if (this.playing) this.startFrames()
   }
 
-  /** Sets a loop and enters it. A playhead outside it goes to the in point. */
-  setLoop(start: number, end: number): void {
+  /**
+   * Sets a loop. With `enter` playback goes into it, and a playhead outside it goes to the in point;
+   * without, the loop is left exited and the playhead stays where it is.
+   */
+  setLoop(start: number, end: number, enter = true): void {
     if (!(end > start)) return
-    this.loop = { start, end, active: true }
-    if (this.position < start || this.position >= end) this.move(start)
+    this.loop = { start, end, active: enter }
+    if (!enter) this.anchor = { ...this.anchor, loop: null }
+    else if (this.position < start || this.position >= end) this.move(start)
     else this.anchor = { ...this.anchor, loop: [start, end] }
-    if (this.ready) this.send({ op: 'setLoop', deck: this.index, inMs: start * 1000, outMs: end * 1000 })
-    else if (this.pending) this.pending.seek = true
+    if (this.ready) this.send({ op: 'setLoop', deck: this.index, inMs: start * 1000, outMs: end * 1000, enter })
+    else if (this.pending && enter) this.pending.seek = true
   }
 
   /** RELOOP: back to the in point and inside the loop. EXIT: carry on past it, keeping the range. */
@@ -196,8 +200,7 @@ export class Deck {
     const deck = this.index
     if (this.loop) {
       const { start, end, active } = this.loop
-      this.send({ op: 'setLoop', deck, inMs: start * 1000, outMs: end * 1000 })
-      if (!active) this.send({ op: 'setLooping', deck, on: false })
+      this.send({ op: 'setLoop', deck, inMs: start * 1000, outMs: end * 1000, enter: active })
     }
     if (pending.seek && this.position > 0) this.send({ op: 'seek', deck, ms: this.position * 1000 })
     this.anchor = pinned(this.anchor, this.position, performance.now())

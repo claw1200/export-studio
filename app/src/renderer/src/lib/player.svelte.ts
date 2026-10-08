@@ -52,9 +52,8 @@ export class Player {
   muted = $state(storedFlag('muted'))
   quantise = $state(storedFlag('quantise'))
   cuePlacement = $state<CuePlacement>(localStorage.getItem('cuePlacement') === 'cuePoint' ? 'cuePoint' : 'playhead')
+  /** Also the loop in point: LOOP OUT closes a loop from here. */
   cuePoint = $state(0)
-  /** A loop in point waiting for its out point. */
-  loopIn = $state<number | null>(null)
   previewAt = $state<number | null>(null)
   private holding = $state.raw<(Hold & { key: HoldKey }) | null>(null)
   private previewOwner: string | null = null
@@ -174,7 +173,6 @@ export class Player {
       return
     }
     this.cuePoint = 0
-    this.loopIn = null
     this.holding = null
     this.previewOwner = null
     this.previewAt = null
@@ -300,7 +298,10 @@ export class Player {
     }
     if (!this.track || this.holding || this.audioError) return
     const action = pressHotCue(this.state, { start: cue.start / 1000, end: cue.end == null ? null : cue.end / 1000 })
-    if (action.loop) this.deck.setLoop(...action.loop)
+    if (action.loop) {
+      this.cuePoint = action.loop[0]
+      this.deck.setLoop(...action.loop)
+    }
     if (action.kind === 'jump') {
       this.seek(action.at)
       return
@@ -332,22 +333,20 @@ export class Player {
     if (cue) this.callCue(cue)
   }
 
-  /** LOOP IN: marks the in point (and the cue point) for LOOP OUT to close. */
+  /** LOOP IN: sets the cue point, which is the in point. */
   setLoopIn(): void {
     if (!this.track || this.audioError) return
     const here = this.here()
-    this.loopIn = here
     this.cuePoint = here
     if (!this.playing && !this.deck.scrubbing) this.seek(here)
   }
 
-  /** LOOP OUT: closes a loop from the in point, or moves the out point of the current loop. */
+  /** LOOP OUT: closes a loop from the cue point. */
   setLoopOut(): void {
     if (!this.track || this.audioError) return
-    const start = this.loopIn ?? this.loop?.start
+    const start = this.cuePoint
     const end = this.here()
-    if (start == null || !(end > start + 0.01)) return
-    this.loopIn = null
+    if (!(end > start + 0.01)) return
     this.deck.setLoop(start, end)
   }
 
@@ -373,7 +372,7 @@ export class Player {
       if (resized) this.deck.setLoop(...resized)
       return
     }
-    this.loopIn = null
+    this.cuePoint = range[0]
     this.deck.setLoop(range[0], Math.min(range[1], this.duration || range[1]))
   }
 
@@ -384,8 +383,7 @@ export class Player {
     const resized = resizeLoop([loop.start, loop.end], factor)
     if (!resized) return
     const end = Math.min(resized[1], this.duration || resized[1])
-    if (end > resized[0]) this.deck.setLoop(resized[0], end)
-    if (!loop.active) this.deck.setLooping(false)
+    if (end > resized[0]) this.deck.setLoop(resized[0], end, loop.active)
   }
 
   async refreshDetail(): Promise<void> {

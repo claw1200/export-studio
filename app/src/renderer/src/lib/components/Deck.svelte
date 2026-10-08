@@ -431,7 +431,7 @@
         </button>
         <button
           class={loopButton(false)}
-          disabled={!track || !!player.audioError || (player.loopIn == null && !player.loop)}
+          disabled={!track || !!player.audioError}
           onclick={() => player.setLoopOut()}
           title="Loop out"
         >

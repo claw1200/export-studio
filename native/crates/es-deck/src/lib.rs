@@ -291,8 +291,9 @@ impl Engine {
         handle.send(deck::Command::Seek(frame));
     }
 
-    /// Sets a loop between two points and enters it. A playhead outside it goes to the in point.
-    pub fn set_loop(&self, deck: DeckId, in_ms: f64, out_ms: f64) {
+    /// Sets a loop between two points. With `enter`, playback goes into it and a playhead outside
+    /// it goes to the in point; without, the loop is left exited and the playhead stays put.
+    pub fn set_loop(&self, deck: DeckId, in_ms: f64, out_ms: f64, enter: bool) {
         let Some(handle) = self.deck(deck) else {
             return;
         };
@@ -302,7 +303,10 @@ impl Engine {
         }
         let clock = handle.clock();
         clock.set_loop(Some((from, to)));
-        clock.set_looping(true);
+        clock.set_looping(enter);
+        if !enter {
+            return;
+        }
         let at = clock.position();
         if at >= to || at < from {
             self.seek_frames(deck, from);

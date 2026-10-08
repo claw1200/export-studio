@@ -11,7 +11,8 @@ export type DeckCommand =
   /** `at` is the pointer event's `timeStamp`: the engine measures drag speed from these. */
   | { op: 'scrubTo'; deck: number; ms: number; at: number }
   | { op: 'scrubEnd'; deck: number }
-  | { op: 'setLoop'; deck: number; inMs: number; outMs: number }
+  /** `enter`: go into the loop, jumping to the in point from outside it. Otherwise only the range changes. */
+  | { op: 'setLoop'; deck: number; inMs: number; outMs: number; enter: boolean }
   | { op: 'setLooping'; deck: number; on: boolean }
   | { op: 'clearLoop'; deck: number }
   | { op: 'volume'; gain: number }

@@ -107,7 +107,7 @@ fn a_loop_seam_plays_straight_through() {
     let rig = Rig::new();
     rig.load(&ramp("loop", RATE * 4));
     let (from, to) = (24_000_u64, 30_000_u64);
-    rig.engine.set_loop(0, 500.0, 625.0);
+    rig.engine.set_loop(0, 500.0, 625.0, true);
     rig.settle_ring();
     rig.engine.play(0);
     let out = rig.pull(20_000);
@@ -133,7 +133,7 @@ fn exit_plays_on_past_the_out_point_and_reloop_returns_to_the_in_point() {
     let rig = Rig::new();
     rig.load(&ramp("loopexit", RATE * 4));
     let (from, to) = (24_000_u64, 30_000_u64);
-    rig.engine.set_loop(0, 500.0, 625.0);
+    rig.engine.set_loop(0, 500.0, 625.0, true);
     rig.settle_ring();
     rig.engine.play(0);
     let _ = rig.pull(9000);
@@ -169,6 +169,26 @@ fn exit_plays_on_past_the_out_point_and_reloop_returns_to_the_in_point() {
         None,
         "stays inside the loop: {:?}",
         outside.map(|i| values[i])
+    );
+}
+
+#[test]
+fn an_exited_loop_resized_behind_the_playhead_leaves_it_in_place() {
+    let rig = Rig::new();
+    rig.load(&ramp("loopresize", RATE * 4));
+    rig.engine.set_loop(0, 500.0, 1000.0, true);
+    rig.engine.set_looping(0, false);
+    rig.engine.seek(0, 900.0);
+    let at = rig.position();
+
+    rig.engine.set_loop(0, 500.0, 750.0, false);
+    assert_eq!(rig.position(), at, "the playhead did not move");
+    let snap = rig.engine.snapshot(0).unwrap();
+    assert!(!snap.looping, "the loop stays exited");
+    assert_eq!(
+        (snap.loop_in_frames, snap.loop_out_frames),
+        (24_000, 36_000),
+        "the range changed"
     );
 }
 

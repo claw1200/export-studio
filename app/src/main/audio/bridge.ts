@@ -105,7 +105,7 @@ export class AudioBridge {
         engine.scrubEnd(command.deck)
         break
       case 'setLoop':
-        engine.setLoop(command.deck, command.inMs, command.outMs)
+        engine.setLoop(command.deck, command.inMs, command.outMs, command.enter)
         break
       case 'setLooping':
         engine.setLooping(command.deck, command.on)

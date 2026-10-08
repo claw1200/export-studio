@@ -173,8 +173,8 @@ impl AudioEngine {
     }
 
     #[napi]
-    pub fn set_loop(&self, deck: u32, in_ms: f64, out_ms: f64) {
-        self.engine.set_loop(deck_index(deck), in_ms, out_ms);
+    pub fn set_loop(&self, deck: u32, in_ms: f64, out_ms: f64, enter: bool) {
+        self.engine.set_loop(deck_index(deck), in_ms, out_ms, enter);
     }
 
     #[napi]

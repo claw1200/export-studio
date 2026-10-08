@@ -43,7 +43,7 @@ export interface NativeEngine {
   scrubBegin(deck: number): void
   scrubTo(deck: number, ms: number, at: number): void
   scrubEnd(deck: number): void
-  setLoop(deck: number, inMs: number, outMs: number): void
+  setLoop(deck: number, inMs: number, outMs: number, enter: boolean): void
   setLooping(deck: number, on: boolean): void
   clearLoop(deck: number): void
   setVolume(gain: number): void
