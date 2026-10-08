@@ -1,0 +1,10 @@
+[package]
+name = "es-decode"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+symphonia.workspace = true
+rubato.workspace = true
+thiserror.workspace = true

@@ -13,13 +13,16 @@
     "svelte-check": "svelte-check --tsconfig ./tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run svelte-check",
     "start": "electron-vite preview",
-    "dev": "electron-vite dev",
+    "dev": "node scripts/build-native.mjs && electron-vite dev",
+    "build:native": "node scripts/build-native.mjs",
+    "build:native:debug": "node scripts/build-native.mjs --debug",
+    "test:native": "cd ../native && cargo test --workspace",
     "build": "npm run typecheck && electron-vite build",
     "build:engine": "cd ../engine && uv run pyinstaller --noconfirm --onedir --name exportstudio-engine --collect-data pyrekordbox --collect-binaries sqlcipher3 --hidden-import sqlcipher3.dbapi2 --collect-submodules mutagen --log-level WARN entry.py",
     "postinstall": "electron-builder install-app-deps",
-    "build:unpack": "npm run build && npm run build:engine && electron-builder --dir",
-    "build:win": "npm run build && npm run build:engine && electron-builder --win",
-    "build:mac": "npm run build && npm run build:engine && electron-builder --mac"
+    "build:unpack": "npm run build && npm run build:native && npm run build:engine && electron-builder --dir",
+    "build:win": "npm run build && npm run build:native && npm run build:engine && electron-builder --win",
+    "build:mac": "npm run build && npm run build:native && npm run build:engine && electron-builder --mac"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",

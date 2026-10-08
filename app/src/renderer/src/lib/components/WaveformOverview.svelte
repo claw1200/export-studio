@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getApp } from '$lib/context'
   import { formatClock, hotCueLetter } from '$lib/format'
-  import { CUE_POINT_COLOR, cueColor, drawOverview, setupCanvas } from '$lib/waveform'
+  import { CUE_POINT_COLOR, cueColor, drawOverview, LOOP_ACTIVE_COLOR, setupCanvas } from '$lib/waveform'
   import type { Cue } from '$lib/types'
 
   const { player } = getApp()
@@ -21,7 +21,6 @@
   }
 
   const WAVEFORM_PREVIEW = 'waveform'
-  let wheelTimer = 0
   let rawWheelSeconds: number | null = null
 
   function secondsAt(e: PointerEvent): number {
@@ -30,10 +29,9 @@
     return player.quantised((x / Math.max(rect.width, 1)) * span)
   }
 
-  function place(e: PointerEvent): void {
-    clearTimeout(wheelTimer)
+  function drag(e: PointerEvent): void {
     rawWheelSeconds = null
-    player.scrub(secondsAt(e))
+    player.scrub(secondsAt(e), e.timeStamp)
   }
 
   function preview(e: PointerEvent): void {
@@ -57,12 +55,7 @@
     const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
     const at = Math.max(0, Math.min(span, (rawWheelSeconds ?? player.position) + delta * (span / width)))
     rawWheelSeconds = at
-    player.scrub(player.quantised(at))
-    clearTimeout(wheelTimer)
-    wheelTimer = window.setTimeout(() => {
-      rawWheelSeconds = null
-      player.endScrub()
-    }, 80)
+    player.seek(player.quantised(at))
   }
 </script>
 
@@ -80,10 +73,11 @@
   onpointerdown={(e) => {
     player.clearPreview(WAVEFORM_PREVIEW)
     e.currentTarget.setPointerCapture(e.pointerId)
-    place(e)
+    rawWheelSeconds = null
+    player.seek(secondsAt(e))
   }}
   onpointermove={(e) => {
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) place(e)
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) drag(e)
     else preview(e)
   }}
   onpointerleave={() => player.clearPreview(WAVEFORM_PREVIEW)}
@@ -98,6 +92,16 @@
 >
   <canvas {@attach paint} class="absolute inset-0 size-full"></canvas>
   <div class="pointer-events-none absolute inset-y-0 left-0 bg-black/50" style:width="{pct(player.position)}%"></div>
+
+  {#if player.loop}
+    <div
+      class={['pointer-events-none absolute inset-y-0 border-x', player.loop.active ? 'opacity-40' : 'opacity-15']}
+      style:left="{pct(player.loop.start)}%"
+      style:width="{pct(player.loop.end) - pct(player.loop.start)}%"
+      style:background={LOOP_ACTIVE_COLOR}
+      style:border-color={LOOP_ACTIVE_COLOR}
+    ></div>
+  {/if}
 
   {#each player.displayCues as cue (cue.id)}
     {#if cue.end != null}
@@ -121,7 +125,7 @@
       title={cueLabel(cue)}
       aria-label={cueLabel(cue)}
       onpointerdown={(e) => e.stopPropagation()}
-      onclick={() => player.seek(cue.start / 1000)}
+      onclick={() => (cue.kind === 'memory' ? player.callCue(cue) : player.seek(cue.start / 1000))}
     >
       {#if cue.kind === 'hot'}
         {hotCueLetter(cue.slot)}

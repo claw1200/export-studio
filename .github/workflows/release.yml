@@ -116,6 +116,18 @@ jobs:
         working-directory: engine
         run: uv python install 3.12
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+
+      - name: Test audio engine
+        working-directory: native
+        run: cargo test --workspace
+
       - name: Install app dependencies
         working-directory: app
         run: npm ci
@@ -184,6 +196,18 @@ jobs:
       - name: Install Python
         working-directory: engine
         run: uv python install 3.12
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+
+      - name: Test audio engine
+        working-directory: native
+        run: cargo test --workspace
 
       - name: Install app dependencies
         working-directory: app

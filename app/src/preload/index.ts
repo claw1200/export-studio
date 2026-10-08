@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { AudioApi, DeckEvent, Tick } from './audio'
 
 type CallResult = { ok: true; result: unknown } | { ok: false; error: { message: string; type: string } }
 
@@ -22,4 +23,24 @@ const api = {
   }
 }
 
+function subscribe<T>(channel: string, listener: (value: T) => void): () => void {
+  const handler = (_: Electron.IpcRendererEvent, value: T): void => listener(value)
+  ipcRenderer.on(channel, handler)
+  return () => ipcRenderer.removeListener(channel, handler)
+}
+
+let sequence = 0
+
+const audio: AudioApi = {
+  status: () => ipcRenderer.invoke('audio:status'),
+  send: (command) => {
+    ipcRenderer.send('deck:cmd', command, ++sequence)
+    return sequence
+  },
+  onTick: (listener) => subscribe<Tick>('deck:tick', listener),
+  onEvent: (listener) => subscribe<DeckEvent>('deck:event', listener),
+  analyse: (trackId, bands) => ipcRenderer.invoke('wave:analyse', trackId, bands)
+}
+
 contextBridge.exposeInMainWorld('api', api)
+contextBridge.exposeInMainWorld('audio', audio)

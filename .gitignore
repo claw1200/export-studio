@@ -12,3 +12,7 @@ app/node_modules/
 app/out/
 app/dist/
 app/.eslintcache
+
+# native
+native/target/
+app/resources/native/

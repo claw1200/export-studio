@@ -2,10 +2,12 @@ import { app, shell, BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { AudioBridge } from './audio/bridge'
 import { Engine } from './engine'
 import { handleMediaProtocol, registerMediaScheme } from './media'
 
 const engine = new Engine()
+const audio = new AudioBridge(engine)
 registerMediaScheme()
 
 function createWindow(): BrowserWindow {
@@ -59,6 +61,7 @@ app.whenReady().then(() => {
 
   engine.start().catch((err) => console.error('[engine] failed to start', err))
   handleMediaProtocol(engine)
+  audio.register()
 
   ipcMain.handle('engine:call', async (_e, method: string, params?: unknown) => {
     try {
@@ -81,4 +84,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('will-quit', () => engine.stop())
+app.on('will-quit', () => {
+  audio.stop()
+  engine.stop()
+})

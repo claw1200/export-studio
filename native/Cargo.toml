@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = ["crates/es-decode", "crates/es-deck", "crates/es-wave", "crates/es-node"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+publish = false
+
+[workspace.dependencies]
+es-decode = { path = "crates/es-decode" }
+es-deck = { path = "crates/es-deck" }
+es-wave = { path = "crates/es-wave" }
+symphonia = { version = "0.5", default-features = false, features = [
+  "mp3",
+  "aac",
+  "isomp4",
+  "alac",
+  "flac",
+  "wav",
+  "aiff",
+  "pcm",
+  "ogg",
+  "vorbis",
+] }
+rubato = "0.16"
+cpal = "0.15"
+rtrb = "0.3"
+rayon = "1"
+thiserror = "2"
+napi = { version = "2", default-features = false, features = ["napi8"] }
+napi-derive = "2"
+napi-build = "2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+debug = false
+
+[profile.test]
+opt-level = 2

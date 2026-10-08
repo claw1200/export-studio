@@ -77,6 +77,12 @@
   }
   const memoryCount = $derived((player.detail?.cues ?? []).filter((c) => c.kind === 'memory').length)
   const cueLit = $derived(player.cueHeld || (!player.playing && !!track && player.atCue))
+  const loopButton = (lit: boolean): string[] => [
+    'flex h-7 items-center rounded-md border px-2 text-[10.5px] font-bold tracking-wide transition disabled:opacity-30',
+    lit
+      ? 'border-transparent bg-cue text-bg shadow-[0_0_10px] shadow-cue/50'
+      : 'border-line-soft text-faint hover:bg-hover hover:text-muted'
+  ]
   const placementLabel = $derived(player.cuePlacement === 'cuePoint' ? 'cue point' : 'playhead')
   const cueShortcut = $derived(keybinds.bindings['deck.cue'][0])
   const cueTitle = $derived(
@@ -305,10 +311,17 @@
       {#if cue}
         <div class="group relative">
           <button
-            class="flex h-7 w-[72px] items-center gap-1.5 rounded-md px-2 text-[11px] font-semibold text-bg transition hover:brightness-110"
+            class="flex h-7 w-[72px] touch-none items-center gap-1.5 rounded-md px-2 text-[11px] font-semibold text-bg transition select-none hover:brightness-110"
             style:background={cueColor(cue)}
             title={cue.comment || undefined}
-            onclick={() => player.seek(cue.start / 1000)}
+            onpointerdown={(e) => {
+              if (e.button !== 0) return
+              e.currentTarget.setPointerCapture(e.pointerId)
+              player.hotCueDown(kind)
+            }}
+            onpointerup={() => player.hotCueUp(kind)}
+            onpointercancel={() => player.hotCueUp(kind)}
+            onlostpointercapture={() => player.hotCueUp(kind)}
           >
             {letter}
             <span
@@ -407,6 +420,59 @@
     <span class="ml-3 text-[11px] text-faint">{memoryCount} memory cues</span>
 
     <div class="ml-auto flex items-center gap-3">
+      <div class="flex items-center gap-1" role="group" aria-label="Loop">
+        <button
+          class={loopButton(false)}
+          disabled={!track || !!player.audioError}
+          onclick={() => player.setLoopIn()}
+          title="Loop in"
+        >
+          IN
+        </button>
+        <button
+          class={loopButton(false)}
+          disabled={!track || !!player.audioError || (player.loopIn == null && !player.loop)}
+          onclick={() => player.setLoopOut()}
+          title="Loop out"
+        >
+          OUT
+        </button>
+        <button
+          class={loopButton(!!player.loop?.active)}
+          disabled={!player.loop}
+          onclick={() => player.reloopExit()}
+          aria-pressed={!!player.loop?.active}
+          title={player.loop?.active ? 'Exit loop' : 'Reloop'}
+        >
+          {player.loop?.active ? 'EXIT' : 'RELOOP'}
+        </button>
+        <button
+          class={loopButton(false)}
+          disabled={!track || !!player.audioError}
+          onclick={() => player.beatLoop(4)}
+          title="4-beat loop"
+        >
+          4 BEAT
+        </button>
+        <button
+          class={loopButton(false)}
+          disabled={!player.loop}
+          onclick={() => player.resizeLoop(0.5)}
+          aria-label="Halve loop"
+          title="Halve loop"
+        >
+          ½
+        </button>
+        <button
+          class={loopButton(false)}
+          disabled={!player.loop}
+          onclick={() => player.resizeLoop(2)}
+          aria-label="Double loop"
+          title="Double loop"
+        >
+          ×2
+        </button>
+      </div>
       <button
         class={[
           'flex h-7 items-center rounded-md border px-2 text-[11px] font-semibold transition',

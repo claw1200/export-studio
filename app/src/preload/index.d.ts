@@ -1,3 +1,5 @@
+import type { AudioApi } from './audio'
+
 export interface Api {
   platform: string
   call<T = unknown>(method: string, params?: unknown): Promise<T>
@@ -8,5 +10,6 @@ export interface Api {
 declare global {
   interface Window {
     api: Api
+    audio: AudioApi
   }
 }

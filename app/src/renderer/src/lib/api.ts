@@ -48,11 +48,9 @@ export const api = {
   showItemInFolder: window.api.showItemInFolder
 }
 
-function mediaUrl(kind: 'art' | 'audio', id: string, query = ''): string {
+function mediaUrl(kind: 'art', id: string, query = ''): string {
   return `media://${kind}/${encodeURIComponent(id)}${query}`
 }
 
 export const artworkUrl = (id: string, size: 's' | 'm' | '' = 'm'): string =>
   mediaUrl('art', id, size ? `?size=${size}` : '')
-
-export const audioUrl = (id: string): string => mediaUrl('audio', id)

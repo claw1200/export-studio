@@ -29,6 +29,7 @@
         cues: player.displayCues,
         beatgrid: player.displayGrid,
         cuePoint: player.track ? player.cuePoint : null,
+        loop: player.loop,
         gridEditing: player.gridEditing
       },
       canvas.width,
@@ -77,7 +78,7 @@
       return
     }
     drag = { x: e.clientX, position: player.position }
-    player.scrub(drag.position)
+    player.scrub(drag.position, e.timeStamp)
   }}
   onpointermove={(e) => {
     if (gridDrag) {
@@ -85,7 +86,7 @@
       return
     }
     if (!drag) return
-    player.scrub(drag.position - (e.clientX - drag.x) * secondsPerPixel())
+    player.scrub(drag.position - (e.clientX - drag.x) * secondsPerPixel(), e.timeStamp)
   }}
   onpointerup={release}
   onpointercancel={release}

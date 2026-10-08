@@ -1,0 +1,11 @@
+[package]
+name = "es-deck"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+es-decode.workspace = true
+cpal.workspace = true
+rtrb.workspace = true
+thiserror.workspace = true

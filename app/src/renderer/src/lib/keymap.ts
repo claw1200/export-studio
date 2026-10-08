@@ -31,7 +31,7 @@ type HotCueAction = (typeof HOT_CUE_ACTIONS)[number]
 const hotCueSpecs = Object.fromEntries(
   HOT_CUE_ACTIONS.map((id, i) => [
     id,
-    { label: `Hot cue ${HOT_CUE_LETTERS[i]}`, group: 'Cues', fields: 'controls' } satisfies ActionSpec
+    { label: `Hot cue ${HOT_CUE_LETTERS[i]}`, group: 'Cues', hold: true, fields: 'controls' } satisfies ActionSpec
   ])
 ) as Record<HotCueAction, ActionSpec>
 
@@ -39,6 +39,11 @@ export const ACTIONS = {
   'deck.playPause': { label: 'Play / pause', group: 'Playback', fields: 'controls' },
   'deck.cue': { label: 'Cue', group: 'Playback', hold: true, fields: 'controls' },
   'deck.loopIn': { label: 'Loop in', group: 'Playback', fields: 'controls' },
+  'deck.loopOut': { label: 'Loop out', group: 'Playback', fields: 'controls' },
+  'deck.reloopExit': { label: 'Reloop / exit', group: 'Playback', fields: 'controls' },
+  'deck.beatLoop': { label: '4-beat loop', group: 'Playback', fields: 'controls' },
+  'deck.loopHalve': { label: 'Halve loop', group: 'Playback', fields: 'controls' },
+  'deck.loopDouble': { label: 'Double loop', group: 'Playback', fields: 'controls' },
   'deck.quantise': { label: 'Toggle quantise', group: 'Playback', fields: 'controls' },
   'deck.gridEdit': { label: 'Toggle beatgrid editing', group: 'Playback', fields: 'controls' },
   'deck.seekBack': { label: 'Seek back 2s', group: 'Playback', repeat: true },
@@ -71,6 +76,11 @@ export const DEFAULT_BINDINGS: Record<ActionId, readonly string[]> = {
   'deck.playPause': ['Space'],
   'deck.cue': ['KeyC'],
   'deck.loopIn': ['KeyI'],
+  'deck.loopOut': ['KeyO'],
+  'deck.reloopExit': ['KeyP'],
+  'deck.beatLoop': ['KeyL'],
+  'deck.loopHalve': ['BracketLeft'],
+  'deck.loopDouble': ['BracketRight'],
   'deck.quantise': ['KeyQ'],
   'deck.gridEdit': [],
   'deck.seekBack': [],

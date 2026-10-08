@@ -1,7 +1,7 @@
 import { createSubscriber } from 'svelte/reactivity'
 import { fallSlice } from './dsp'
 import { poolSize, runJob } from './pool'
-import type { WaveSamples } from './peaks'
+import type { WaveSamples } from './deck/waves.svelte'
 import type { Beatgrid, Cue, TrackDetail } from './types'
 import { barBeatAt, countdownTo, firstIndexAtOrAfter } from './beat'
 import {
@@ -540,10 +540,13 @@ export interface DetailView {
   cues: Cue[]
   beatgrid: Beatgrid | null
   cuePoint: number | null
+  /** The deck's loop in seconds; drawn brighter while playback is held in it. */
+  loop: { start: number; end: number; active: boolean } | null
   gridEditing: boolean
 }
 
 export const CUE_POINT_COLOR = '#ff8a1f'
+export const LOOP_ACTIVE_COLOR = '#ffb020'
 
 let envUpper = new Float32Array(0)
 let envLower = new Float32Array(0)
@@ -681,6 +684,17 @@ function paintLoops(frame: Frame): void {
     ctx.fillStyle = cueColor(cue) + '33'
     ctx.fillRect(x0, 0, x1 - x0, ph)
   }
+  const loop = view.loop
+  if (!loop) return
+  const x0 = toX(loop.start)
+  const x1 = toX(loop.end)
+  if (x1 < 0 || x0 > pw) return
+  ctx.fillStyle = LOOP_ACTIVE_COLOR + (loop.active ? '40' : '18')
+  ctx.fillRect(x0, 0, x1 - x0, ph)
+  ctx.fillStyle = LOOP_ACTIVE_COLOR
+  const edge = Math.max(1, Math.round(frame.dpr))
+  ctx.fillRect(Math.round(x0), 0, edge, ph)
+  ctx.fillRect(Math.round(x1) - edge, 0, edge, ph)
 }
 
 /**
