@@ -116,8 +116,24 @@ export interface LibraryInfo {
   writable: boolean
 }
 
+export interface Volume {
+  id: string
+  name: string
+  path: string
+  hasLibrary: boolean
+  rootName: string | null
+}
+
+export interface SyncProgress {
+  phase: string
+  done?: number
+  total?: number
+  name?: string
+}
+
 export type Source =
   | { type: 'collection' }
   | { type: 'playlist'; id: string }
   | { type: 'history'; id: string }
   | { type: 'tag'; id: string }
+  | { type: 'device'; volumeId: string; playlistId: string | null }

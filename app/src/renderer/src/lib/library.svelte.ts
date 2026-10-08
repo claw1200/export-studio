@@ -2,7 +2,7 @@ import { api } from './api'
 import { clearDetailCache } from './deck/session.svelte'
 import { newestFirst, type SortKey, sortTracks, type TrackSort } from './library/sort'
 import { buildTree } from './library/tree'
-import type { LibraryInfo, Source, Track, TrackEdit, TreeItem } from './types'
+import type { LibraryInfo, Source, SyncProgress, Track, TrackEdit, TreeItem, Volume } from './types'
 
 export const TRACK_DRAG_TYPE = 'application/x-exportstudio-tracks'
 
@@ -15,6 +15,12 @@ export class Library {
   histories = $state.raw<TreeItem[]>([])
   myTags = $state.raw<TreeItem[]>([])
   info = $state.raw<LibraryInfo | null>(null)
+  devices = $state.raw<Volume[]>([])
+  devicePlaylists = $state.raw<Record<string, TreeItem[]>>({})
+  deviceTracks = $state.raw<Track[]>([])
+  syncing = $state(false)
+  syncProgress = $state<SyncProgress | null>(null)
+  syncError = $state<string | null>(null)
 
   status = $state<'idle' | 'loading' | 'ready' | 'error'>('idle')
   error = $state<string | null>(null)
@@ -40,7 +46,7 @@ export class Library {
   private noticeTimer: ReturnType<typeof setTimeout> | undefined
   private trackListeners = new Set<(tracks: Track[]) => void>()
 
-  byId = $derived(new Map(this.tracks.map((t) => [t.id, t])))
+  byId = $derived(new Map([...this.tracks, ...this.deviceTracks].map((t) => [t.id, t])))
   playlistById = $derived(new Map(this.playlists.map((p) => [p.id, p])))
   playlistTree = $derived(buildTree(this.playlists))
   historyTree = $derived(buildTree(this.histories))
@@ -54,7 +60,7 @@ export class Library {
 
   private haystack = $derived(
     new Map(
-      this.tracks.map((t) => [
+      [...this.tracks, ...this.deviceTracks].map((t) => [
         t.id,
         [t.title, t.artist, t.album, t.genre, t.label, t.remixer, t.comment, t.key, t.originalArtist]
           .join('\u0001')
@@ -66,6 +72,12 @@ export class Library {
   /** 1-based position of each track in the current playlist or history, as stored in rekordbox. */
   positions = $derived.by(() => {
     const out = new Map<string, number>()
+    if (this.source.type === 'device' && this.source.playlistId) {
+      this.deviceTracks.forEach((track, i) => {
+        if (!out.has(track.id)) out.set(track.id, i + 1)
+      })
+      return out
+    }
     if (this.source.type !== 'playlist' && this.source.type !== 'history') return out
     this.sourceIds?.forEach((id, i) => {
       if (!out.has(id)) out.set(id, i + 1)
@@ -76,6 +88,7 @@ export class Library {
   sourceTracks = $derived.by(() => {
     const src = this.source
     if (src.type === 'collection') return this.tracks
+    if (src.type === 'device') return this.deviceTracks
     if (src.type === 'tag') return this.tracks.filter((t) => t.myTags.includes(src.id))
     if (!this.sourceIds) return []
     const out: Track[] = []
@@ -117,6 +130,11 @@ export class Library {
   sourceTitle = $derived.by(() => {
     const src = this.source
     if (src.type === 'collection') return 'Collection'
+    if (src.type === 'device') {
+      const volume = this.devices.find((item) => item.id === src.volumeId)
+      if (!src.playlistId) return volume?.name ?? 'Device'
+      return this.devicePlaylists[src.volumeId]?.find((item) => item.id === src.playlistId)?.name ?? volume?.name ?? 'Device'
+    }
     const list = src.type === 'playlist' ? this.playlists : src.type === 'history' ? this.histories : this.myTags
     return list.find((i) => i.id === src.id)?.name ?? ''
   })
@@ -126,6 +144,8 @@ export class Library {
   constructor() {
     api.onEvent((event, data) => {
       if (event === 'library.changed') this.changed = true
+      if (event === 'usb.volumes') void this.refreshDevices()
+      if (event === 'usb.progress') this.syncProgress = data as SyncProgress
       if (event === 'library.rekordbox') {
         const running = Boolean((data as { running?: boolean } | undefined)?.running)
         if (this.info && this.info.rekordboxRunning !== running) {
@@ -150,6 +170,7 @@ export class Library {
     try {
       this.info = reload ? await api.reload() : await api.open()
       await this.refreshContents()
+      await this.refreshDevices()
       this.status = 'ready'
     } catch (e) {
       this.error = (e as Error).message
@@ -283,6 +304,10 @@ export class Library {
 
   async updateTracks(ids: string[], fields: TrackEdit): Promise<boolean> {
     if (!ids.length || !Object.keys(fields).length) return true
+    if (ids.some((id) => id.startsWith('usb:'))) {
+      this.notify('Device tracks follow the playlist synced to that volume')
+      return false
+    }
     const result = await this.edit(() => api.updateTracks(ids, fields, this.writeFileTags))
     if (!result) return false
     this.applyTracks(result.tracks)
@@ -295,6 +320,10 @@ export class Library {
   }
 
   async addToPlaylist(playlistId: string, ids: string[]): Promise<void> {
+    if (ids.some((id) => id.startsWith('usb:'))) {
+      this.notify('Device tracks stay on the volume')
+      return
+    }
     const before = this.playlistById.get(playlistId)?.count ?? 0
     const result = await this.edit(() => api.addToPlaylist(playlistId, ids))
     if (!result) return
@@ -366,6 +395,59 @@ export class Library {
     await this.setSource(this.source)
   }
 
+  async refreshDevices(): Promise<void> {
+    try {
+      const volumes = await api.usbList()
+      const present = new Set(volumes.map((volume) => volume.id))
+      this.devices = volumes
+      const playlists = { ...this.devicePlaylists }
+      for (const id of Object.keys(playlists)) {
+        if (!present.has(id)) delete playlists[id]
+      }
+      this.devicePlaylists = playlists
+      if (this.source.type === 'device' && !present.has(this.source.volumeId)) {
+        await this.setSource({ type: 'collection' })
+      }
+    } catch (e) {
+      this.notify((e as Error).message)
+    }
+  }
+
+  async devicePlaylistTree(volumeId: string): Promise<TreeItem[]> {
+    if (!this.devicePlaylists[volumeId]) {
+      const rows = await api.usbPlaylists(volumeId)
+      this.devicePlaylists = { ...this.devicePlaylists, [volumeId]: rows }
+    }
+    return this.devicePlaylists[volumeId]
+  }
+
+  async syncTo(volumeId: string, playlistIds: string[]): Promise<boolean> {
+    if (this.syncing) return false
+    if (!playlistIds.length) {
+      this.syncError = 'Select a playlist to sync'
+      return false
+    }
+    this.syncing = true
+    this.syncError = null
+    this.syncProgress = { phase: 'reading' }
+    try {
+      await api.usbSync(volumeId, playlistIds)
+      const refreshPlaylists = volumeId in this.devicePlaylists
+      const playlists = { ...this.devicePlaylists }
+      delete playlists[volumeId]
+      this.devicePlaylists = playlists
+      await this.refreshDevices()
+      if (refreshPlaylists) await this.devicePlaylistTree(volumeId)
+      if (this.source.type === 'device' && this.source.volumeId === volumeId) await this.setSource(this.source)
+      return true
+    } catch (e) {
+      this.syncError = (e as Error).message
+      return false
+    } finally {
+      this.syncing = false
+    }
+  }
+
   async setSource(source: Source): Promise<void> {
     const token = ++this.sourceToken
     if (!this.isSource(source)) {
@@ -375,8 +457,26 @@ export class Library {
     this.source = source
     if (source.type === 'collection' || source.type === 'tag') {
       this.sourceIds = null
+      this.deviceTracks = []
       return
     }
+    if (source.type === 'device') {
+      this.sourceIds = null
+      this.sourceLoading = true
+      try {
+        const rows = await api.usbTracks(source.volumeId, source.playlistId)
+        if (token === this.sourceToken) this.deviceTracks = rows
+      } catch (e) {
+        if (token === this.sourceToken) {
+          this.deviceTracks = []
+          this.notify((e as Error).message)
+        }
+      } finally {
+        if (token === this.sourceToken) this.sourceLoading = false
+      }
+      return
+    }
+    this.deviceTracks = []
     this.sourceLoading = true
     try {
       const ids = source.type === 'playlist' ? await api.playlistTracks(source.id) : await api.historyTracks(source.id)
@@ -396,6 +496,10 @@ export class Library {
   isSource(source: Source): boolean {
     const cur = this.source
     if (cur.type !== source.type) return false
-    return cur.type === 'collection' || (source.type !== 'collection' && 'id' in cur && cur.id === source.id)
+    if (cur.type === 'collection') return true
+    if (cur.type === 'device' && source.type === 'device') {
+      return cur.volumeId === source.volumeId && cur.playlistId === source.playlistId
+    }
+    return source.type !== 'collection' && source.type !== 'device' && 'id' in cur && cur.id === source.id
   }
 }

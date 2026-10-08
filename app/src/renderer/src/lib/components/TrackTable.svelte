@@ -256,6 +256,7 @@
   const AUTOSCROLL_STEP = 14
 
   function dragStart(e: DragEvent, track: Track): void {
+    if (library.source.type === 'device') return
     pendingCollapse = null
     if (!library.selection.has(track.id)) onselect(track)
     const ids = library.selectedTracks.map((t) => t.id)
@@ -450,7 +451,7 @@
               role="row"
               tabindex="-1"
               aria-selected={selected}
-              draggable="true"
+              draggable={library.source.type !== 'device'}
               onmousedown={(e) => rowMousedown(e, track)}
               onmouseup={(e) => rowMouseup(e, track)}
               oncontextmenu={(e) => rowContextMenu(e, track)}

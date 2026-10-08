@@ -8,7 +8,8 @@ import type {
   TrackDetail,
   TrackEdit,
   TrackUpdate,
-  TreeItem
+  TreeItem,
+  Volume
 } from './types'
 
 const call = window.api.call
@@ -44,6 +45,12 @@ export const api = {
   deletePlaylist: (id: string) => call<TreeItem[]>('playlist.delete', { id }),
   addTag: (id: string, trackIds: string[]) => call<Track[]>('tag.add', { id, trackIds }),
   removeTag: (id: string, trackIds: string[]) => call<Track[]>('tag.remove', { id, trackIds }),
+  usbList: () => call<Volume[]>('usb.list'),
+  usbPlaylists: (volumeId: string) => call<TreeItem[]>('usb.playlists', { volumeId }),
+  usbTracks: (volumeId: string, playlistId: string | null) =>
+    call<Track[]>('usb.tracks', { volumeId, playlistId }),
+  usbSync: (volumeId: string, playlistIds: string[]) =>
+    call<{ volumeId: string; tracks: number; playlists: number }>('usb.sync', { volumeId, playlistIds }),
   onEvent: window.api.onEvent,
   showItemInFolder: window.api.showItemInFolder
 }

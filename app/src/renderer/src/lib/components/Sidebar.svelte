@@ -13,15 +13,17 @@
     ChevronRight,
     Pencil,
     Plus,
-    Trash2
+    Trash2,
+    HardDrive
   } from '@lucide/svelte'
   import { getApp } from '$lib/context'
-  import type { TreeNode } from '$lib/library/tree'
+  import { buildTree, type TreeNode } from '$lib/library/tree'
   import { menuAt, tidy, type MenuEntry, type MenuRequest } from '$lib/menu'
   import { SEPARATOR, unlockEntry } from '$lib/trackMenu'
   import type { Source } from '$lib/types'
   import ConfirmDialog from './ConfirmDialog.svelte'
   import ContextMenu from './ContextMenu.svelte'
+  import SyncDialog from './SyncDialog.svelte'
 
   let { onsource }: { onsource?: () => void } = $props()
 
@@ -113,6 +115,7 @@
 
   let menu = $state<MenuRequest | null>(null)
   let deleting = $state<TreeNode | null>(null)
+  let syncing = $state<TreeNode | null>(null)
 
   function create(parentId: string, folder: boolean): void {
     if (parentId !== 'root') expanded.add(`playlist:${parentId}`)
@@ -146,6 +149,7 @@
       isFolder ? 'Folder' : 'Playlist',
       tidy([
         ...(isFolder ? [...createItems(node.id), SEPARATOR] : []),
+        { label: 'Sync to…', icon: HardDrive, onselect: () => { void library.refreshDevices(); syncing = node } },
         { label: 'Rename', icon: Pencil, disabled: locked, onselect: () => (library.renamingId = node.id) },
         { label: 'Delete', icon: Trash2, danger: true, disabled: locked, onselect: () => (deleting = node) },
         locked && SEPARATOR,
@@ -182,7 +186,59 @@
       library.renamingId = null
     }
   }
+  async function toggleDevice(volumeId: string, hasLibrary: boolean): Promise<void> {
+    const key = `device:${volumeId}`
+    if (expanded.has(key)) {
+      expanded.delete(key)
+      return
+    }
+    if (hasLibrary) {
+      try {
+        await library.devicePlaylistTree(volumeId)
+      } catch (e) {
+        library.notify((e as Error).message)
+        return
+      }
+    }
+    expanded.add(key)
+  }
 </script>
+
+{#snippet deviceTree(nodes: TreeNode[], volumeId: string, depth: number)}
+  {#each nodes as node (node.id)}
+    {@const key = `device-playlist:${volumeId}:${node.id}`}
+    {@const isFolder = node.kind === 'folder'}
+    {@const isOpen = expanded.has(key)}
+    {@const active = !isFolder && library.isSource({ type: 'device', volumeId, playlistId: node.id })}
+    <button
+      class={[
+        'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-left text-[12.5px]',
+        active ? 'bg-select text-fg' : 'text-muted hover:bg-hover hover:text-fg'
+      ]}
+      style:padding-left="{8 + depth * 14}px"
+      onclick={() => (isFolder ? toggle(key) : setSource({ type: 'device', volumeId, playlistId: node.id }))}
+    >
+      {#if isFolder}
+        <ChevronRight class={['size-3 shrink-0 text-faint transition-transform', isOpen && 'rotate-90']} />
+        {#if isOpen}
+          <FolderOpen class="size-3.5 shrink-0 text-faint" />
+        {:else}
+          <Folder class="size-3.5 shrink-0 text-faint" />
+        {/if}
+      {:else}
+        <span class="w-3 shrink-0"></span>
+        <ListMusic class="size-3.5 shrink-0 text-faint" />
+      {/if}
+      <span class="min-w-0 flex-1 truncate">{node.name || 'Untitled'}</span>
+      {#if !isFolder && node.count != null}
+        <span class="tabular text-[11px] text-faint">{node.count}</span>
+      {/if}
+    </button>
+    {#if isFolder && isOpen}
+      {@render deviceTree(node.children, volumeId, depth + 1)}
+    {/if}
+  {/each}
+{/snippet}
 
 {#snippet icon(node: TreeNode, type: SourceType, isOpen: boolean)}
   {#if node.kind === 'folder'}
@@ -317,6 +373,51 @@
     <span class="tabular text-[11px] text-faint">{library.tracks.length}</span>
   </button>
 
+  <div class="mt-4">
+    <button
+      class="flex w-full items-center gap-1 px-2 pb-1 text-[10.5px] font-semibold tracking-wider text-faint uppercase hover:text-muted"
+      onclick={() => toggleSection('devices')}
+    >
+      <ChevronRight class={['size-3 transition-transform', sectionOpen('devices') && 'rotate-90']} />
+      Devices
+    </button>
+    {#if sectionOpen('devices')}
+      {#each library.devices as volume (volume.id)}
+        {@const key = `device:${volume.id}`}
+        {@const open = expanded.has(key)}
+        {@const active = library.isSource({ type: 'device', volumeId: volume.id, playlistId: null })}
+        <div class="flex h-7 items-center gap-1 rounded-md pr-2" class:bg-select={active && volume.hasLibrary}>
+          <button
+            class="grid size-7 place-items-center text-faint hover:text-fg"
+            aria-label={open ? `Collapse ${volume.name}` : `Expand ${volume.name}`}
+            onclick={() => void toggleDevice(volume.id, volume.hasLibrary)}
+          >
+            <ChevronRight class={['size-3 transition-transform', open && 'rotate-90']} />
+          </button>
+          <button
+            class={[
+              'flex h-7 min-w-0 flex-1 items-center gap-1.5 text-left text-[12.5px]',
+              active && volume.hasLibrary ? 'text-fg' : 'text-muted hover:text-fg'
+            ]}
+            disabled={!volume.hasLibrary}
+            onclick={() => volume.hasLibrary && setSource({ type: 'device', volumeId: volume.id, playlistId: null })}
+          >
+            <HardDrive class="size-3.5 shrink-0 text-faint" />
+            <span class="min-w-0 flex-1 truncate">{volume.name}</span>
+            {#if !volume.hasLibrary}
+              <span class="text-[11px] text-faint">Empty</span>
+            {/if}
+          </button>
+        </div>
+        {#if open && volume.hasLibrary}
+          {@render deviceTree(buildTree(library.devicePlaylists[volume.id] ?? []), volume.id, 1)}
+        {/if}
+      {:else}
+        <p class="px-2 py-1 text-[12px] text-faint">No devices</p>
+      {/each}
+    {/if}
+  </div>
+
   {@render section('playlists', 'Playlists', library.playlistTree, 'playlist')}
   {@render section('tags', 'My Tag', library.tagTree, 'tag')}
   {@render section('histories', 'Histories', library.historyTree, 'history')}
@@ -336,4 +437,9 @@
     onconfirm={() => void library.deletePlaylist(node.id)}
     onclose={() => (deleting = null)}
   />
+{/if}
+
+{#if syncing}
+  {@const node = syncing}
+  <SyncDialog playlistId={node.id} onclose={() => (syncing = null)} />
 {/if}
