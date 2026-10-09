@@ -2,11 +2,13 @@ import json
 import logging
 import sys
 import threading
+import time
 import traceback
 
 from pathlib import Path
 
-from .library import Library
+from .backup import Backups
+from .library import WRITE_BLOCKED, Library, _rekordbox_db_path
 from .usb import browse
 from .usb.sync import bundle_from_library, sync_volume
 from .usb.volumes import list_volumes
@@ -15,6 +17,9 @@ log = logging.getLogger("exportstudio_engine")
 
 _out = sys.stdout
 _out_lock = threading.Lock()
+
+DAILY = 24 * 60 * 60
+DAILY_CHECK_TICKS = 300
 
 
 def _send(msg: dict) -> None:
@@ -31,6 +36,8 @@ def emit(event: str, data: dict | None = None) -> None:
 class Engine:
     def __init__(self) -> None:
         self.library: Library | None = None
+        self.backups = Backups()
+        self._backed_up = False
         self._lock = threading.Lock()
         self.methods = {
             "library.open": self.open,
@@ -71,6 +78,12 @@ class Engine:
             "usb.tracks": lambda volumeId, playlistId=None: browse.tracks(Path(volumeId), playlistId),
             "usb.detail": lambda id: browse.detail(id),
             "usb.sync": lambda volumeId, playlistIds: self.sync(volumeId, playlistIds),
+            "backup.list": lambda: self.backups.list_backups(self._source(required=False)),
+            "backup.create": lambda: self.back_up("manual"),
+            "backup.restore": lambda id: self.restore(id),
+            "backup.delete": lambda id: self.delete_backup(id),
+            "backup.settings": lambda: self.backups.settings(),
+            "backup.setSettings": lambda auto=None, keep=None: self.backups.set_settings(auto, keep),
         }
 
     @property
@@ -92,8 +105,61 @@ class Engine:
         return self.lib.info()
 
     def set_writable(self, writable: bool) -> dict:
-        self.lib.set_writable(bool(writable))
-        return self.lib.info()
+        lib = self.lib
+        if writable and not lib.writable and not self._backed_up and self.backups.settings()["auto"]:
+            if lib.rekordbox_running():
+                raise RuntimeError(WRITE_BLOCKED)
+            self.back_up("before-edit")
+            self._backed_up = True
+        lib.set_writable(bool(writable))
+        return lib.info()
+
+    def _source(self, required: bool = True) -> Path | None:
+        if self.library is not None:
+            return self.library.src
+        try:
+            return _rekordbox_db_path()
+        except FileNotFoundError:
+            if required:
+                raise
+            return None
+
+    def back_up(self, reason: str) -> dict | None:
+        try:
+            result = self.backups.create(self._source(), reason, on_progress=lambda e: emit("backup.progress", e))
+        finally:
+            emit("backup.progress", {"stage": "done", "reason": reason})
+        if result is not None:
+            emit("backup.changed")
+        return result
+
+    def delete_backup(self, backup_id: str) -> list[dict]:
+        self.backups.delete(backup_id)
+        return self.backups.list_backups(self._source(required=False))
+
+    def restore(self, backup_id: str) -> dict:
+        src = self._source()
+        if self.library is not None:
+            self.library.close()
+        try:
+            result = self.backups.restore(backup_id, src, on_progress=lambda e: emit("backup.progress", e))
+        finally:
+            emit("backup.progress", {"stage": "done", "reason": "restore"})
+            emit("backup.changed")
+            try:
+                if self.library is None:
+                    self.library = Library(src)
+                self.library.open()
+            except Exception:
+                log.exception("Could not open the library after restoring")
+        emit("library.reloaded")
+        return result
+
+    def _daily_due(self) -> bool:
+        if not self.backups.settings()["auto"]:
+            return False
+        latest = self.backups.latest_automatic()
+        return latest is None or time.time() - latest.get("created", 0) >= DAILY
 
     def track_detail(self, id: str) -> dict:
         if str(id).startswith("usb:"):
@@ -138,7 +204,17 @@ class Engine:
         notified = False
         running: bool | None = None
         volumes: tuple | None = None
+        ticks = 0
         while not stop.wait(2.0):
+            ticks += 1
+            if ticks % DAILY_CHECK_TICKS == 1:
+                with self._lock:
+                    if self.library is not None and self.library.db is not None:
+                        try:
+                            if self._daily_due():
+                                self.back_up("daily")
+                        except Exception:
+                            log.exception("Daily backup failed")
             try:
                 current = tuple((item["id"], item["hasLibrary"], item["rootName"]) for item in list_volumes())
             except Exception:

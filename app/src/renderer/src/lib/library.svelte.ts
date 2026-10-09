@@ -42,6 +42,7 @@ export class Library {
   editError = $state<string | null>(null)
   writeFileTags = $state(localStorage.getItem('writeFileTags') === '1')
   importArtwork = $state(localStorage.getItem('importArtwork') !== '0')
+  hideStreaming = $state(localStorage.getItem('hideStreaming') === '1')
   importing = $state(false)
   renamingId = $state<string | null>(null)
   dragging = $state.raw<string[] | null>(null)
@@ -90,7 +91,7 @@ export class Library {
     return out
   })
 
-  sourceTracks = $derived.by(() => {
+  private allSourceTracks = $derived.by(() => {
     const src = this.source
     if (src.type === 'collection') return this.tracks
     if (src.type === 'device') return this.deviceTracks
@@ -103,6 +104,8 @@ export class Library {
     }
     return out
   })
+
+  sourceTracks = $derived(this.hideStreaming ? this.allSourceTracks.filter((t) => !t.streaming) : this.allSourceTracks)
 
   visible = $derived.by(() => {
     let list = this.sourceTracks
@@ -138,7 +141,9 @@ export class Library {
     if (src.type === 'device') {
       const volume = this.devices.find((item) => item.id === src.volumeId)
       if (!src.playlistId) return volume?.name ?? 'Device'
-      return this.devicePlaylists[src.volumeId]?.find((item) => item.id === src.playlistId)?.name ?? volume?.name ?? 'Device'
+      return (
+        this.devicePlaylists[src.volumeId]?.find((item) => item.id === src.playlistId)?.name ?? volume?.name ?? 'Device'
+      )
     }
     const list = src.type === 'playlist' ? this.playlists : src.type === 'history' ? this.histories : this.myTags
     return list.find((i) => i.id === src.id)?.name ?? ''
@@ -264,6 +269,11 @@ export class Library {
   setImportArtwork(on: boolean): void {
     this.importArtwork = on
     localStorage.setItem('importArtwork', on ? '1' : '0')
+  }
+
+  setHideStreaming(on: boolean): void {
+    this.hideStreaming = on
+    localStorage.setItem('hideStreaming', on ? '1' : '0')
   }
 
   onTracksUpdated(listener: (tracks: Track[]) => void): () => void {
@@ -413,7 +423,11 @@ export class Library {
     if (result.tracks.length) parts.push(`Imported ${count(result.tracks.length)}${into}.`)
     else if (playlistId && result.skipped) parts.push(`Added ${count(result.skipped)}${into}.`)
     if (result.skipped) {
-      parts.push(result.skipped === 1 ? 'One was already in the collection.' : `${result.skipped} were already in the collection.`)
+      parts.push(
+        result.skipped === 1
+          ? 'One was already in the collection.'
+          : `${result.skipped} were already in the collection.`
+      )
     }
     if (result.failed.length) {
       const first = result.failed[0]

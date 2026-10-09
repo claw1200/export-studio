@@ -1,23 +1,56 @@
+<script module lang="ts">
+  export type SettingsSection = 'general' | 'display' | 'analysis' | 'database' | 'keyboard' | 'developer'
+</script>
+
 <script lang="ts">
-  import { AudioWaveform, Keyboard, Plus, RotateCcw, Search, SlidersHorizontal, Wrench, X } from '@lucide/svelte'
+  import {
+    ArchiveRestore,
+    AudioWaveform,
+    Database,
+    DatabaseBackup,
+    FolderOpen,
+    Keyboard,
+    LoaderCircle,
+    Monitor,
+    Plus,
+    RotateCcw,
+    Search,
+    SlidersHorizontal,
+    Trash2,
+    Wrench,
+    X
+  } from '@lucide/svelte'
   import { BPM_RANGES, MAX_CONCURRENCY } from '$lib/analysis.svelte'
+  import { backupDate, KEEP_CHOICES } from '$lib/backups.svelte'
   import { getApp } from '$lib/context'
+  import { formatSize } from '$lib/format'
   import { ACTION_IDS, ACTIONS, chordFromEvent, chordLabel, type ActionGroup, type ActionId } from '$lib/keymap'
   import type { CuePlacement } from '$lib/player.svelte'
+  import type { Backup, BackupProgress, BackupReason } from '$lib/types'
   import type { GridMode } from '../../../../preload/analysis'
+  import ConfirmDialog from './ConfirmDialog.svelte'
 
-  let { onclose }: { onclose: () => void } = $props()
+  let { initialSection = 'general', onclose }: { initialSection?: SettingsSection; onclose: () => void } = $props()
 
-  const { library, player, keybinds, analysis } = getApp()
+  const { library, player, keybinds, analysis, backups } = getApp()
 
-  type Section = 'general' | 'analysis' | 'keyboard' | 'developer'
+  type Section = SettingsSection
   type Choice = { id: string; label: string }
   const SECTIONS: { id: Section; label: string; icon: typeof Keyboard }[] = [
     { id: 'general', label: 'General', icon: SlidersHorizontal },
+    { id: 'display', label: 'Display', icon: Monitor },
     { id: 'analysis', label: 'Import & analysis', icon: AudioWaveform },
+    { id: 'database', label: 'Database & files', icon: Database },
     { id: 'keyboard', label: 'Keyboard shortcuts', icon: Keyboard },
     { id: 'developer', label: 'Developer options', icon: Wrench }
   ]
+  const REASONS: Record<BackupReason, string> = {
+    manual: 'Manual',
+    'before-edit': 'Before editing',
+    daily: 'Daily',
+    'pre-restore': 'Replaced by a restore'
+  }
+  const KEEP: Choice[] = KEEP_CHOICES.map((n) => ({ id: String(n), label: String(n) }))
   const GROUPS: ActionGroup[] = ['Playback', 'Cues', 'Library', 'App']
   const PLACEMENTS: { id: CuePlacement; label: string }[] = [
     { id: 'playhead', label: 'Playhead' },
@@ -33,8 +66,24 @@
     label: String(i + 1)
   }))
 
-  let section = $state<Section>('general')
+  // svelte-ignore state_referenced_locally
+  let section = $state<Section>(initialSection)
   let recording = $state<ActionId | null>(null)
+  let confirming = $state.raw<{ kind: 'restore' | 'delete'; backup: Backup } | null>(null)
+
+  void backups.refresh()
+
+  function progressLabel(p: BackupProgress): string {
+    const count = p.total ? ` ${p.done ?? 0} of ${p.total} files` : ''
+    if (p.stage === 'checking') return p.reason === 'restore' ? 'Checking the backup…' : 'Checking the library…'
+    if (p.stage === 'extracting') return `Restoring${count}`
+    return `Saving${count}`
+  }
+
+  function restoreMessage(backup: Backup): string {
+    const other = backup.otherLibrary ? ` It was made from a different library (${backup.dbPath}).` : ''
+    return `Replaces your rekordbox library with the one from ${backupDate(backup)}.${other} Your current library is kept in the backups folder.`
+  }
   let notice = $state<string | null>(null)
   let filter = $state('')
   let swallowKeyup: string | null = null
@@ -180,8 +229,19 @@
               {player.display.fallBlocks}
             </span>
           </div>
-        {:else if section === 'general'}
-          <div class="flex flex-col gap-1">
+        {:else if section === 'display'}
+          <section class="mb-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Browser</h3>
+            {@render toggle(
+              'Hide streaming tracks',
+              'Leave tracks from streaming services out of the collection, playlists, histories and tags. They stay in rekordbox.',
+              library.hideStreaming,
+              () => library.setHideStreaming(!library.hideStreaming)
+            )}
+          </section>
+
+          <section class="mb-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Waveforms</h3>
             <div class="flex items-center gap-3 rounded-md px-2 py-2">
               <span class="min-w-0 flex-1">
                 <span class="block text-[12.5px] font-medium">High quality waveforms</span>
@@ -204,6 +264,9 @@
                 {player.display.quality === 0 ? 'Off' : `${player.display.quality}%`}
               </span>
             </div>
+          </section>
+        {:else if section === 'general'}
+          <div class="flex flex-col gap-1">
             {@render toggle(
               'Quantise',
               'Scrubbing, the cue point and new cues snap to the nearest beat.',
@@ -237,13 +300,117 @@
                 {/each}
               </div>
             </div>
+          </div>
+        {:else if section === 'database'}
+          {@const rekordboxOpen = !!library.info?.rekordboxRunning}
+          <section class="mb-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Files</h3>
             {@render toggle(
               'Write track info to file tags',
               'When you edit title, artist, album and other text fields, also save them into the audio files’ own tags. Off keeps changes in rekordbox only. Rating and colour always stay in rekordbox.',
               library.writeFileTags,
               () => library.setWriteFileTags(!library.writeFileTags)
             )}
+          </section>
+
+          <section class="mb-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Backups</h3>
+            {@render toggle(
+              'Automatic backups',
+              'Back up the library before the first edit each time you unlock editing, and once a day. Skipped when nothing has changed.',
+              backups.settings.auto,
+              () => void backups.setSettings({ auto: !backups.settings.auto })
+            )}
+            {@render choice(
+              'Keep',
+              'How many automatic backups to keep. Manual backups stay until you delete them.',
+              KEEP,
+              String(backups.settings.keep),
+              (id) => void backups.setSettings({ keep: Number(id) })
+            )}
+            <p class="px-2 pt-1 text-[11px] leading-snug text-faint">
+              Backups hold the rekordbox database, playlists, cues, beatgrids, waveforms and artwork. Audio files are
+              not backed up.
+            </p>
+          </section>
+
+          <div class="mb-3 flex items-center gap-2 px-2">
+            <button
+              class="flex h-7 items-center gap-1.5 rounded-md bg-accent px-3 text-[12px] font-medium text-bg hover:bg-accent/90 disabled:pointer-events-none disabled:opacity-50"
+              disabled={!!backups.busy}
+              onclick={() => void backups.create()}
+            >
+              <DatabaseBackup class="size-3.5" />
+              Back up now
+            </button>
+            <button
+              class="flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] text-muted hover:bg-hover hover:text-fg disabled:pointer-events-none disabled:opacity-40"
+              disabled={!backups.list.length}
+              onclick={() => backups.list[0] && void window.api.showItemInFolder(backups.list[0].path)}
+            >
+              <FolderOpen class="size-3.5" />
+              Show backups folder
+            </button>
+            {#if backups.progress}
+              {@const p = backups.progress}
+              <span class="ml-auto flex min-w-0 items-center gap-2 text-[11px] text-muted" role="status">
+                <LoaderCircle class="size-3 shrink-0 animate-spin text-accent" />
+                <span class="truncate">{progressLabel(p)}</span>
+                {#if p.total}
+                  <span class="h-1 w-20 shrink-0 overflow-hidden rounded-full bg-line">
+                    <span
+                      class="block h-full rounded-full bg-accent transition-[width]"
+                      style:width="{(100 * (p.done ?? 0)) / p.total}%"
+                    ></span>
+                  </span>
+                {/if}
+              </span>
+            {/if}
           </div>
+
+          {#if backups.error}
+            <p class="mx-2 mb-3 rounded-md border border-warn/60 bg-warn/10 px-2 py-1.5 text-[11.5px] text-warn">
+              {backups.error}
+            </p>
+          {/if}
+
+          <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Saved backups</h3>
+          {#each backups.list as backup (backup.id)}
+            <div class="group/row flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-hover/60">
+              <span class="min-w-0 flex-1">
+                <span class="block text-[12.5px] font-medium">{backupDate(backup)}</span>
+                <span class="mt-0.5 block truncate text-[11px] text-faint">
+                  {REASONS[backup.reason] ?? backup.reason}
+                  {#if backup.tracks != null}· {backup.tracks.toLocaleString()} tracks{/if}
+                  · {formatSize(backup.size)}
+                  {#if backup.otherLibrary}<span class="text-warn" title={backup.dbPath}> · other library</span>{/if}
+                  {#if !backup.verified}<span title="This library was not checked when it was saved">
+                      · unchecked</span
+                    >{/if}
+                </span>
+              </span>
+              <button
+                class="flex h-6 items-center gap-1 rounded px-2 text-[11.5px] text-muted hover:bg-hover hover:text-fg disabled:pointer-events-none disabled:opacity-40"
+                disabled={!!backups.busy || rekordboxOpen}
+                title={rekordboxOpen ? 'Close rekordbox before restoring a backup' : 'Restore this backup'}
+                onclick={() => (confirming = { kind: 'restore', backup })}
+              >
+                <ArchiveRestore class="size-3" />
+                Restore
+              </button>
+              <button
+                class="grid size-6 place-items-center rounded text-faint hover:bg-hover hover:text-fg disabled:pointer-events-none disabled:opacity-40"
+                disabled={!!backups.busy}
+                aria-label="Delete the backup from {backupDate(backup)}"
+                title="Delete"
+                onclick={() => (confirming = { kind: 'delete', backup })}
+              >
+                <Trash2 class="size-3" />
+              </button>
+            </div>
+          {:else}
+            <p class="px-2 text-[12px] text-faint">No backups yet.</p>
+          {/each}
         {:else if section === 'analysis'}
           {@const s = analysis.settings}
           <section class="mb-5">
@@ -316,9 +483,9 @@
           </section>
 
           <p class="px-2 text-[11px] leading-snug text-faint">
-            This is ExportStudio’s own analysis, not rekordbox’s. Tested on rekordbox libraries, it picks the same
-            tempo for about 96% of tracks, puts the beats within a few milliseconds of rekordbox’s, and finds the same
-            key for most.
+            This is ExportStudio’s own analysis, not rekordbox’s. Tested on rekordbox libraries, it picks the same tempo
+            for about 96% of tracks, puts the beats within a few milliseconds of rekordbox’s, and finds the same key for
+            most.
           </p>
         {:else}
           {#each groups as { group, ids } (group)}
@@ -356,6 +523,29 @@
     </div>
   </div>
 </dialog>
+
+{#if confirming}
+  {@const { kind, backup } = confirming}
+  {#if kind === 'restore'}
+    <ConfirmDialog
+      title="Restore this backup?"
+      message={restoreMessage(backup)}
+      confirmLabel="Restore"
+      danger
+      onconfirm={() => void backups.restore(backup)}
+      onclose={() => (confirming = null)}
+    />
+  {:else}
+    <ConfirmDialog
+      title="Delete this backup?"
+      message="The backup from {backupDate(backup)} will be deleted. This can’t be undone."
+      confirmLabel="Delete"
+      danger
+      onconfirm={() => void backups.remove(backup)}
+      onclose={() => (confirming = null)}
+    />
+  {/if}
+{/if}
 
 {#snippet toggle(label: string, description: string, on: boolean, flip: () => void)}
   <button

@@ -18,32 +18,33 @@
   import { chordLabel } from '$lib/keymap'
   import type { MenuRequest } from '$lib/menu'
   import ContextMenu from './ContextMenu.svelte'
-  import SettingsDialog from './SettingsDialog.svelte'
+  import SettingsDialog, { type SettingsSection } from './SettingsDialog.svelte'
 
   let {
     inspectorOpen = $bindable(true),
-    searchInput = $bindable()
+    searchInput = $bindable(),
+    settings = $bindable(null)
   }: {
     inspectorOpen: boolean
     searchInput?: HTMLInputElement
+    settings?: SettingsSection | null
   } = $props()
 
   const { library, player, keybinds } = getApp()
   const silent = $derived(player.output.muted || player.output.volume === 0)
   const isMac = window.api.platform === 'darwin'
-  let settingsOpen = $state(false)
   let importMenu = $state<MenuRequest | null>(null)
 
   $effect(() =>
     keybinds.register({
-      'app.settings': () => (settingsOpen = true),
+      'app.settings': () => (settings = 'general'),
       'library.import': () => void library.chooseImport('files')
     })
   )
 
   $effect(() =>
     window.api.onMenu((command) => {
-      if (command === 'settings') settingsOpen = true
+      if (command === 'settings') settings = 'general'
       else void library.chooseImport(command === 'import.folder' ? 'folder' : 'files')
     })
   )
@@ -91,8 +92,8 @@
   }
 </script>
 
-{#if settingsOpen}
-  <SettingsDialog onclose={() => (settingsOpen = false)} />
+{#if settings}
+  <SettingsDialog initialSection={settings} onclose={() => (settings = null)} />
 {/if}
 
 {#if importMenu}
@@ -221,13 +222,10 @@
     </div>
 
     <button
-      class={[
-        'no-drag grid size-7 place-items-center rounded-md hover:bg-hover',
-        settingsOpen ? 'text-fg' : 'text-faint'
-      ]}
-      onclick={() => (settingsOpen = true)}
+      class={['no-drag grid size-7 place-items-center rounded-md hover:bg-hover', settings ? 'text-fg' : 'text-faint']}
+      onclick={() => (settings = 'general')}
       aria-label="Settings"
-      aria-expanded={settingsOpen}
+      aria-expanded={!!settings}
       aria-haspopup="dialog"
       title="Settings"
     >

@@ -1,5 +1,6 @@
 import { createContext } from 'svelte'
 import type { Analysis } from './analysis.svelte'
+import type { Backups } from './backups.svelte'
 import type { Keybinds } from './keybinds.svelte'
 import type { Library } from './library.svelte'
 import type { Player } from './player.svelte'
@@ -9,6 +10,7 @@ export interface AppContext {
   player: Player
   keybinds: Keybinds
   analysis: Analysis
+  backups: Backups
 }
 
 export const [getApp, setApp] = createContext<AppContext>()

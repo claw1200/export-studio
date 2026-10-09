@@ -3,7 +3,7 @@
   import { getApp } from '$lib/context'
   import { formatSize, formatTotal } from '$lib/format'
 
-  const { library, player, analysis } = getApp()
+  const { library, player, analysis, backups } = getApp()
 
   const totals = $derived.by(() => {
     let duration = 0
@@ -43,6 +43,20 @@
     </span>
   {/if}
 
+  {#if backups.progress}
+    {@const { reason, done = 0, total = 0 } = backups.progress}
+    <span class="ml-auto flex items-center gap-2 text-muted" role="status">
+      <LoaderCircle class="size-3 animate-spin text-accent" />
+      <span>{reason === 'restore' ? 'Restoring backup' : 'Backing up library'}</span>
+      {#if total}
+        <span class="h-1 w-20 overflow-hidden rounded-full bg-line">
+          <span class="block h-full rounded-full bg-accent transition-[width]" style:width="{(100 * done) / total}%"
+          ></span>
+        </span>
+      {/if}
+    </span>
+  {/if}
+
   {#if analysis.running && analysis.progress}
     {@const { total, done, failed } = analysis.progress}
     <span class="ml-auto flex items-center gap-2 text-muted" role="status">
@@ -69,7 +83,7 @@
     </span>
   {/if}
 
-  <span class="truncate {analysis.running ? '' : 'ml-auto'}" title={library.info?.dbPath}>
+  <span class="truncate {analysis.running || backups.progress ? '' : 'ml-auto'}" title={library.info?.dbPath}>
     {library.info?.rekordboxRunning ? 'rekordbox is running' : 'rekordbox is closed'}
     {#if library.info}
       · {library.writable ? 'editing' : 'read-only'}

@@ -2,6 +2,7 @@
   import { LoaderCircle, AlertTriangle } from '@lucide/svelte'
   import { setApp } from '$lib/context'
   import { Analysis } from '$lib/analysis.svelte'
+  import { Backups } from '$lib/backups.svelte'
   import { Library } from '$lib/library.svelte'
   import { Player } from '$lib/player.svelte'
   import { Keybinds } from '$lib/keybinds.svelte'
@@ -18,12 +19,14 @@
   import TrackEditDialog from '$lib/components/TrackEditDialog.svelte'
   import RelocateDialog from '$lib/components/RelocateDialog.svelte'
   import RemoveDialog from '$lib/components/RemoveDialog.svelte'
+  import type { SettingsSection } from '$lib/components/SettingsDialog.svelte'
 
   const library = new Library()
   const player = new Player()
   const keybinds = new Keybinds()
   const analysis = new Analysis()
-  setApp({ library, player, keybinds, analysis })
+  const backups = new Backups(library, player, analysis)
+  setApp({ library, player, keybinds, analysis, backups })
 
   library.onImported((tracks) => analysis.afterImport(tracks))
   library.onRemoved((ids) => {
@@ -118,6 +121,7 @@
   let editing = $state.raw<Track[] | null>(null)
   let relocating = $state.raw<Track[] | null>(null)
   let removing = $state.raw<Track[] | null>(null)
+  let settings = $state<SettingsSection | null>(null)
 
   function remove(tracks: Track[]): void {
     const local = tracks.filter((t) => !t.id.startsWith('usb:'))
@@ -291,6 +295,7 @@
 <div class="flex h-full flex-col">
   <TitleBar
     bind:searchInput
+    bind:settings
     bind:inspectorOpen={
       () => inspectorOpen,
       (v) => {
@@ -306,9 +311,17 @@
         <AlertTriangle class="mx-auto size-6 text-danger" />
         <p class="mt-3 text-[14px] font-medium">Couldn’t open your rekordbox library</p>
         <p class="mt-1 text-[12px] break-words text-faint">{library.error}</p>
-        <button class="mt-4 rounded-md bg-raised px-3 py-1.5 text-[12px] hover:bg-hover" onclick={reload}>
-          Try again
-        </button>
+        <div class="mt-4 flex justify-center gap-2">
+          <button class="rounded-md bg-raised px-3 py-1.5 text-[12px] hover:bg-hover" onclick={reload}>
+            Try again
+          </button>
+          <button
+            class="rounded-md bg-raised px-3 py-1.5 text-[12px] hover:bg-hover"
+            onclick={() => (settings = 'database')}
+          >
+            Restore from backup
+          </button>
+        </div>
       </div>
     </div>
   {:else if library.status !== 'ready' && !library.tracks.length}

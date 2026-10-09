@@ -154,6 +154,45 @@ export interface SyncProgress {
   name?: string
 }
 
+export type BackupReason = 'manual' | 'before-edit' | 'daily' | 'pre-restore'
+
+export interface Backup {
+  id: string
+  path: string
+  reason: BackupReason
+  created: number
+  createdAt: string
+  dbPath: string
+  /** Made from a different rekordbox library than the one open now. */
+  otherLibrary: boolean
+  /** False for the copy kept of a library that was replaced by a restore; it was never checked. */
+  verified: boolean
+  tracks?: number
+  playlists?: number
+  files: number
+  bytes: number
+  size: number
+}
+
+export interface BackupSettings {
+  auto: boolean
+  keep: number
+}
+
+export interface BackupProgress {
+  stage: 'checking' | 'saving' | 'extracting' | 'done'
+  reason: BackupReason | 'restore'
+  done?: number
+  total?: number
+}
+
+export interface RestoreResult {
+  restored: string
+  kept: string | null
+  tracks: number
+  playlists: number
+}
+
 export type Source =
   | { type: 'collection' }
   | { type: 'playlist'; id: string }

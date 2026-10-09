@@ -1,4 +1,6 @@
 import type {
+  Backup,
+  BackupSettings,
   Beatgrid,
   BeatgridSaved,
   Cue,
@@ -7,6 +9,7 @@ import type {
   LibraryInfo,
   MissingScan,
   RemoveResult,
+  RestoreResult,
   Track,
   TrackDetail,
   TrackEdit,
@@ -55,10 +58,15 @@ export const api = {
   removeTag: (id: string, trackIds: string[]) => call<Track[]>('tag.remove', { id, trackIds }),
   usbList: () => call<Volume[]>('usb.list'),
   usbPlaylists: (volumeId: string) => call<TreeItem[]>('usb.playlists', { volumeId }),
-  usbTracks: (volumeId: string, playlistId: string | null) =>
-    call<Track[]>('usb.tracks', { volumeId, playlistId }),
+  usbTracks: (volumeId: string, playlistId: string | null) => call<Track[]>('usb.tracks', { volumeId, playlistId }),
   usbSync: (volumeId: string, playlistIds: string[]) =>
     call<{ volumeId: string; tracks: number; playlists: number }>('usb.sync', { volumeId, playlistIds }),
+  backupList: () => call<Backup[]>('backup.list'),
+  backupCreate: () => call<Backup>('backup.create'),
+  backupRestore: (id: string) => call<RestoreResult>('backup.restore', { id }),
+  backupDelete: (id: string) => call<Backup[]>('backup.delete', { id }),
+  backupSettings: () => call<BackupSettings>('backup.settings'),
+  setBackupSettings: (settings: Partial<BackupSettings>) => call<BackupSettings>('backup.setSettings', settings),
   onEvent: window.api.onEvent,
   showItemInFolder: window.api.showItemInFolder,
   choosePath: window.api.choosePath
