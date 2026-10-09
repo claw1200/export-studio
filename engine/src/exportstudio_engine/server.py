@@ -51,6 +51,7 @@ class Engine:
             "playlist.tracks": lambda id: self.lib.playlist_tracks(id),
             "history.tracks": lambda id: self.lib.history_tracks(id),
             "track.detail": lambda id: self.track_detail(id),
+            "track.previews": lambda ids: self.track_previews(ids),
             "cue.setHot": lambda id, kind, ms: self.lib.set_hot_cue(id, kind, ms),
             "cue.addMemory": lambda id, ms: self.lib.add_memory_cue(id, ms),
             "cue.delete": lambda id, cueId: self.lib.delete_cue(id, cueId),
@@ -165,6 +166,17 @@ class Engine:
         if str(id).startswith("usb:"):
             return browse.detail(str(id))
         return self.lib.track_detail(id)
+
+    def track_previews(self, ids: list[str]) -> list[dict]:
+        chosen = list(dict.fromkeys(str(i) for i in ids))[:80]
+        library_ids = [i for i in chosen if not i.startswith("usb:")]
+        usb_ids = [i for i in chosen if i.startswith("usb:")]
+        by_id = {}
+        if library_ids:
+            by_id.update({row["id"]: row for row in self.lib.track_previews(library_ids)})
+        if usb_ids:
+            by_id.update({row["id"]: row for row in browse.previews(usb_ids)})
+        return [by_id[i] for i in chosen if i in by_id]
 
     def resolve_media(self, kind: str, id: str, size: str = "") -> str | None:
         if str(id).startswith("usb:"):

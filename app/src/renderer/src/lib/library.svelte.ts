@@ -1,10 +1,16 @@
 import { api } from './api'
+import { browserPreviews } from './browserPreview.svelte'
 import { clearDetailCache } from './deck/session.svelte'
-import { newestFirst, type SortKey, sortTracks, type TrackSort } from './library/sort'
+import { cueStats, newestFirst, type SortKey, sortTracks, type TrackSort } from './library/sort'
 import { buildTree } from './library/tree'
-import type { ImportResult, LibraryInfo, Source, SyncProgress, Track, TrackEdit, TreeItem, Volume } from './types'
+import type { Cue, ImportResult, LibraryInfo, Source, SyncProgress, Track, TrackEdit, TreeItem, Volume } from './types'
 
 export const TRACK_DRAG_TYPE = 'application/x-exportstudio-tracks'
+
+function dropCaches(): void {
+  clearDetailCache()
+  browserPreviews.forget()
+}
 
 const READ_ONLY = 'Unlock editing to change the library'
 const NOTICE_MS = 6000
@@ -164,7 +170,7 @@ export class Library {
         if (!running) this.lockError = null
       }
       if (event === 'library.locked') {
-        clearDetailCache()
+        dropCaches()
         this.info = data as LibraryInfo
         this.changed = false
         this.lockError = null
@@ -176,7 +182,7 @@ export class Library {
   async load(reload = false): Promise<void> {
     this.status = 'loading'
     this.error = null
-    if (reload) clearDetailCache()
+    if (reload) dropCaches()
     try {
       this.info = reload ? await api.reload() : await api.open()
       await this.refreshContents()
@@ -198,7 +204,7 @@ export class Library {
     this.lockError = null
     try {
       this.info = await api.setWritable(on)
-      clearDetailCache()
+      dropCaches()
       await this.refreshContents()
       return this.writable === on
     } catch (e) {
@@ -208,7 +214,7 @@ export class Library {
         const reopened = info.writable !== this.writable || info.snapshotTime !== this.info?.snapshotTime
         this.info = info
         if (reopened) {
-          clearDetailCache()
+          dropCaches()
           await this.refreshContents()
         }
       } catch {
@@ -297,6 +303,17 @@ export class Library {
     this.applyTracks(rows)
   }
 
+  /** Refresh the CUE and waveform sort keys after cues are saved. */
+  noteCueCounts(id: string, cues: Cue[]): void {
+    const track = this.byId.get(id)
+    if (!track) return
+    const stats = cueStats(cues, track.phrase)
+    if (stats.cueStars === track.cueStars && stats.cueCount === track.cueCount) return
+    const fresh = { ...track, ...stats }
+    if (id.startsWith('usb:')) this.deviceTracks = this.deviceTracks.map((row) => (row.id === id ? fresh : row))
+    else this.applyTracks([fresh])
+  }
+
   notify(message: string): void {
     clearTimeout(this.noticeTimer)
     this.editError = message
@@ -367,7 +384,7 @@ export class Library {
     if (!Object.keys(moves).length) return true
     const result = await this.edit(() => api.relocate(moves))
     if (!result) return false
-    clearDetailCache()
+    dropCaches()
     this.applyTracks(result)
     return true
   }

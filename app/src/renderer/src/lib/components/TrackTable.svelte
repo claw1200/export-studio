@@ -1,6 +1,7 @@
 <script lang="ts">
   import { flushSync } from 'svelte'
   import { ArrowUp, ArrowDown, Star, AudioLines, Music } from '@lucide/svelte'
+  import { browserPreviews } from '$lib/browserPreview.svelte'
   import { getApp } from '$lib/context'
   import { artworkUrl } from '$lib/api'
   import { formatBpm, formatDuration, keyColor, TRACK_COLORS } from '$lib/format'
@@ -12,6 +13,7 @@
   import { trackMenu, type TrackMenuShortcut } from '$lib/trackMenu'
   import type { Track } from '$lib/types'
   import ContextMenu from './ContextMenu.svelte'
+  import WaveformThumb from './WaveformThumb.svelte'
 
   let {
     onselect,
@@ -46,8 +48,8 @@
 
   const COLUMNS: Column[] = [
     { id: 'index', name: '#', label: '#', width: 44, min: 36, max: 72, align: 'right', sort: 'position' },
-    { id: 'color', name: 'Colour', label: '', width: 10, min: 10, max: 28, sort: 'color' },
-    { id: 'art', name: 'Artwork', label: '', width: 34, min: 28, max: 64 },
+    { id: 'color', name: 'Colour', label: 'Colour', width: 80, min: 72, max: 160, align: 'center', sort: 'color' },
+    { id: 'art', name: 'Artwork', label: 'Artwork', width: 88, min: 76, max: 180 },
     { id: 'title', name: 'Title', label: 'Title', width: 220, min: 120, max: 640, fr: 2.2, sort: 'title' },
     { id: 'artist', name: 'Artist', label: 'Artist', width: 150, min: 80, max: 480, fr: 1.4, sort: 'artist' },
     { id: 'album', name: 'Album', label: 'Album', width: 120, min: 72, max: 480, fr: 1, sort: 'album' },
@@ -55,25 +57,43 @@
     { id: 'bpm', name: 'BPM', label: 'BPM', width: 64, min: 48, max: 120, align: 'right', sort: 'bpm' },
     { id: 'key', name: 'Key', label: 'Key', width: 52, min: 40, max: 120, align: 'center', sort: 'key' },
     { id: 'duration', name: 'Time', label: 'Time', width: 60, min: 48, max: 120, align: 'right', sort: 'duration' },
+    { id: 'wave', name: 'Waveform', label: 'Waveform', width: 148, min: 80, max: 480, sort: 'cueCount' },
+    { id: 'cue', name: 'CUE', label: 'CUE', width: 72, min: 52, max: 110, align: 'center', sort: 'cueStars' },
     { id: 'rating', name: 'Rating', label: 'Rating', width: 78, min: 64, max: 140, sort: 'rating' },
     { id: 'dateAdded', name: 'Added', label: 'Added', width: 92, min: 64, max: 180, sort: 'dateAdded' },
     { id: 'fileType', name: 'Type', label: 'Type', width: 58, min: 44, max: 120, sort: 'fileType' }
   ]
 
   const STORAGE_KEY = 'browserColumns'
+  const LAYOUT_VERSION = 2
+  const SHOWN_BY_DEFAULT = ['index', 'cue', 'wave', 'art', 'title', 'artist', 'bpm', 'key', 'duration', 'dateAdded']
 
-  function loadPrefs(): { widths: Record<string, number>; sized: string[]; hidden: string[] } {
+  function defaultOrder(): string[] {
+    const order = SHOWN_BY_DEFAULT.filter((id) => COLUMNS.some((column) => column.id === id))
+    for (const column of COLUMNS) if (!order.includes(column.id)) order.push(column.id)
+    return order
+  }
+
+  function defaultHidden(): string[] {
+    return COLUMNS.map((column) => column.id).filter((id) => !SHOWN_BY_DEFAULT.includes(id))
+  }
+
+  function loadPrefs(): { widths: Record<string, number>; sized: string[]; hidden: string[]; order: string[] } {
     const widths = Object.fromEntries(COLUMNS.map((column) => [column.id, column.width]))
     let sized: string[] = []
-    let hidden: string[] = []
+    let hidden = defaultHidden()
+    let order = defaultOrder()
     try {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (raw) {
         const prefs = JSON.parse(raw) as {
+          layout?: unknown
           widths?: Record<string, unknown>
           sized?: unknown
           hidden?: unknown
+          order?: unknown
         }
+        const currentLayout = prefs.layout === LAYOUT_VERSION
         if (prefs.widths && typeof prefs.widths === 'object') {
           for (const column of COLUMNS) {
             const width = prefs.widths[column.id]
@@ -87,23 +107,40 @@
             (id): id is string => typeof id === 'string' && COLUMNS.some((column) => column.id === id && column.fr)
           )
         }
-        if (Array.isArray(prefs.hidden)) {
+        if (currentLayout && Array.isArray(prefs.hidden)) {
           hidden = prefs.hidden.filter((id): id is string => typeof id === 'string' && widths[id] !== undefined)
           if (hidden.length >= COLUMNS.length) hidden = []
         }
+        if (currentLayout && Array.isArray(prefs.order)) {
+          const seen: Record<string, true> = {}
+          const next: string[] = []
+          for (const id of prefs.order) {
+            if (typeof id === 'string' && widths[id] !== undefined && !seen[id]) {
+              next.push(id)
+              seen[id] = true
+            }
+          }
+          for (const id of order) if (!seen[id]) next.push(id)
+          order = next
+        }
       }
     } catch {
-      return { widths, sized, hidden }
+      return { widths, sized, hidden, order }
     }
-    return { widths, sized, hidden }
+    return { widths, sized, hidden, order }
   }
 
   const initial = loadPrefs()
   let widths = $state(initial.widths)
   let sized = $state(initial.sized)
   let hidden = $state(initial.hidden)
+  let order = $state(initial.order)
 
-  const shownColumns = $derived(COLUMNS.filter((column) => !hidden.includes(column.id)))
+  const orderedColumns = $derived.by(() => {
+    const rank = new Map(order.map((id, index) => [id, index]))
+    return [...COLUMNS].sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
+  })
+  const shownColumns = $derived(orderedColumns.filter((column) => !hidden.includes(column.id)))
   const template = $derived(
     shownColumns
       .map((column) => {
@@ -120,7 +157,7 @@
   )
 
   function save(): void {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ widths, sized, hidden }))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ layout: LAYOUT_VERSION, widths, sized, hidden, order }))
   }
 
   function toggleColumn(id: string): void {
@@ -132,7 +169,8 @@
   function resetColumns(): void {
     widths = Object.fromEntries(COLUMNS.map((column) => [column.id, column.width]))
     sized = []
-    hidden = []
+    hidden = defaultHidden()
+    order = defaultOrder()
     save()
   }
 
@@ -184,7 +222,7 @@
   function columnItems(): MenuEntry[] {
     return [
       { kind: 'header', label: 'Columns' },
-      ...COLUMNS.map((column) => ({
+      ...orderedColumns.map((column) => ({
         label: column.name,
         checked: !hidden.includes(column.id),
         keepOpen: true,
@@ -197,7 +235,69 @@
 
   function openColumnMenu(e: MouseEvent): void {
     e.preventDefault()
-    if (!drag) rowMenu = menuAt(e, 'Columns', columnItems)
+    if (!drag && !moving?.active) rowMenu = menuAt(e, 'Columns', columnItems)
+  }
+
+  let headerEl = $state<HTMLDivElement>()
+  let moving = $state<{
+    id: string
+    startX: number
+    startY: number
+    active: boolean
+    index: number
+    dropX: number
+  } | null>(null)
+  let suppressSort = false
+
+  function startMove(e: PointerEvent): void {
+    if (e.button !== 0 || drag) return
+    const target = e.target
+    if (!(target instanceof Element) || target.closest('[role="separator"]')) return
+    const id = target.closest<HTMLElement>('[data-column]')?.dataset.column
+    if (!id) return
+    moving = { id, startX: e.clientX, startY: e.clientY, active: false, index: 0, dropX: 0 }
+  }
+
+  function onPointerMove(e: PointerEvent): void {
+    onResizeMove(e)
+    const current = moving
+    if (!current || !headerEl) return
+    if (!current.active && Math.hypot(e.clientX - current.startX, e.clientY - current.startY) < 4) return
+    const cells = [...headerEl.querySelectorAll<HTMLElement>('[data-column]')]
+    const header = headerEl.getBoundingClientRect()
+    let index = cells.length
+    for (let i = 0; i < cells.length; i++) {
+      const rect = cells[i].getBoundingClientRect()
+      if (e.clientX < rect.left + rect.width / 2) {
+        index = i
+        break
+      }
+    }
+    const edge = cells[Math.min(index, Math.max(0, cells.length - 1))]
+    const rect = edge?.getBoundingClientRect()
+    const dropX = rect ? (index >= cells.length ? rect.right : rect.left) - header.left : 0
+    moving = { ...current, active: true, index, dropX }
+  }
+
+  function endPointer(): void {
+    endResize()
+    const current = moving
+    moving = null
+    if (!current?.active) return
+    suppressSort = true
+    setTimeout(() => {
+      suppressSort = false
+    }, 0)
+    const shown = shownColumns.map((column) => column.id)
+    const from = shown.indexOf(current.id)
+    const to = current.index
+    if (from < 0 || to === from || to === from + 1) return
+    const before = to >= shown.length ? null : shown[to]
+    const next = order.filter((id) => id !== current.id)
+    const at = before ? next.indexOf(before) : next.length
+    next.splice(at < 0 ? next.length : at, 0, current.id)
+    order = next
+    save()
   }
 
   const ROW = 32
@@ -211,6 +311,20 @@
   const first = $derived(Math.max(0, Math.floor(scrollTop / ROW) - OVERSCAN))
   const last = $derived(Math.min(list.length, Math.ceil((scrollTop + height) / ROW) + OVERSCAN))
   const rows = $derived(list.slice(first, last))
+  const wantsPreview = $derived(shownColumns.some((column) => column.id === 'wave' || column.id === 'cue'))
+
+  $effect(() => {
+    if (!wantsPreview) return
+    const ids = rows.map((track) => track.id)
+    void browserPreviews.revision
+    browserPreviews.request(ids)
+  })
+
+  const CUE_STARS = [
+    { key: 'memory' as const, color: '#ff3b3b', label: 'Memory cue' },
+    { key: 'hot' as const, color: '#2ee56b', label: 'Hot cue' },
+    { key: 'phrase' as const, color: '#c084fc', label: 'Phrase analysis' }
+  ]
 
   export function ensureVisible(index: number): void {
     if (!viewport) return
@@ -318,7 +432,11 @@
   let rowsEl = $state<HTMLDivElement>()
   let fileDrop = $state(false)
   const fileTarget = $derived(
-    library.source.type === 'collection' ? 'collection' : library.sourcePlaylist?.kind === 'playlist' ? 'playlist' : null
+    library.source.type === 'collection'
+      ? 'collection'
+      : library.sourcePlaylist?.kind === 'playlist'
+        ? 'playlist'
+        : null
   )
 
   function fileDragOver(e: DragEvent): void {
@@ -368,7 +486,7 @@
   }
 </script>
 
-<svelte:window onpointermove={onResizeMove} onpointerup={endResize} onpointercancel={endResize} />
+<svelte:window onpointermove={onPointerMove} onpointerup={endPointer} onpointercancel={endPointer} />
 
 {#snippet sortIcon(key: SortKey | undefined)}
   {#if key && library.sort?.key === key}
@@ -417,6 +535,23 @@
     <span class="font-medium" style:color={(!track.missing && keyColor(track.key)) || 'inherit'}>{track.key}</span>
   {:else if column.id === 'duration'}
     {formatDuration(track.duration)}
+  {:else if column.id === 'wave'}
+    {@const row = browserPreviews.preview(track.id)}
+    <WaveformThumb {track} wave={row?.wave ?? null} cues={row?.cues ?? []} />
+  {:else if column.id === 'cue'}
+    {@const preview = browserPreviews.preview(track.id)}
+    {@const labels = CUE_STARS.filter((star) => preview?.[star.key]).map((star) => star.label)}
+    {#if labels.length}
+      <span class="flex items-center gap-0.5" aria-label={labels.join(', ')} title={labels.join(', ')}>
+        {#each CUE_STARS as star (star.key)}
+          {#if preview?.[star.key]}
+            <span class="inline-flex" style:color={star.color} aria-hidden="true">
+              <Star class="size-3.5 fill-current" strokeWidth={0} />
+            </span>
+          {/if}
+        {/each}
+      </span>
+    {/if}
   {:else if column.id === 'rating'}
     <span class="flex gap-px">
       {#each [1, 2, 3, 4, 5] as n (n)}
@@ -453,29 +588,46 @@
   >
     <div style:min-width="max(100%, {minWidth}px)">
       <div
-        class="sticky top-0 z-10 grid h-8 items-center border-b border-line-soft bg-bg/95 text-[11px] font-medium text-faint backdrop-blur"
+        bind:this={headerEl}
+        class="sticky top-0 z-10 grid h-8 cursor-grab items-center border-b border-line-soft bg-bg/95 text-[11px] font-medium text-faint backdrop-blur select-none"
         style:grid-template-columns={template}
         role="row"
         tabindex="-1"
+        onpointerdown={startMove}
         oncontextmenu={openColumnMenu}
       >
         {#each shownColumns as column (column.id)}
-          <div class="relative flex h-full min-w-0 items-center">
+          <div
+            class={[
+              'relative flex h-full min-w-0 items-center',
+              moving?.active && moving.id === column.id && 'opacity-40'
+            ]}
+            data-column={column.id}
+          >
             {#if column.sort && (column.sort !== 'position' || library.positions.size)}
               <button
                 class={[
-                  'flex h-full min-w-0 flex-1 items-center gap-1 px-2 hover:text-fg',
+                  'flex h-full min-w-0 flex-1 cursor-grab items-center gap-1 px-2 hover:text-fg',
                   column.align === 'right' && 'flex-row-reverse',
                   column.align === 'center' && 'justify-center',
                   library.sort?.key === column.sort && 'text-fg'
                 ]}
-                onclick={() => library.toggleSort(column.sort!)}
+                onclick={() => {
+                  if (suppressSort) return
+                  library.toggleSort(column.sort!)
+                }}
               >
                 <span class="truncate">{column.label}</span>
                 {@render sortIcon(column.sort)}
               </button>
             {:else}
-              <span class={['min-w-0 flex-1 truncate px-2', column.align === 'right' && 'text-right']}>
+              <span
+                class={[
+                  'min-w-0 flex-1 truncate px-2',
+                  column.align === 'right' && 'text-right',
+                  column.align === 'center' && 'text-center'
+                ]}
+              >
                 {column.label}
               </span>
             {/if}
@@ -490,13 +642,21 @@
             >
               <span
                 class={[
-                  'pointer-events-none absolute inset-y-1 left-1/2 w-px -translate-x-1/2',
-                  drag?.id === column.id ? 'bg-accent' : 'bg-line opacity-0 group-hover/resize:opacity-100'
+                  'pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2',
+                  drag?.id === column.id ? 'bg-accent' : 'bg-faint/55 group-hover/resize:bg-muted'
                 ]}
               ></span>
             </div>
           </div>
         {/each}
+        {#if moving?.active}
+          <div
+            class="pointer-events-none absolute inset-y-0 z-30 w-0.5 bg-accent"
+            style:grid-column="1 / -1"
+            style:grid-row="1"
+            style:left="{moving.dropX}px"
+          ></div>
+        {/if}
       </div>
 
       <div
@@ -539,7 +699,7 @@
                     'flex min-w-0 items-center overflow-hidden px-2 whitespace-nowrap',
                     column.align === 'right' && 'justify-end',
                     column.align === 'center' && 'justify-center',
-                    column.id === 'color' && 'px-0'
+                    column.id === 'wave' && 'h-full px-1.5'
                   ]}
                 >
                   {@render cell(column, track, index)}
@@ -574,8 +734,8 @@
     </div>
   {/if}
 
-  {#if drag}
-    <div class="fixed inset-0 z-50 cursor-col-resize"></div>
+  {#if drag || moving?.active}
+    <div class={['fixed inset-0 z-50', drag ? 'cursor-col-resize' : 'cursor-grabbing']}></div>
   {/if}
 
   {#if rowMenu}

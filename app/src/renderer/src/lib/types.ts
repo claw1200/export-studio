@@ -31,6 +31,12 @@ export interface Track {
   trackNo: number
   analysed: boolean
   myTags: string[]
+  /** Memory cues, hot cues and phrase analysis: one star each, so 0–3. */
+  cueStars: number
+  /** Memory cues and hot cues placed on the track. Loops are not counted. */
+  cueCount: number
+  /** Phrase analysis is present, which is one of the CUE stars. */
+  phrase: boolean
 }
 
 export type EditableField =
@@ -122,6 +128,21 @@ export interface WaveformPayload {
   threeBand: { length: number; bands: string } | null
   threeBandPreview: { length: number; bands: string } | null
   mono: { length: number; heights: string; whiteness: string } | null
+}
+
+export interface TrackPreview {
+  id: string
+  memory: boolean
+  hot: boolean
+  phrase: boolean
+  cues: Cue[]
+  waveform: {
+    bandLength?: number
+    bands?: string
+    rgbLength?: number
+    heights?: string
+    colors?: string
+  } | null
 }
 
 export interface TrackDetail {

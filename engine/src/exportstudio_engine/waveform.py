@@ -17,7 +17,9 @@ BEATGRID_TAG = "PQTZ"
 EXTENDED_BEATGRID_TAG = "PQT2"
 HOT_CUE_TAG = "PCO2"
 PATH_TAG = "PPTH"
+PHRASE_TAG = "PSSI"
 FILE_LENGTH_OFFSET = 8
+BROWSER_WAVE_COLUMNS = 400
 TAG_LENGTH_OFFSET = 8
 PATH_LENGTH_OFFSET = 12
 PQT2_ANCHORS_OFFSET = 24
@@ -113,6 +115,185 @@ def decode_three_band(ex2: Tags | None, kind: str = DETAIL_BANDS_TAG) -> dict | 
     raw = np.frombuffer(body, dtype=np.uint8, count=count * 3).reshape(-1, 3)
     bands = np.clip(raw.astype(np.float32) * BAND_SCALE, 0, BYTE_MAX).round()
     return {"length": int(count), "bands": _b64(bands.reshape(-1))}
+
+
+def has_phrase(ext: Tags | None) -> bool:
+    return bool(ext and ext.get(PHRASE_TAG))
+
+
+def _hot_slots() -> set[int]:
+    return {kind for kind in range(1, 10) if kind != 4}
+
+
+def cue_marks(kinds) -> tuple[bool, bool]:
+    """Whether any memory cue (kind 0) or hot cue is present. One of each, at most."""
+    memory = hot = False
+    hot_kinds = _hot_slots()
+    for kind in kinds:
+        slot = int(kind or 0)
+        if slot in hot_kinds:
+            hot = True
+        elif slot == 0:
+            memory = True
+        if memory and hot:
+            break
+    return memory, hot
+
+
+def cue_sort_facts(kinds, phrase: bool) -> dict:
+    """Star count for the CUE column, and how many memory and hot cues are placed.
+
+    A loop (kind 4) is neither. Phrase analysis adds a star and no cue.
+    """
+    memory = hot = 0
+    hot_kinds = _hot_slots()
+    for kind in kinds:
+        slot = int(kind or 0)
+        if slot in hot_kinds:
+            hot += 1
+        elif slot == 0:
+            memory += 1
+    return {
+        "cueCount": memory + hot,
+        "cueStars": int(memory > 0) + int(hot > 0) + int(phrase),
+        "phrase": bool(phrase),
+    }
+
+
+def file_has_tag(path: Path, kind: str) -> bool:
+    """Whether an ANLZ file contains `kind`, skipping each tag body."""
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(8)
+            if len(head) < 8 or head[:4] != b"PMAI":
+                return False
+            (file_header,) = struct.unpack(">I", head[4:8])
+            handle.seek(file_header)
+            target = kind.encode("ascii")
+            while True:
+                tag = handle.read(TAG_HEADER_BYTES)
+                if len(tag) < TAG_HEADER_BYTES:
+                    return False
+                if tag[:4] == target:
+                    return True
+                _len_header, len_tag = struct.unpack_from(">II", tag, 4)
+                if len_tag < TAG_HEADER_BYTES:
+                    return False
+                handle.seek(len_tag - TAG_HEADER_BYTES, os.SEEK_CUR)
+    except OSError:
+        return False
+
+
+def browser_cue(cue_id, kind, start, end, color, color_index, comment) -> dict:
+    """One cue in the shape the browser markers draw, without an analysis colour yet."""
+    slot = int(kind or 0)
+    return {
+        "id": str(cue_id),
+        "kind": "hot" if slot > 0 else "memory",
+        "slot": slot,
+        "start": int(start or 0),
+        "end": None if end is None or int(end) < 0 else int(end),
+        "color": None if color is None or int(color) < 0 else int(color),
+        "colorIndex": None if color_index is None else int(color_index),
+        "comment": comment or "",
+    }
+
+
+def paint_browser_cues(cues: list[dict], colors: dict) -> list[dict]:
+    painted = []
+    for cue in cues:
+        rgb = colors.get((int(cue["slot"]), int(cue["start"]))) if cue["kind"] == "hot" else None
+        painted.append({**cue, "rgb": rgb})
+    painted.sort(key=lambda cue: (cue["kind"] != "hot", cue["slot"], cue["start"]))
+    return painted
+
+
+def browser_waveform(ext: Tags | None, ex2: Tags | None) -> dict | None:
+    """A short overview: 3-band data for that drawing, and a colour waveform for RGB drawing."""
+    out: dict = {}
+    for kind in (PREVIEW_BANDS_TAG, DETAIL_BANDS_TAG):
+        rows = _band_rows(ex2, kind)
+        if rows is not None:
+            pooled = _pool_peak(rows, BROWSER_WAVE_COLUMNS)
+            out["bandLength"] = int(len(pooled))
+            out["bands"] = _b64(pooled.reshape(-1))
+            break
+    colour = _rgb_rows(ext) or _mono_rows(ext)
+    if colour is not None:
+        heights, colors = _pool_rgb(*colour, BROWSER_WAVE_COLUMNS)
+        out["rgbLength"] = int(len(heights))
+        out["heights"] = _b64(heights)
+        out["colors"] = _b64(colors.reshape(-1))
+    return out or None
+
+
+def _band_rows(tags: Tags | None, kind: str) -> np.ndarray | None:
+    found = _entries(tags, kind)
+    if found is None:
+        return None
+    body, count = found
+    raw = np.frombuffer(body, dtype=np.uint8, count=count * 3).reshape(-1, 3)
+    return np.clip(raw.astype(np.float32) * BAND_SCALE, 0, BYTE_MAX).round().astype(np.uint8)
+
+
+def _rgb_rows(ext: Tags | None) -> tuple[np.ndarray, np.ndarray] | None:
+    found = _entries(ext, RGB_TAG)
+    if found is None:
+        return None
+    body, count = found
+    packed = np.frombuffer(body, dtype=">u2", count=count).astype(np.uint16)
+    channels = np.stack(
+        [
+            (packed >> RED_SHIFT) & RGB_BITS,
+            (packed >> GREEN_SHIFT) & RGB_BITS,
+            (packed >> BLUE_SHIFT) & RGB_BITS,
+        ],
+        axis=1,
+    )
+    heights = (packed >> HEIGHT_SHIFT) & HEIGHT_BITS
+    return _to_bytes(heights, HEIGHT_MAX).astype(np.uint8), _to_bytes(channels, RGB_MAX).astype(np.uint8)
+
+
+def _mono_rows(ext: Tags | None) -> tuple[np.ndarray, np.ndarray] | None:
+    found = _entries(ext, MONO_TAG)
+    if found is None:
+        return None
+    body, count = found
+    packed = np.frombuffer(body, dtype=np.uint8, count=count)
+    heights = _to_bytes(packed & HEIGHT_BITS, HEIGHT_MAX).astype(np.uint8)
+    white = ((packed >> WHITENESS_SHIFT) & RGB_BITS).astype(np.float32) / RGB_MAX
+    colors = np.empty((count, 3), dtype=np.uint8)
+    colors[:, 0] = np.rint(40 + 180 * white)
+    colors[:, 1] = np.rint(110 + 130 * white)
+    colors[:, 2] = 255
+    return heights, colors
+
+
+def _pool_peak(rows: np.ndarray, columns: int) -> np.ndarray:
+    count = len(rows)
+    if count <= columns:
+        return np.ascontiguousarray(rows)
+    out = np.empty((columns, rows.shape[1]), dtype=rows.dtype)
+    for index in range(columns):
+        start = (index * count) // columns
+        end = ((index + 1) * count) // columns
+        out[index] = rows[start:end].max(axis=0)
+    return out
+
+
+def _pool_rgb(heights: np.ndarray, colors: np.ndarray, columns: int) -> tuple[np.ndarray, np.ndarray]:
+    count = len(heights)
+    if count <= columns:
+        return heights, colors
+    out_h = np.empty(columns, dtype=np.uint8)
+    out_c = np.empty((columns, 3), dtype=np.uint8)
+    for index in range(columns):
+        start = (index * count) // columns
+        end = ((index + 1) * count) // columns
+        peak = start + int(heights[start:end].argmax())
+        out_h[index] = heights[peak]
+        out_c[index] = colors[peak]
+    return out_h, out_c
 
 
 def decode_mono(ext: Tags | None) -> dict | None:

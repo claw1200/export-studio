@@ -1,5 +1,7 @@
 <script lang="ts">
   import { LoaderCircle, AlertTriangle } from '@lucide/svelte'
+  import { Audition } from '$lib/audition.svelte'
+  import { browserPreviews } from '$lib/browserPreview.svelte'
   import { setApp } from '$lib/context'
   import { Analysis } from '$lib/analysis.svelte'
   import { Backups } from '$lib/backups.svelte'
@@ -23,10 +25,14 @@
 
   const library = new Library()
   const player = new Player()
+  const audition = new Audition()
+  audition.onBegan = () => player.yieldToPreview()
+  audition.onEnded = () => player.resumeAfterPreview()
+  player.onDeckPlay = () => audition.stop()
   const keybinds = new Keybinds()
   const analysis = new Analysis()
   const backups = new Backups(library, player, analysis)
-  setApp({ library, player, keybinds, analysis, backups })
+  setApp({ library, player, keybinds, analysis, backups, audition })
 
   library.onImported((tracks) => analysis.afterImport(tracks))
   library.onRemoved((ids) => {
@@ -34,6 +40,7 @@
   })
   analysis.onFinished((track) => {
     if (!track) return
+    browserPreviews.forget([track.id])
     library.updateRows([track])
     if (player.track?.id === track.id) void player.refreshDetail()
   })
@@ -107,6 +114,7 @@
   let table = $state<ReturnType<typeof TrackTable>>()
   let previewTimer: ReturnType<typeof setTimeout> | undefined
 
+  browserPreviews.onCueChange = (id, cues) => library.noteCueCounts(id, cues)
   library.load()
   library.onTracksUpdated((rows) => {
     const loaded = player.track

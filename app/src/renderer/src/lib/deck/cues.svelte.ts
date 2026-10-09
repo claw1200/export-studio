@@ -1,4 +1,5 @@
 import { api } from '../api'
+import { browserPreviews } from '../browserPreview.svelte'
 import type { Cue } from '../types'
 import type { GridEditor } from './grid.svelte'
 import type { TrackSession } from './session.svelte'
@@ -28,6 +29,8 @@ export class CueEditor {
 
   private async write(write: (id: string) => Promise<Cue[]>): Promise<void> {
     if (this.grid.editing) return
-    await this.session.edit(write, (detail, cues) => ({ ...detail, cues }))
+    const id = this.session.track?.id
+    const cues = await this.session.edit(write, (detail, next) => ({ ...detail, cues: next }))
+    if (id && cues) browserPreviews.noteCues(id, cues)
   }
 }

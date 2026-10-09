@@ -57,6 +57,15 @@ def _abs(volume: Path, relative: str) -> Path | None:
         return None
 
 
+def _cue_sort(volume: Path, track: DeviceTrack) -> dict:
+    phrase = False
+    if track.analysis:
+        base = _abs(volume, track.analysis)
+        if base is not None:
+            phrase = waveform.file_has_tag(base.with_suffix(".EXT"), waveform.PHRASE_TAG)
+    return waveform.cue_sort_facts((cue.kind for cue in track.cues), phrase)
+
+
 def track_row(volume: Path, track: DeviceTrack) -> dict:
     audio = _abs(volume, track.path)
     path = str(audio) if audio is not None else ""
@@ -92,6 +101,7 @@ def track_row(volume: Path, track: DeviceTrack) -> dict:
         "trackNo": track.track_no,
         "analysed": bool(track.analysis),
         "myTags": [],
+        **_cue_sort(volume, track),
     }
 
 
@@ -159,6 +169,57 @@ def _cues(track: DeviceTrack, ext: waveform.Tags | None) -> list[dict]:
             cue["rgb"] = colors.get((cue["slot"], cue["start"]))
     cues.sort(key=lambda cue: (cue["kind"] != "hot", cue["slot"], cue["start"]))
     return cues
+
+
+def _blank_preview(key: str) -> dict:
+    return {"id": key, "memory": False, "hot": False, "phrase": False, "cues": [], "waveform": None}
+
+
+def previews(ids: list[str]) -> list[dict]:
+    grouped: dict[str, list[str]] = {}
+    for key in ids:
+        volume_text, _export_id = parse_track_key(key)
+        grouped.setdefault(volume_text, []).append(key)
+    out = []
+    for volume_text, keys in grouped.items():
+        try:
+            volume = Path(volume_text)
+            library = load(volume)
+        except (OSError, FileNotFoundError, ValueError):
+            out.extend(_blank_preview(key) for key in keys)
+            continue
+        for key in keys:
+            _volume, export_id = parse_track_key(key)
+            track = library.track(export_id)
+            if track is None:
+                out.append(_blank_preview(key))
+                continue
+            anlz = _anlz(volume, track.analysis)
+            stored = [
+                waveform.browser_cue(
+                    f"{track.export_id}:{index}",
+                    cue.kind,
+                    cue.start_ms,
+                    cue.end_ms,
+                    cue.color,
+                    cue.color_index,
+                    cue.comment,
+                )
+                for index, cue in enumerate(track.cues, 1)
+            ]
+            cues = waveform.paint_browser_cues(stored, waveform.hot_cue_colors(anlz["EXT"]))
+            memory, hot = waveform.cue_marks(cue["slot"] for cue in cues)
+            out.append(
+                {
+                    "id": key,
+                    "memory": memory,
+                    "hot": hot,
+                    "phrase": waveform.has_phrase(anlz["EXT"]),
+                    "cues": cues,
+                    "waveform": waveform.browser_waveform(anlz["EXT"], anlz["2EX"]),
+                }
+            )
+    return out
 
 
 def detail(key: str) -> dict:

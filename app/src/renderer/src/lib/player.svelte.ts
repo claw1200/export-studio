@@ -38,6 +38,10 @@ type HoldKey = 'cue' | number
  */
 export class Player {
   readonly session = new TrackSession()
+  /** Stops the browser audition as this deck takes the speakers. */
+  onDeckPlay: (() => void) | null = null
+  /** A preview paused playback and should start it again when the preview ends. */
+  private returnAfterPreview = false
   readonly deck = new Deck(0)
   readonly grid = new GridEditor(
     this.session,
@@ -193,6 +197,7 @@ export class Player {
     this.previewOwner = null
     this.previewAt = null
     this.grid.cancel()
+    if (autoplay) this.takeSpeakers()
     this.deck.load(track.id, track.duration)
     if (autoplay) this.deck.play()
     const opened = this.session.open(track)
@@ -201,7 +206,29 @@ export class Player {
   }
 
   play(): void {
+    if (!this.track) return
+    this.takeSpeakers()
+    this.deck.play()
+  }
+
+  /** Pause while a browser preview has the speakers. A deck that is already paused stays paused. */
+  yieldToPreview(): void {
+    if (!this.playing || this.returnAfterPreview) return
+    this.returnAfterPreview = true
+    this.pause()
+  }
+
+  /** Continue after a preview that paused this deck. */
+  resumeAfterPreview(): void {
+    if (!this.returnAfterPreview) return
+    this.returnAfterPreview = false
     if (this.track) this.deck.play()
+  }
+
+  /** This deck is about to be heard, so a preview must not start it again afterwards. */
+  private takeSpeakers(): void {
+    this.returnAfterPreview = false
+    this.onDeckPlay?.()
   }
 
   pause(): void {
@@ -288,6 +315,7 @@ export class Player {
   }
 
   private startHold(key: HoldKey, at: number): void {
+    this.takeSpeakers()
     this.holding = { key, at, latched: false }
     if (this.position !== at) this.seek(at)
     this.deck.play()

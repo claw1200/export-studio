@@ -1,4 +1,5 @@
-import type { Track } from '../types'
+import { HOT_CUE_KINDS } from '../format'
+import type { Cue, Track } from '../types'
 
 export type SortKey =
   | 'title'
@@ -19,6 +20,8 @@ export type SortKey =
   | 'comment'
   | 'remixer'
   | 'position'
+  | 'cueStars'
+  | 'cueCount'
 
 export interface TrackSort {
   key: SortKey
@@ -42,7 +45,9 @@ function compare(a: Track, b: Track, key: Exclude<SortKey, 'position'>): number 
     case 'year':
     case 'bitrate':
     case 'color':
-      return a[key] - b[key]
+    case 'cueStars':
+    case 'cueCount':
+      return (a[key] ?? 0) - (b[key] ?? 0)
     case 'key':
       return camelotRank(a.key) - camelotRank(b.key)
     default: {
@@ -67,4 +72,18 @@ export function sortTracks(list: Track[], sort: TrackSort, positions: ReadonlyMa
 
 export function newestFirst(list: Track[]): Track[] {
   return [...list].sort((a, b) => collator.compare(b.dateAdded, a.dateAdded))
+}
+
+/** Star total and placed-cue total after a cue edit. Phrase analysis is unchanged. */
+export function cueStats(cues: Cue[], phrase: boolean): { cueStars: number; cueCount: number } {
+  let memory = 0
+  let hot = 0
+  for (const cue of cues) {
+    if (cue.slot === 0) memory++
+    else if (HOT_CUE_KINDS.includes(cue.slot)) hot++
+  }
+  return {
+    cueCount: memory + hot,
+    cueStars: (memory > 0 ? 1 : 0) + (hot > 0 ? 1 : 0) + (phrase ? 1 : 0)
+  }
 }

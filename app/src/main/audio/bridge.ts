@@ -3,8 +3,8 @@ import type { AudioStatus, DeckCommand, DeckEvent, DeckTick, Tick, WaveAnalysis 
 import type { Engine } from '../engine'
 import { loadNative, type NativeEngine, type NativeModule } from './native'
 
-/** Decks the engine runs. The interface has one; the engine is built for more. */
-const DECKS = 1
+/** The playing deck, and a second one that auditions a browser row without loading it. */
+const DECKS = 2
 
 /** Position ticks per second while a deck is sounding. The renderer extrapolates between them. */
 const TICK_MS = 33

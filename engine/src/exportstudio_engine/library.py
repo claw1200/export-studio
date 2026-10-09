@@ -41,7 +41,7 @@ NORMAL_PLAYLIST = 0
 STREAMING_URI = re.compile(r"^[a-z][a-z0-9+.-]+:", re.IGNORECASE)
 IMPORT_SUFFIXES = {".mp3", ".m4a", ".flac", ".wav", ".aif", ".aiff"}
 ANALYSED = 105
-PHRASE_TAG = "PSSI"
+PHRASE_TAG = waveform.PHRASE_TAG
 CAMELOT = re.compile(r"(1[0-2]|[1-9])[AB]")
 TONICS = ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
 ENHARMONIC = {"Db": "C#", "Eb": "D#", "F#": "Gb", "Ab": "G#", "Bb": "A#"}
@@ -63,6 +63,27 @@ NAMED_COLUMNS = {
     "label": (t.DjmdLabel, "LabelID", "add_label"),
 }
 EDITABLE_FIELDS = set(TEXT_COLUMNS) | set(NUMBER_COLUMNS) | set(NAMED_COLUMNS)
+
+
+def _read_anlz(path: Path) -> waveform.Tags | None:
+    if not path.is_file():
+        return None
+    try:
+        return waveform.read_tags(path)
+    except Exception as e:
+        log.warning("Failed to read %s: %s", path, e)
+        return None
+
+
+def _stored_cues(rows) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for content_id, cue_id, kind, start, end, color, color_index, comment, deleted in rows:
+        if deleted:
+            continue
+        grouped[str(content_id)].append(
+            waveform.browser_cue(cue_id, kind, start, end, color, color_index, comment)
+        )
+    return grouped
 
 
 def _rekordbox_db_path() -> Path:
@@ -447,6 +468,14 @@ class Library:
         tags_by_track: dict[str, list[str]] = defaultdict(list)
         for content_id, tag_id in self.db.session.execute(tag_stmt):
             tags_by_track[content_id].append(tag_id)
+        Q = t.DjmdCue
+        cue_stmt = select(Q.ContentID, Q.Kind, Q.rb_local_deleted)
+        if ids is not None:
+            cue_stmt = cue_stmt.where(Q.ContentID.in_([str(i) for i in ids]))
+        kinds_by_track: dict[str, list[int]] = defaultdict(list)
+        for content_id, kind, deleted in self.db.session.execute(cue_stmt):
+            if not deleted:
+                kinds_by_track[str(content_id)].append(int(kind or 0))
 
         rows = []
         for r in self.db.session.execute(stmt):
@@ -454,6 +483,11 @@ class Library:
              key_n, bpm, length, rating, color_id, comment, year, stock, created, plays,
              bitrate, rate, depth, ftype, path, size, image, track_no, anlz, created_at) = r
             path = path or ""
+            phrase = False
+            if anlz:
+                ext = (self.share_dir / str(anlz).strip("/\\")).with_suffix(".EXT")
+                phrase = waveform.file_has_tag(ext, PHRASE_TAG)
+            facts = waveform.cue_sort_facts(kinds_by_track.get(str(cid), []), phrase)
             rows.append({
                 "id": cid,
                 "title": title or Path(path).stem,
@@ -486,6 +520,7 @@ class Library:
                 "trackNo": track_no or 0,
                 "analysed": bool(anlz),
                 "myTags": tags_by_track.get(cid, []),
+                **facts,
             })
         return rows
 
@@ -593,6 +628,48 @@ class Library:
                 "mono": None if rgb else waveform.decode_mono(anlz["EXT"]),
             },
         }
+
+    def track_previews(self, ids: list[str]) -> list[dict]:
+        """Cue stars and a short waveform for the browser rows on screen."""
+        wanted = list(dict.fromkeys(str(i) for i in ids))[:80]
+        if not wanted:
+            return []
+        Q = t.DjmdCue
+        stored = _stored_cues(self.db.session.execute(
+            select(
+                Q.ContentID, Q.ID, Q.Kind, Q.InMsec, Q.OutMsec, Q.Color, Q.ColorTableIndex,
+                Q.Comment, Q.rb_local_deleted,
+            ).where(Q.ContentID.in_(wanted))
+        ))
+        paths = {
+            str(cid): anlz
+            for cid, anlz in self.db.session.execute(
+                select(t.DjmdContent.ID, t.DjmdContent.AnalysisDataPath).where(t.DjmdContent.ID.in_(wanted))
+            )
+        }
+        rows = []
+        for cid in wanted:
+            phrase = False
+            wave = None
+            ext = None
+            relative = paths.get(cid)
+            if relative:
+                dat = self.share_dir / str(relative).strip("/\\")
+                ext = _read_anlz(dat.with_suffix(".EXT"))
+                ex2 = _read_anlz(dat.with_suffix(".2EX"))
+                phrase = waveform.has_phrase(ext)
+                wave = waveform.browser_waveform(ext, ex2)
+            cues = waveform.paint_browser_cues(stored.get(cid, []), waveform.hot_cue_colors(ext))
+            memory, hot = waveform.cue_marks(cue["slot"] for cue in cues)
+            rows.append({
+                "id": cid,
+                "memory": memory,
+                "hot": hot,
+                "phrase": phrase,
+                "cues": cues,
+                "waveform": wave,
+            })
+        return rows
 
     def _cues(self, content: t.DjmdContent, ext: waveform.Tags | None) -> list[dict]:
         cues = []
