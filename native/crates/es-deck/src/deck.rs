@@ -36,7 +36,7 @@ pub(crate) enum Command {
 }
 
 /// How long the thread waits between top-ups while audio is running and the ring is full.
-const TOP_UP_WAIT: Duration = Duration::from_millis(2);
+const TOP_UP_WAIT: Duration = Duration::from_micros(500);
 
 /// Blocks queued during a scrub: about 32 ms, so the sound follows the hand closely.
 const SCRUB_RING_BLOCKS: usize = 3;
@@ -342,6 +342,9 @@ impl Worker {
 
     /// Decodes one block into the ring. False when there is nothing to add.
     fn produce(&mut self) -> bool {
+        if self.generation != self.clock.generation() {
+            return false;
+        }
         if self.scrub.is_some() {
             return self.produce_scrub();
         }

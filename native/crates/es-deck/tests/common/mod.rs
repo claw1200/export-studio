@@ -98,7 +98,7 @@ impl Rig {
             let n = left.min(256);
             out.extend(self.sink.pull(n));
             left -= n;
-            std::thread::sleep(Duration::from_micros(200));
+            std::thread::sleep(Duration::from_millis(2));
         }
         out
     }
