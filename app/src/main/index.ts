@@ -29,7 +29,7 @@ function createWindow(): BrowserWindow {
     ...(isMac
       ? { trafficLightPosition: { x: 14, y: 14 } }
       : { titleBarOverlay: { color: '#0b0c0f', symbolColor: '#a1a1aa', height: 40 } }),
-    ...(process.platform === 'linux' ? { icon } : {}),
+    ...(process.platform === 'darwin' ? {} : { icon }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -59,6 +59,7 @@ function createWindow(): BrowserWindow {
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.exportstudio.app')
   nativeTheme.themeSource = 'dark'
+  if (process.platform === 'darwin' && is.dev) app.dock?.setIcon(icon)
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window, { zoom: true })

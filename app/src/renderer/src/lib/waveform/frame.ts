@@ -11,6 +11,8 @@ export interface DetailView {
   /** The deck's loop in seconds; drawn brighter while playback is held in it. */
   loop: { start: number; end: number; active: boolean } | null
   gridEditing: boolean
+  /** Beat under the pointer while editing, or -1. Dragging its handle shifts the grid. */
+  hotGridIndex: number
 }
 
 /** One draw of the detail view: the canvas in device pixels and the entries it spans. */

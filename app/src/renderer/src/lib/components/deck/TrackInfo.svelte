@@ -2,7 +2,7 @@
   import { Music, Pencil } from '@lucide/svelte'
   import { artworkUrl } from '$lib/api'
   import { getApp } from '$lib/context'
-  import { formatBpm, keyColor } from '$lib/format'
+  import { formatBpm, keyColor, pitchSemitones, shiftKey } from '$lib/format'
 
   const {
     bpm,
@@ -14,6 +14,9 @@
   const { player } = getApp()
   const track = $derived(player.track)
   const rate = $derived(player.tempo.rate)
+  /** Master tempo holds the pitch, so the key stays. Otherwise it moves with the fader. */
+  const semitones = $derived(player.tempo.masterTempo ? 0 : pitchSemitones(rate))
+  const key = $derived(track?.key ? shiftKey(track.key, semitones) : '')
 </script>
 
 <div class="size-14 shrink-0 overflow-hidden rounded-md bg-raised shadow-lg shadow-black/40">
@@ -34,9 +37,12 @@
         title={rate === 1 ? undefined : `${formatBpm(bpm)} BPM at the track's own tempo`}
         >{formatBpm(bpm * rate)} BPM</span
       >
-      {#if track.key}
-        <span class="rounded bg-raised px-1.5 py-0.5 font-semibold" style:color={keyColor(track.key) ?? 'inherit'}
-          >{track.key}</span
+      {#if key}
+        <span
+          class="rounded bg-raised px-1.5 py-0.5 font-semibold"
+          style:color={keyColor(key) ?? 'inherit'}
+          title={key === track.key ? undefined : `${track.key} at the track's own pitch`}
+          >{key}</span
         >
       {/if}
       <span class="rounded bg-raised px-1.5 py-0.5 text-muted">{track.fileType}</span>

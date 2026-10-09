@@ -2,7 +2,8 @@
 //! heard at once rather than after the ring's worth of queued audio.
 //!
 //! Without master tempo the audio is resampled, so the pitch moves with the speed as a record's
-//! does. With it the audio is time-stretched and keeps its key. Both read frames from the deck's
+//! does. With it the audio is time-stretched and keeps its key. At the file's own speed neither
+//! runs, and the frames pass through unchanged. Both read frames from the deck's
 //! [`Feed`](crate::reader::Feed) at the tempo and hand back one output frame at a time, with the
 //! file position of what is being heard.
 
@@ -18,7 +19,9 @@ pub const MAX_TEMPO: f64 = 2.0;
 pub(crate) fn catmull_rom(p: [f32; 4], t: f32) -> f32 {
     p[1] + 0.5
         * t
-        * (p[2] - p[0] + t * (2.0 * p[0] - 5.0 * p[1] + 4.0 * p[2] - p[3] + t * (3.0 * (p[1] - p[2]) + p[3] - p[0])))
+        * (p[2] - p[0]
+            + t * (2.0 * p[0] - 5.0 * p[1] + 4.0 * p[2] - p[3]
+                + t * (3.0 * (p[1] - p[2]) + p[3] - p[0])))
 }
 
 /// How the deck turns file frames into output frames.
@@ -149,7 +152,8 @@ impl Stretcher {
         for rate in [MIN_TEMPO, 1.0, MAX_TEMPO] {
             let frames = ((CHUNK as f64 * rate) as usize).min(self.input.len() / 2);
             for _ in 0..64 {
-                self.stretch.process(&self.input[..frames * 2], &mut self.output[..]);
+                self.stretch
+                    .process(&self.input[..frames * 2], &mut self.output[..]);
             }
         }
         self.input.fill(0.0);
@@ -217,7 +221,11 @@ impl Stretcher {
         if got == 0 {
             return;
         }
-        self.carry = if got == frames { wanted - frames as f64 } else { 0.0 };
+        self.carry = if got == frames {
+            wanted - frames as f64
+        } else {
+            0.0
+        };
         self.stretch
             .process(&self.input[..got * 2], &mut self.output[..]);
         self.chunk_start = self.fed;

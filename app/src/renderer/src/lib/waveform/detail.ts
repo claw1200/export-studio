@@ -3,7 +3,15 @@ import type { WaveSamples } from '../deck/waves.svelte'
 import { drawAnalysisBands, drawAnalysisRgb } from './analysis'
 import type { Waveform, WaveformMode } from './data'
 import type { DetailView, Frame } from './frame'
-import { paintBeatCounters, paintBeatGrid, paintCuePoint, paintCues, paintLoops, paintPlayhead } from './markers'
+import {
+  paintBeatCounters,
+  paintBeatGrid,
+  paintCuePoint,
+  paintCues,
+  paintGridHandles,
+  paintLoops,
+  paintPlayhead
+} from './markers'
 import { drawSampleWave, waveStride } from './samples'
 
 /** The analysis entries in view: `cssWidth` pixels centred on the playhead. */
@@ -74,6 +82,7 @@ export function drawDetail(
   paintBeatGrid(frame)
   paintCues(frame)
   paintCuePoint(frame)
+  paintGridHandles(frame)
   paintPlayhead(frame)
   paintBeatCounters(frame)
 }

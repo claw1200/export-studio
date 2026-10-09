@@ -195,16 +195,16 @@ impl DeckReader {
         }
     }
 
-    /// How playback should run now. Scrubs are always heard as they are rendered.
+    /// How playback should run now. Scrubs are always heard as they are rendered. At the file's
+    /// own speed the frames pass through, master tempo or not: running the stretcher there would
+    /// only change the sound.
     fn playback_mode(&self) -> Mode {
-        if self.clock.scrubbing() {
+        if self.clock.scrubbing() || self.clock.tempo() == 1.0 {
             Mode::Direct
         } else if self.clock.master_tempo() && self.stretcher.is_some() {
             Mode::Stretch
-        } else if self.clock.tempo() != 1.0 {
-            Mode::Varispeed
         } else {
-            Mode::Direct
+            Mode::Varispeed
         }
     }
 

@@ -1,9 +1,16 @@
 /** What the detail view draws over the waveform: loops, the beatgrid, cues and the playhead. */
 import { barBeatAt, countdownTo, firstIndexAtOrAfter } from '../beat'
 import { cueColor, hotCueLetter } from '../format'
-import type { Cue } from '../types'
+import type { Beatgrid, Cue } from '../types'
 import { CUE_POINT_COLOR, LOOP_ACTIVE_COLOR } from './colors'
+import type { Waveform } from './data'
 import type { Frame } from './frame'
+
+/** Beat handles, in CSS pixels. A vertical pill centered on each grid line, with a slightly larger hit box. */
+const HANDLE_W = 6
+const HANDLE_H = 30
+const HANDLE_HIT_X = 10
+const HANDLE_HIT_Y = 18
 
 export function paintLoops(frame: Frame): void {
   const { ctx, view, pw, ph, toX } = frame
@@ -58,6 +65,61 @@ export function paintBeatGrid(frame: Frame): void {
       ctx.fillStyle = 'rgba(255,255,255,0.10)'
       ctx.fillRect(x, 0, line, ph)
     }
+  }
+}
+
+export function gridHandleIndex(
+  wf: Waveform,
+  position: number,
+  zoom: number,
+  grid: Beatgrid | null,
+  cssWidth: number,
+  cssHeight: number,
+  x: number,
+  y: number
+): number {
+  if (!grid?.times.length || !(cssWidth > 0) || !(cssHeight > 0) || !(zoom > 0) || !(wf.rate > 0)) return -1
+  if (Math.abs(y - cssHeight / 2) > HANDLE_HIT_Y) return -1
+  const pxPerSecond = wf.rate * zoom
+  const half = cssWidth / 2
+  const startMs = (position - half / pxPerSecond) * 1000
+  const endMs = (position + half / pxPerSecond) * 1000
+  const first = firstIndexAtOrAfter(grid.times, startMs)
+  let best = -1
+  let bestDx = Infinity
+  for (let i = first; i < grid.times.length && grid.times[i] <= endMs; i++) {
+    const dx = Math.abs(x - (half + (grid.times[i] / 1000 - position) * pxPerSecond))
+    if (dx <= HANDLE_HIT_X && dx < bestDx) {
+      bestDx = dx
+      best = i
+    }
+  }
+  return best
+}
+
+/** A vertical pill on each beat, centered on the grid line. Dragging one shifts the grid. */
+export function paintGridHandles(frame: Frame): void {
+  const { ctx, view, dpr, ph, toX, wf, from, to } = frame
+  const grid = view.beatgrid
+  if (!view.gridEditing || !grid) return
+  const line = Math.max(1, dpr)
+  const w = HANDLE_W * dpr
+  const h = HANDLE_H * dpr
+  const y = ph / 2
+  const startMs = (from / wf.rate) * 1000
+  const endMs = (to / wf.rate) * 1000
+  const first = firstIndexAtOrAfter(grid.times, startMs)
+  for (let i = first; i < grid.times.length && grid.times[i] <= endMs; i++) {
+    const x = Math.round(toX(grid.times[i] / 1000)) + line / 2
+    const downbeat = grid.beats[i] === 1
+    const hot = i === view.hotGridIndex
+    ctx.beginPath()
+    ctx.roundRect(x - w / 2, y - h / 2, w, h, w / 2)
+    ctx.fillStyle = downbeat ? (hot ? '#ff6174' : '#ff4858') : hot ? '#ffffff' : 'rgba(255,255,255,0.92)'
+    ctx.fill()
+    ctx.lineWidth = Math.max(1, dpr)
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)'
+    ctx.stroke()
   }
 }
 

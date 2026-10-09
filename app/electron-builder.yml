@@ -18,6 +18,7 @@ extraResources:
     to: engine
 win:
   executableName: ExportStudio
+  icon: build/icon.ico
   target: nsis
 nsis:
   artifactName: ${productName}-${version}-Windows-setup.${ext}
@@ -25,6 +26,7 @@ nsis:
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
+  icon: build/icon.icns
   target: dmg
   category: public.app-category.music
   hardenedRuntime: true

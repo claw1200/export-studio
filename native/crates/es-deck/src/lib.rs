@@ -355,7 +355,9 @@ impl Engine {
     }
 
     /// Playback speed as a multiple of the file's, heard from the next callback. A deck keeps its
-    /// tempo across loads, as a pitch fader stays where it was left.
+    /// tempo across loads, as a pitch fader stays where it was left. With master tempo, crossing
+    /// the file's own speed requeues: that is where playback swaps between the raw frames and the
+    /// stretcher, and the stretcher has to be primed from the playhead.
     pub fn set_tempo(&self, deck: DeckId, tempo: f64) {
         let Some(handle) = self.deck(deck) else {
             return;
@@ -365,11 +367,22 @@ impl Engine {
         } else {
             1.0
         };
-        handle.clock().set_tempo(tempo);
+        let clock = handle.clock();
+        let previous = clock.tempo();
+        clock.set_tempo(tempo);
+        if clock.master_tempo()
+            && (previous == 1.0) != (tempo == 1.0)
+            && clock.loaded()
+            && !clock.scrubbing()
+        {
+            self.seek_frames(deck, clock.position());
+            handle.send(deck::Command::Wake);
+        }
     }
 
     /// Master tempo: keep the key when the tempo changes. Switching requeues from the playhead,
-    /// since the stretcher has to be primed with audio the ring has already passed.
+    /// since the stretcher has to be primed with audio the ring has already passed. At the file's
+    /// own speed the frames pass through either way, so the switch leaves playback where it is.
     pub fn set_master_tempo(&self, deck: DeckId, on: bool) {
         let Some(handle) = self.deck(deck) else {
             return;
@@ -379,7 +392,7 @@ impl Engine {
             return;
         }
         clock.set_master_tempo(on);
-        if clock.loaded() && !clock.scrubbing() {
+        if clock.tempo() != 1.0 && clock.loaded() && !clock.scrubbing() {
             self.seek_frames(deck, clock.position());
             handle.send(deck::Command::Wake);
         }

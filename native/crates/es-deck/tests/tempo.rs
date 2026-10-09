@@ -12,7 +12,10 @@ fn sine(name: &str, frames: u32, hz: f64) -> std::path::PathBuf {
 /// Cycles per second of the left channel, from its upward zero crossings.
 fn frequency(out: &[f32]) -> f64 {
     let left: Vec<f32> = out.chunks_exact(2).map(|f| f[0]).collect();
-    let crossings = left.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
+    let crossings = left
+        .windows(2)
+        .filter(|w| w[0] < 0.0 && w[1] >= 0.0)
+        .count();
     crossings as f64 * f64::from(RATE) / left.len() as f64
 }
 
@@ -56,6 +59,19 @@ fn slowing_down_works_both_ways() {
     assert!((hz - 440.0).abs() < 6.0, "heard {hz} Hz");
 }
 
+/// Consecutive file frames: each left sample is the next ramp step, so nothing resampled or
+/// stretched them.
+fn assert_exact(out: &[f32]) {
+    let values: Vec<i64> = out.chunks_exact(2).map(|f| value(f[0])).collect();
+    for pair in values.windows(2) {
+        assert_eq!(
+            pair[1],
+            (pair[0] + 1) % 30_000,
+            "frames are the file's, one after another"
+        );
+    }
+}
+
 #[test]
 fn back_at_normal_speed_the_file_plays_exactly() {
     let rig = Rig::new();
@@ -67,10 +83,51 @@ fn back_at_normal_speed_the_file_plays_exactly() {
     rig.engine.set_tempo(0, 1.0);
     let _ = rig.pull(16);
     let out = rig.pull(4096);
-    let values: Vec<i64> = out.chunks_exact(2).map(|f| value(f[0])).collect();
-    for pair in values.windows(2) {
-        assert_eq!(pair[1], (pair[0] + 1) % 30_000, "frames are the file's, one after another");
-    }
+    assert_exact(&out);
+}
+
+#[test]
+fn master_tempo_at_zero_leaves_the_file_untouched() {
+    let rig = Rig::new();
+    rig.load(&ramp("master-zero", RATE * 4));
+    rig.engine.play(0);
+    let _ = rig.pull(4096);
+    rig.engine.set_master_tempo(0, true);
+    let out = rig.pull(4096);
+    assert_exact(&out);
+}
+
+#[test]
+fn leaving_zero_with_master_tempo_stretches() {
+    let rig = Rig::new();
+    rig.load(&sine("leave-zero", RATE * 8, 440.0));
+    rig.engine.set_master_tempo(0, true);
+    rig.engine.play(0);
+    let _ = rig.pull(RATE as usize / 4);
+    rig.engine.set_tempo(0, 1.25);
+    // Past the requeue fade and the stretcher's priming.
+    let _ = rig.pull(RATE as usize / 2);
+    let from = rig.position();
+    let out = rig.pull(RATE as usize);
+    let moved = (rig.position() - from) as f64 / f64::from(RATE);
+    let hz = frequency(&out);
+    assert!((moved - 1.25).abs() < 0.03, "moved {moved} s in a second");
+    assert!((hz - 440.0).abs() < 6.0, "heard {hz} Hz");
+}
+
+#[test]
+fn master_tempo_back_at_zero_plays_the_file_exactly() {
+    let rig = Rig::new();
+    rig.load(&ramp("master-return", RATE * 8));
+    rig.engine.set_master_tempo(0, true);
+    rig.engine.set_tempo(0, 1.1);
+    rig.engine.play(0);
+    let _ = rig.pull(RATE as usize / 2);
+    rig.engine.set_tempo(0, 1.0);
+    // Past the requeue fade back to the raw frames.
+    let _ = rig.pull(RATE as usize / 4);
+    let out = rig.pull(4096);
+    assert_exact(&out);
 }
 
 #[test]

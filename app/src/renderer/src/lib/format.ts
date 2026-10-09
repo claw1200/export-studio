@@ -46,6 +46,42 @@ export const TRACK_COLORS: Record<number, { name: string; hex: string }> = {
 
 const CAMELOT_HUES = [170, 140, 100, 60, 30, 10, 345, 320, 290, 260, 230, 200]
 
+/** Analysis and rekordbox: flats, except F#. */
+const MIXED = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B']
+const SHARPS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+const FLATS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
+const CAMELOT_KEY = /^(\d{1,2})([AB])$/i
+const NOTE_KEY = /^(C#|Db|D#|Eb|F#|Gb|G#|Ab|A#|Bb|[A-G])(m)?$/
+
+function mod(n: number, m: number): number {
+  return ((n % m) + m) % m
+}
+
+/** Semitones the pitch moves at `rate` (1 is the file's own pitch), to the nearest one. */
+export function pitchSemitones(rate: number): number {
+  if (!(rate > 0)) return 0
+  return Math.round(12 * Math.log2(rate))
+}
+
+/** The key heard when the pitch moves by `semitones`. Camelot stays Camelot; a note name keeps its spelling. */
+export function shiftKey(key: string, semitones: number): string {
+  const steps = mod(semitones, 12)
+  if (!steps) return key
+  const camelot = CAMELOT_KEY.exec(key.trim())
+  if (camelot) {
+    const n = Number(camelot[1])
+    if (n < 1 || n > 12) return key
+    // A semitone is seven steps around the wheel: it is laid out in fifths.
+    return `${mod(n - 1 + 7 * steps, 12) + 1}${camelot[2].toUpperCase()}`
+  }
+  const note = NOTE_KEY.exec(key.trim())
+  if (!note) return key
+  const name = note[1]
+  const scale = MIXED.includes(name) ? MIXED : SHARPS.includes(name) ? SHARPS : FLATS
+  const index = scale.indexOf(name)
+  return `${scale[mod(index + steps, 12)]}${note[2] ?? ''}`
+}
+
 export function keyColor(key: string): string | null {
   const m = /^(\d{1,2})([AB])$/i.exec(key.trim())
   if (!m) return null
