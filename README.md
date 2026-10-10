@@ -5,6 +5,35 @@ ExportStudio is a library browser for rekordbox. Browse your collection, preview
 > [!NOTE]
 > ExportStudio opens a rekordbox 6 or 7 library in read-only mode. Close rekordbox, then click the lock in the title bar to edit.
 
+## Why ExportStudio?
+
+ExportStudio is a library browser for rekordbox, with with a fundemtaly different vision to other alternate tools like [rbxport](https://github.com/chrisle/rbxport).
+
+ExportStudio looks to compltly overhaul the avalible feature set of a library manager, not just to strip down Rekordbox to its essentials. I beleive that rekordbox does not just need optimization, but a redesign from the ground up, hence why I have chosen not to copy the old interface and workflow.
+
+## Roadmap and Vision
+
+| Key | Status |
+| --- | --- |
+| 🟢 | Comparable or better |
+| 🟡 | Planned |
+| 🔴 | Can't |
+| ⚫️ | Maybe |
+
+| Feature | ExportStudio | rekordbox |
+| --- | --- | --- |
+| Lightweight and responsive UI | 🟢 | ❌ |
+| High-resolution waveforms | 🟢 | ❌ |
+| Backups | 🟢 | ❌ |
+| Beatgrid editing | 🟢 | ✅ |
+| Track Analysis | 🟢 | ✅ |
+| USB sync | 🟢 | ✅ |
+| Streaming | ⚫️ | ✅ |
+| Playlist conversion | 🟡 | ❌ |
+| USB Hardware compatibility checks | 🟡 | ❌ |
+| Phrase analysis | 🟡 | ✅ |
+| Duel Player | 🟡 | ✅ |
+
 ## Key Features
 
 ExportStudio's goal is not just to strip down Rekordbox, but improve on the feature set. ExportStudio improves:
@@ -54,6 +83,14 @@ Backups are run when you unlock editing, and once a day when something has chang
 
 ### Editing
 
-A snapshot until you unlock. Writes only while rekordbox is closed.
+Improved track metadata editing. Title, artist, rating, and colour are editable from a single dialog or from the information panel on the left.
+
+Select multiple tracks to edit their metadata in bulk.
+
+You can also change your preferences to write the changes to the actual file as well as the database.
 
 <img src="preview/images/editing_metadata.webp" alt="Editing a track's title, artist, rating, and colour." height="480">
+
+## Download
+
+ExportStudio is currently in alpha, and can be downloaded from the [releases page](https://github.com/claw1200/export-studio/releases).
