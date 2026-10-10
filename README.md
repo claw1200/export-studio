@@ -2,8 +2,6 @@
 
 ExportStudio is a library browser for rekordbox. Browse your collection, preview tracks, edit playlists and tags, analyse new files, and copy playlists to a USB stick. Your library stays in rekordbox's own database.
 
-> [!NOTE]
-> ExportStudio opens a rekordbox 6 or 7 library in read-only mode. Close rekordbox, then click the lock in the title bar to edit.
 
 ## Why ExportStudio?
 
@@ -77,6 +75,9 @@ DeviceLibrary and OneLibrary are both written to the device, so that compatibili
 ### Backups
 
 Backups are run when you unlock editing, and once a day when something has changed. You can restore any backup from Settings, a backup is taken before you restore, so you can undo the restore if you made a mistake.
+
+> [!NOTE]
+> Audio files are not included in the backup.
 
 <img src="preview/images/backups.webp" alt="Saved library backups, with restore, in Settings." height="480">
 
