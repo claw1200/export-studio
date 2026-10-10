@@ -483,9 +483,7 @@
           </section>
 
           <p class="px-2 text-[11px] leading-snug text-faint">
-            This is ExportStudio’s own analysis, not rekordbox’s. Tested on rekordbox libraries, it picks the same tempo
-            for about 96% of tracks, puts the beats within a few milliseconds of rekordbox’s, and finds the same key for
-            most.
+            This is ExportStudio’s own analysis system, not rekordbox’s.
           </p>
         {:else}
           {#each groups as { group, ids } (group)}
