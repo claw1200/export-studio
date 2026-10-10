@@ -14,7 +14,7 @@ ExportStudio looks to compltly overhaul the avalible feature set of a library ma
 | Key | Status |
 | --- | --- |
 | 🟢 | Comparable or better |
-| 🟡 | Planned |
+| 🟡 | Planned / Working on it |
 | 🔴 | Can't |
 | ⚫️ | Maybe |
 
@@ -32,6 +32,7 @@ ExportStudio looks to compltly overhaul the avalible feature set of a library ma
 | USB Hardware compatibility checks | 🟡 | ❌ |
 | Phrase analysis | 🟡 | ✅ |
 | Duel Player | 🟡 | ✅ |
+| Support Serato Library | 🟡 | ❌ |
 
 ## Key Features
 
