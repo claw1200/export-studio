@@ -23,7 +23,8 @@ ExportStudio looks to compltly overhaul the avalible feature set of a library ma
 | Lightweight and responsive UI | 🟢 | ❌ |
 | High-resolution waveforms | 🟢 | ❌ |
 | Backups | 🟢 | ❌ |
-| Beatgrid editing | 🟢 | ✅ |
+| Standard beatgrid editing | 🟢 | ✅ |
+| Dynamic beatgrid editing | 🟡 | ✅ |
 | Track Analysis | 🟢 | ✅ |
 | USB sync | 🟢 | ✅ |
 | Streaming | ⚫️ | ✅ |
@@ -52,7 +53,7 @@ A quality slider changes the number of samples used to draw the waveform. Off us
 
 ### Grid editing
 
-Shift the beatgrid onto the kick, a millisecond at a time, or halve and double the tempo. Save writes it back to rekordbox.
+Stop spending hours holding down the nudge button to get the beatgrid just right. ExportStudio lets you grab the beatgrid and drag it to the position you want, then use nudge to fine-tune it.
 
 <img src="preview/images/grid_edit.webp" alt="Editing a beatgrid on the deck, with nudge, half, and double." height="480">
 
