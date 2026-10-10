@@ -165,6 +165,7 @@ export interface Volume {
   name: string
   path: string
   hasLibrary: boolean
+  ejectable: boolean
   rootName: string | null
 }
 

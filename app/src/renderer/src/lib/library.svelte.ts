@@ -577,6 +577,11 @@ export class Library {
     await this.setSource(this.source)
   }
 
+  async ejectDevice(volumeId: string): Promise<void> {
+    await api.usbEject(volumeId)
+    await this.refreshDevices()
+  }
+
   async refreshDevices(): Promise<void> {
     try {
       const volumes = await api.usbList()

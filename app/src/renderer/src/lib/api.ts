@@ -59,6 +59,7 @@ export const api = {
   addTag: (id: string, trackIds: string[]) => call<Track[]>('tag.add', { id, trackIds }),
   removeTag: (id: string, trackIds: string[]) => call<Track[]>('tag.remove', { id, trackIds }),
   usbList: () => call<Volume[]>('usb.list'),
+  usbEject: (volumeId: string) => call<void>('usb.eject', { volumeId }),
   usbPlaylists: (volumeId: string) => call<TreeItem[]>('usb.playlists', { volumeId }),
   usbTracks: (volumeId: string, playlistId: string | null) => call<Track[]>('usb.tracks', { volumeId, playlistId }),
   usbSync: (volumeId: string, playlistIds: string[]) =>

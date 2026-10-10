@@ -40,8 +40,11 @@ def list_volumes(root: Path | None = None) -> list[dict]:
             dev = path.stat().st_dev
         except OSError:
             continue
+        if real and dev == boot:
+            continue
         library = has_library(path)
-        if real and (dev == boot or (not library and not _ejectable(path))):
+        ejectable = _ejectable(path) if real else False
+        if real and not library and not ejectable:
             continue
         volumes.append(
             {
@@ -49,7 +52,30 @@ def list_volumes(root: Path | None = None) -> list[dict]:
                 "name": path.name,
                 "path": str(path),
                 "hasLibrary": library,
+                "ejectable": ejectable,
                 "rootName": _root_name(path),
             }
         )
     return volumes
+
+
+def eject_volume(volume_id: str, volumes: list[dict] | None = None) -> None:
+    """Eject a removable volume from the device list. `volumes` stands in for the live list in tests."""
+    volume = Path(volume_id).resolve()
+    listed = list_volumes() if volumes is None else volumes
+    match = next((item for item in listed if Path(item["path"]).resolve() == volume), None)
+    if match is None or not match.get("ejectable"):
+        raise ValueError("That device can’t be ejected")
+    try:
+        subprocess.run(
+            ["diskutil", "eject", str(volume)],
+            check=True,
+            timeout=30,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as err:
+        detail = (err.stderr or err.stdout or "").strip()
+        raise RuntimeError(detail or "Couldn’t eject the device") from err
+    except subprocess.TimeoutExpired as err:
+        raise RuntimeError("Ejecting the device took too long") from err

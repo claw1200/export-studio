@@ -11,7 +11,7 @@ from .backup import Backups
 from .library import WRITE_BLOCKED, Library, _rekordbox_db_path
 from .usb import browse
 from .usb.sync import bundle_from_library, sync_volume
-from .usb.volumes import list_volumes
+from .usb.volumes import eject_volume, list_volumes
 
 log = logging.getLogger("exportstudio_engine")
 
@@ -75,6 +75,7 @@ class Engine:
             "tag.remove": lambda id, trackIds: self.lib.remove_tag(id, trackIds),
             "media.resolve": lambda kind, id, size="": self.resolve_media(kind, id, size),
             "usb.list": lambda: list_volumes(),
+            "usb.eject": lambda volumeId: self.eject(volumeId),
             "usb.playlists": lambda volumeId: browse.playlists(Path(volumeId)),
             "usb.tracks": lambda volumeId, playlistId=None: browse.tracks(Path(volumeId), playlistId),
             "usb.detail": lambda id: browse.detail(id),
@@ -197,6 +198,10 @@ class Engine:
         emit("usb.volumes", {"volumes": list_volumes()})
         return result
 
+    def eject(self, volumeId: str) -> None:
+        eject_volume(volumeId)
+        emit("usb.volumes", {"volumes": list_volumes()})
+
     def handle(self, msg: dict) -> None:
         req_id = msg.get("id")
         method = msg.get("method", "")
@@ -228,7 +233,9 @@ class Engine:
                         except Exception:
                             log.exception("Daily backup failed")
             try:
-                current = tuple((item["id"], item["hasLibrary"], item["rootName"]) for item in list_volumes())
+                current = tuple(
+                    (item["id"], item["hasLibrary"], item["rootName"], item["ejectable"]) for item in list_volumes()
+                )
             except Exception:
                 log.exception("Failed to list volumes")
                 current = volumes

@@ -29,7 +29,7 @@ from exportstudio_engine.usb.pdb import (
     table_page,
 )
 from exportstudio_engine.usb.sync import Conflict, ExportBundle, SourcePlaylist, SourceTrack, VerifyError, sync_volume
-from exportstudio_engine.usb.volumes import list_volumes
+from exportstudio_engine.usb.volumes import eject_volume, list_volumes
 
 
 def _anlz(path: str) -> bytes:
@@ -117,6 +117,23 @@ class ParseTests(unittest.TestCase):
             self.assertEqual(found["Stick"]["rootName"], "PIONEER")
             self.assertTrue(found["Stick"]["hasLibrary"])
             self.assertEqual(found["Dot"]["rootName"], ".PIONEER")
+            self.assertFalse(found["Stick"]["ejectable"])
+
+
+class EjectTests(unittest.TestCase):
+    def test_only_a_listed_removable_volume_is_ejected(self) -> None:
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as raw:
+            target = Path(raw) / "Stick"
+            target.mkdir()
+            with self.assertRaises(ValueError):
+                eject_volume(str(target), [{"path": str(target), "ejectable": False}])
+            with patch("exportstudio_engine.usb.volumes.subprocess.run") as run:
+                eject_volume(str(target), [{"path": str(target), "ejectable": True}])
+            run.assert_called_once()
+            self.assertEqual(run.call_args.args[0][:2], ["diskutil", "eject"])
+            self.assertEqual(Path(run.call_args.args[0][2]).resolve(), target.resolve())
 
 
 def read_device_from_rows():

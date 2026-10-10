@@ -16,21 +16,51 @@
     Trash2,
     HardDrive,
     FilePlus,
-    FolderInput
+    FolderInput,
+    Eject,
+    LoaderCircle
   } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import { droppedPaths, isFileDrag } from '$lib/library/drop'
   import { buildTree, type TreeNode } from '$lib/library/tree'
   import { menuAt, tidy, type MenuEntry, type MenuRequest } from '$lib/menu'
   import { SEPARATOR, unlockEntry } from '$lib/trackMenu'
-  import type { Source } from '$lib/types'
+  import type { Source, Volume } from '$lib/types'
   import ConfirmDialog from './ConfirmDialog.svelte'
   import ContextMenu from './ContextMenu.svelte'
   import SyncDialog from './SyncDialog.svelte'
 
   let { onsource }: { onsource?: () => void } = $props()
 
-  const { library, player } = getApp()
+  const { library, player, audition } = getApp()
+
+  let ejectingId = $state<string | null>(null)
+
+  function trackOnVolume(trackId: string | null | undefined, volumeId: string): boolean {
+    if (!trackId?.startsWith('usb:')) return false
+    const body = trackId.slice(4)
+    const split = body.lastIndexOf(':')
+    if (split <= 0) return false
+    try {
+      return decodeURIComponent(body.slice(0, split)) === volumeId
+    } catch {
+      return false
+    }
+  }
+
+  async function ejectVolume(volume: Volume): Promise<void> {
+    if (library.syncing || ejectingId) return
+    ejectingId = volume.id
+    if (trackOnVolume(audition.trackId, volume.id)) audition.stop()
+    if (trackOnVolume(player.track?.id, volume.id)) player.eject()
+    try {
+      await library.ejectDevice(volume.id)
+    } catch (e) {
+      library.notify((e as Error).message)
+    } finally {
+      if (ejectingId === volume.id) ejectingId = null
+    }
+  }
 
   function setSource(source: Source): void {
     library.setSource(source)
@@ -94,7 +124,9 @@
     if (files ? type !== 'playlist' || node.kind !== 'playlist' : !accepts(type, node)) return
     if (!library.writable) {
       library.notify(
-        files ? 'Unlock editing to import tracks' : `Unlock editing to add tracks to ${type === 'tag' ? 'tags' : 'playlists'}`
+        files
+          ? 'Unlock editing to import tracks'
+          : `Unlock editing to add tracks to ${type === 'tag' ? 'tags' : 'playlists'}`
       )
       return
     }
@@ -125,7 +157,12 @@
     const locked = !library.writable
     return [
       { label: 'Import tracks…', icon: FilePlus, disabled: locked, onselect: () => void library.chooseImport('files') },
-      { label: 'Import folder…', icon: FolderInput, disabled: locked, onselect: () => void library.chooseImport('folder') }
+      {
+        label: 'Import folder…',
+        icon: FolderInput,
+        disabled: locked,
+        onselect: () => void library.chooseImport('folder')
+      }
     ]
   }
 
@@ -196,7 +233,14 @@
       isFolder ? 'Folder' : 'Playlist',
       tidy([
         ...(isFolder ? [...createItems(node.id), SEPARATOR] : []),
-        { label: 'Sync to…', icon: HardDrive, onselect: () => { void library.refreshDevices(); syncing = node } },
+        {
+          label: 'Sync to…',
+          icon: HardDrive,
+          onselect: () => {
+            void library.refreshDevices()
+            syncing = node
+          }
+        },
         { label: 'Rename', icon: Pencil, disabled: locked, onselect: () => (library.renamingId = node.id) },
         { label: 'Delete', icon: Trash2, danger: true, disabled: locked, onselect: () => (deleting = node) },
         locked && SEPARATOR,
@@ -463,6 +507,21 @@
               <span class="text-[11px] text-faint">Empty</span>
             {/if}
           </button>
+          {#if volume.ejectable}
+            <button
+              class="grid size-6 shrink-0 place-items-center rounded text-faint hover:bg-hover hover:text-fg disabled:opacity-40"
+              aria-label="Eject {volume.name}"
+              title={library.syncing ? 'Wait for the sync to finish' : `Eject ${volume.name}`}
+              disabled={library.syncing || ejectingId === volume.id}
+              onclick={() => void ejectVolume(volume)}
+            >
+              {#if ejectingId === volume.id}
+                <LoaderCircle class="size-3.5 animate-spin" />
+              {:else}
+                <Eject class="size-3.5" />
+              {/if}
+            </button>
+          {/if}
         </div>
         {#if open && volume.hasLibrary}
           {@render deviceTree(buildTree(library.devicePlaylists[volume.id] ?? []), volume.id, 1)}
