@@ -1,5 +1,6 @@
 import { formatDuration } from '$lib/format'
-import type { PlaylistMembership, Track, TrackViewFilters, View } from '$lib/types'
+import { isDurationSlack } from '$lib/library/duplicates'
+import type { DuplicateMatch, PlaylistMembership, Track, TrackViewFilters, View } from '$lib/types'
 
 const STORAGE_KEY = 'views'
 
@@ -159,12 +160,24 @@ function isFilters(value: unknown): value is TrackViewFilters {
   )
 }
 
+function isDuplicateMatch(value: unknown): value is DuplicateMatch {
+  if (!value || typeof value !== 'object') return false
+  const match = value as DuplicateMatch
+  return (
+    typeof match.title === 'boolean' &&
+    typeof match.artist === 'boolean' &&
+    typeof match.duration === 'boolean' &&
+    typeof match.fileSize === 'boolean'
+  )
+}
+
 function isView(value: unknown): value is View {
   if (!value || typeof value !== 'object') return false
   const view = value as View
   if (typeof view.id !== 'string' || !view.id || typeof view.name !== 'string') return false
   if (view.type === 'tracks') return isFilters(view.filters)
   if (view.type === 'files') return typeof view.directory === 'string' && typeof view.showInCollection === 'boolean'
+  if (view.type === 'duplicates') return isDuplicateMatch(view.match) && isDurationSlack(view.durationSlack)
   return false
 }
 

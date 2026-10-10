@@ -220,6 +220,19 @@ export interface RestoreResult {
 /** Whether a track-list view keeps tracks that sit in a normal playlist. */
 export type PlaylistMembership = 'any' | 'in' | 'out'
 
+/** Fields that must agree before two tracks count as the same recording. */
+export interface DuplicateMatch {
+  title: boolean
+  artist: boolean
+  /** Whole seconds, compared within the view's duration tolerance. */
+  duration: boolean
+  /** Exact byte size. Tracks with an unknown size are left out. */
+  fileSize: boolean
+}
+
+/** Whole seconds of duration tolerance. 0 means the durations must be equal. */
+export type DurationSlack = 0 | 1 | 2 | 5
+
 export interface TrackViewFilters {
   title: string
   artist: string
@@ -240,6 +253,7 @@ export interface TrackViewFilters {
 export type View =
   | { id: string; name: string; type: 'tracks'; filters: TrackViewFilters }
   | { id: string; name: string; type: 'files'; directory: string; showInCollection: boolean }
+  | { id: string; name: string; type: 'duplicates'; match: DuplicateMatch; durationSlack: DurationSlack }
 
 export type Source =
   | { type: 'collection' }

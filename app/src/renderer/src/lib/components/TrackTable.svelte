@@ -137,6 +137,17 @@
   let hidden = $state(initial.hidden)
   let order = $state(initial.order)
 
+  const duplicateView = $derived(library.sourceView?.type === 'duplicates')
+
+  function columnWidth(column: Column): number {
+    const width = widths[column.id]
+    return duplicateView && column.id === 'index' ? Math.max(width, 72) : width
+  }
+
+  function headerLabel(column: Column): string {
+    return duplicateView && column.id === 'index' ? 'Group' : column.label
+  }
+
   const orderedColumns = $derived.by(() => {
     const rank = new Map(order.map((id, index) => [id, index]))
     return [...COLUMNS].sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
@@ -145,7 +156,7 @@
   const template = $derived(
     shownColumns
       .map((column) => {
-        const width = widths[column.id]
+        const width = columnWidth(column)
         return column.fr && !sized.includes(column.id) ? `minmax(${column.width}px, ${column.fr}fr)` : `${width}px`
       })
       .join(' ')
@@ -153,7 +164,7 @@
   const minWidth = $derived(
     shownColumns.reduce((sum, column) => {
       if (column.fr && !sized.includes(column.id)) return sum + column.width
-      return sum + widths[column.id]
+      return sum + columnWidth(column)
     }, 0)
   )
 
@@ -549,7 +560,10 @@
     {#if player.track?.id === track.id}
       <AudioLines class={['ml-auto size-3.5 text-accent', player.playing && 'animate-pulse']} />
     {:else}
-      <span class={track.missing ? 'text-warn/70' : 'text-faint'}>{library.positions.get(track.id) ?? index + 1}</span>
+      {@const group = duplicateView ? library.positions.get(track.id) : undefined}
+      <span class={track.missing ? 'text-warn/70' : 'text-faint'} title={group ? `Group ${group}` : undefined}>
+        {library.positions.get(track.id) ?? index + 1}
+      </span>
     {/if}
   {:else if column.id === 'color'}
     {#if TRACK_COLORS[track.color]}
@@ -674,7 +688,7 @@
                   library.toggleSort(column.sort!)
                 }}
               >
-                <span class="truncate">{column.label}</span>
+                <span class="truncate">{headerLabel(column)}</span>
                 {@render sortIcon(column.sort)}
               </button>
             {:else}
@@ -685,7 +699,7 @@
                   column.align === 'center' && 'text-center'
                 ]}
               >
-                {column.label}
+                {headerLabel(column)}
               </span>
             {/if}
             <div

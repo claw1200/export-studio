@@ -2,8 +2,9 @@
   import { untrack } from 'svelte'
   import { getApp } from '$lib/context'
   import { api } from '$lib/api'
+  import { emptyDuplicateMatch } from '$lib/library/duplicates'
   import { emptyFilters, formatDurationInput, parseDurationInput } from '$lib/library/views'
-  import type { PlaylistMembership, TrackViewFilters, View } from '$lib/types'
+  import type { DuplicateMatch, DurationSlack, PlaylistMembership, TrackViewFilters, View } from '$lib/types'
 
   let { view = null, onclose }: { view?: View | null; onclose: () => void } = $props()
 
@@ -11,9 +12,12 @@
 
   const opened = untrack(() => view)
   const initial = opened?.type === 'tracks' ? opened.filters : emptyFilters()
+  const initialMatch = opened?.type === 'duplicates' ? opened.match : emptyDuplicateMatch()
   let name = $state(opened?.name ?? '')
-  let kind = $state<'tracks' | 'files'>(opened?.type ?? 'tracks')
+  let kind = $state<'tracks' | 'files' | 'duplicates'>(opened?.type ?? 'tracks')
   let filters = $state<TrackViewFilters>({ ...initial, keys: [...initial.keys] })
+  let match = $state<DuplicateMatch>({ ...initialMatch })
+  let durationSlack = $state<DurationSlack>(opened?.type === 'duplicates' ? opened.durationSlack : 2)
   let directory = $state(opened?.type === 'files' ? opened.directory : '')
   let showInCollection = $state(opened?.type === 'files' ? opened.showInCollection : true)
   let bpmMin = $state(initial.bpmMin == null ? '' : String(initial.bpmMin))
@@ -37,6 +41,21 @@
     { id: 'in', label: 'In a playlist' },
     { id: 'out', label: 'Not in a playlist' }
   ]
+
+  const slacks: { value: DurationSlack; label: string }[] = [
+    { value: 0, label: 'Exact' },
+    { value: 1, label: '1s' },
+    { value: 2, label: '2s' },
+    { value: 5, label: '5s' }
+  ]
+
+  const blurb = $derived(
+    kind === 'tracks'
+      ? 'List collection tracks that match every filter you fill in.'
+      : kind === 'files'
+        ? 'List the audio files under a folder. Files already in the collection keep their library data.'
+        : 'List collection tracks that match each other on every field you turn on.'
+  )
 
   const inputClass =
     'h-7 w-full rounded-md border border-line bg-bg px-2 text-[12.5px] text-fg placeholder:text-faint focus:border-accent/60'
@@ -86,6 +105,25 @@
         return false
       }
       library.saveView({ id, name: trimmed, type: 'files', directory: folder, showInCollection })
+      return true
+    }
+    if (kind === 'duplicates') {
+      if (!match.title && !match.artist && !match.duration && !match.fileSize) {
+        error = 'Turn on at least one field'
+        return false
+      }
+      library.saveView({
+        id,
+        name: trimmed,
+        type: 'duplicates',
+        match: {
+          title: match.title,
+          artist: match.artist,
+          duration: match.duration,
+          fileSize: match.fileSize
+        },
+        durationSlack
+      })
       return true
     }
     const low = parseBpm(bpmMin)
@@ -144,15 +182,16 @@
   >
     <div class="min-h-0 flex-1 overflow-y-auto p-5">
       <h2 class="text-[13.5px] font-semibold">{creating ? 'New view' : 'Edit view'}</h2>
-      <p class="mt-1 text-[12.5px] leading-relaxed text-muted">
-        {kind === 'tracks'
-          ? 'List collection tracks that match every filter you fill in.'
-          : 'List the audio files under a folder. Files already in the collection keep their library data.'}
-      </p>
+      <p class="mt-1 text-[12.5px] leading-relaxed text-muted">{blurb}</p>
 
       <label class="mt-4 block">
         <span class="mb-1 block text-[11px] font-medium text-faint">Name</span>
-        <input bind:value={name} class={inputClass} spellcheck="false" />
+        <input
+          bind:value={name}
+          class={inputClass}
+          spellcheck="false"
+          placeholder={kind === 'duplicates' ? 'Suspected duplicates' : ''}
+        />
       </label>
 
       <div class="mt-4 flex rounded-md bg-bg p-0.5" role="radiogroup" aria-label="View type">
@@ -179,6 +218,18 @@
           onclick={() => (kind = 'files')}
         >
           File list
+        </button>
+        <button
+          type="button"
+          class={[
+            'h-7 flex-1 rounded-[5px] text-[12.5px]',
+            kind === 'duplicates' ? 'bg-raised font-medium text-fg' : 'text-muted hover:text-fg'
+          ]}
+          role="radio"
+          aria-checked={kind === 'duplicates'}
+          onclick={() => (kind = 'duplicates')}
+        >
+          Duplicates
         </button>
       </div>
 
@@ -272,7 +323,7 @@
             {/each}
           </div>
         </div>
-      {:else}
+      {:else if kind === 'files'}
         <div class="mt-4">
           <span class="mb-1 block text-[11px] font-medium text-faint">Folder</span>
           <div class="flex gap-2">
@@ -299,6 +350,65 @@
           <input type="checkbox" class="accent-accent" bind:checked={showInCollection} />
           Show files already in the collection
         </label>
+      {:else}
+        <div class="mt-4 grid grid-cols-2 gap-2">
+          <label class="flex items-center gap-2 text-[12.5px] text-muted">
+            <input type="checkbox" class="accent-accent" bind:checked={match.title} />
+            Same title
+          </label>
+          <label class="flex items-center gap-2 text-[12.5px] text-muted">
+            <input type="checkbox" class="accent-accent" bind:checked={match.artist} />
+            Same artist
+          </label>
+          <label class="flex items-center gap-2 text-[12.5px] text-muted">
+            <input type="checkbox" class="accent-accent" bind:checked={match.duration} />
+            Duration
+          </label>
+          <label class="flex items-center gap-2 text-[12.5px] text-muted">
+            <input type="checkbox" class="accent-accent" bind:checked={match.fileSize} />
+            Same file size
+          </label>
+        </div>
+        <p class="mt-3 text-[11.5px] leading-snug text-faint">
+          Title and artist ignore case and punctuation. Mix names stay in the title, so an original mix and a dub stay
+          apart. File size has to match exactly.
+        </p>
+        {#if match.title || match.fileSize}
+          <p class="mt-1.5 text-[11.5px] leading-snug text-faint">
+            {[
+              match.title ? 'Tracks with no title are left out.' : '',
+              match.fileSize ? 'Tracks with an unknown size are left out.' : ''
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          </p>
+        {/if}
+        {#if match.duration && !match.title && !match.artist && !match.fileSize}
+          <p class="mt-1.5 text-[11.5px] leading-snug text-faint">
+            Duration alone groups every track of a similar length. Turn on title, artist, or file size to narrow it.
+          </p>
+        {/if}
+        {#if match.duration}
+          <div class="mt-4">
+            <span class="mb-1.5 block text-[11px] font-medium text-faint">Duration tolerance</span>
+            <div class="flex rounded-md bg-bg p-0.5" role="radiogroup" aria-label="Duration tolerance">
+              {#each slacks as slack (slack.value)}
+                <button
+                  type="button"
+                  class={[
+                    'h-7 flex-1 rounded-[5px] text-[12px]',
+                    durationSlack === slack.value ? 'bg-raised font-medium text-fg' : 'text-muted hover:text-fg'
+                  ]}
+                  role="radio"
+                  aria-checked={durationSlack === slack.value}
+                  onclick={() => (durationSlack = slack.value)}
+                >
+                  {slack.label}
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
       {/if}
 
       {#if error}

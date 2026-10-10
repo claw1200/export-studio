@@ -19,6 +19,7 @@
     FolderInput,
     FolderSearch,
     ListFilter,
+    Copy,
     Eject,
     LoaderCircle
   } from '@lucide/svelte'
@@ -581,6 +582,8 @@
         >
           {#if view.type === 'files'}
             <FolderSearch class="size-3.5 shrink-0 text-faint" />
+          {:else if view.type === 'duplicates'}
+            <Copy class="size-3.5 shrink-0 text-faint" />
           {:else}
             <ListFilter class="size-3.5 shrink-0 text-faint" />
           {/if}

@@ -3,6 +3,7 @@ import { browserPreviews } from './browserPreview.svelte'
 import { clearDetailCache } from './deck/session.svelte'
 import { cueStats, newestFirst, type SortKey, sortTracks, type TrackSort } from './library/sort'
 import { buildTree } from './library/tree'
+import { duplicateGroups, rankCopies } from './library/duplicates'
 import { loadViews, looseTrack, matchesTrack, pathKey, saveViews, type FileEntry } from './library/views'
 import type {
   Cue,
@@ -82,6 +83,21 @@ export class Library {
   private removeListeners = new Set<(ids: string[]) => void>()
 
   viewById = $derived(new Map(this.views.map((view) => [view.id, view])))
+  sourceView = $derived(this.source.type === 'view' ? (this.viewById.get(this.source.id) ?? null) : null)
+  /** Open duplicates view, keeper first inside each group. */
+  private listedDuplicates = $derived.by(() => {
+    const view = this.sourceView
+    if (view?.type !== 'duplicates') return null
+    const groups = new Map<string, number>()
+    const tracks: Track[] = []
+    duplicateGroups(this.tracks, view.match, view.durationSlack).forEach((group, index) => {
+      for (const track of rankCopies(group, this.playlistMembers)) {
+        groups.set(track.id, index + 1)
+        tracks.push(track)
+      }
+    })
+    return { tracks, groups }
+  })
   private looseTracks = $derived(this.fileEntries.flatMap((entry) => (entry.loose ? [entry.loose] : [])))
   byId = $derived(new Map([...this.tracks, ...this.deviceTracks, ...this.looseTracks].map((t) => [t.id, t])))
   playlistById = $derived(new Map(this.playlists.map((p) => [p.id, p])))
@@ -107,8 +123,10 @@ export class Library {
     )
   )
 
-  /** 1-based position of each track in the current playlist or history, as stored in rekordbox. */
+  /** Playlist position, history position, or duplicate group number. All are 1-based. */
   positions = $derived.by(() => {
+    const grouped = this.listedDuplicates
+    if (grouped) return grouped.groups
     const out = new Map<string, number>()
     if (this.source.type === 'device' && this.source.playlistId) {
       this.deviceTracks.forEach((track, i) => {
@@ -739,7 +757,7 @@ export class Library {
       this.sourceIds = null
       this.deviceTracks = []
       const view = this.viewById.get(source.id)
-      if (!view || view.type === 'tracks') {
+      if (!view || view.type !== 'files') {
         this.fileEntries = []
         this.sourceLoading = false
         return
@@ -796,6 +814,7 @@ export class Library {
     if (view.type === 'tracks') {
       return this.tracks.filter((track) => matchesTrack(track, view.filters, this.playlistMembers.has(track.id)))
     }
+    if (view.type === 'duplicates') return this.listedDuplicates?.tracks ?? []
     const byPath = this.tracksByPath()
     const out: Track[] = []
     for (const entry of this.fileEntries) {
