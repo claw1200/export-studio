@@ -510,18 +510,23 @@
       <span class="block h-4 w-[3px] rounded-full" style:background={TRACK_COLORS[track.color].hex}></span>
     {/if}
   {:else if column.id === 'art'}
+    {@const fill = library.browserArtwork === 'fill'}
     {#if track.hasArtwork}
       <img
-        src={artworkUrl(track.id, 's')}
+        src={artworkUrl(track.id, fill ? 'm' : 's')}
         alt=""
         loading="lazy"
         decoding="async"
         draggable="false"
-        class="size-6 rounded-[3px] bg-raised object-cover"
+        class={fill
+          ? 'absolute inset-0 size-full object-cover object-top'
+          : 'size-6 rounded-[3px] bg-raised object-cover'}
       />
     {:else}
-      <span class="grid size-6 place-items-center rounded-[3px] bg-raised text-faint">
-        <Music class="size-3" />
+      <span
+        class={['grid place-items-center bg-raised text-faint', fill ? 'absolute inset-0' : 'size-6 rounded-[3px]']}
+      >
+        <Music class={fill ? 'size-3.5' : 'size-3'} />
       </span>
     {/if}
   {:else if column.id === 'title'}
@@ -699,7 +704,8 @@
                     'flex min-w-0 items-center overflow-hidden px-2 whitespace-nowrap',
                     column.align === 'right' && 'justify-end',
                     column.align === 'center' && 'justify-center',
-                    column.id === 'wave' && 'h-full px-1.5'
+                    column.id === 'wave' && 'h-full px-1.5',
+                    column.id === 'art' && library.browserArtwork === 'fill' && 'relative h-8 px-0'
                   ]}
                 >
                   {@render cell(column, track, index)}

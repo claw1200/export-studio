@@ -7,6 +7,13 @@ import type { Cue, ImportResult, LibraryInfo, Source, SyncProgress, Track, Track
 
 export const TRACK_DRAG_TYPE = 'application/x-exportstudio-tracks'
 
+/** How cover art is drawn in the browser. Fill uses the column width and crops the bottom. */
+export type BrowserArtwork = 'fill' | 'whole'
+
+function storedArtwork(): BrowserArtwork {
+  return localStorage.getItem('browserArtwork') === 'whole' ? 'whole' : 'fill'
+}
+
 function dropCaches(): void {
   clearDetailCache()
   browserPreviews.forget()
@@ -49,6 +56,7 @@ export class Library {
   writeFileTags = $state(localStorage.getItem('writeFileTags') === '1')
   importArtwork = $state(localStorage.getItem('importArtwork') !== '0')
   hideStreaming = $state(localStorage.getItem('hideStreaming') === '1')
+  browserArtwork = $state<BrowserArtwork>(storedArtwork())
   importing = $state(false)
   renamingId = $state<string | null>(null)
   dragging = $state.raw<string[] | null>(null)
@@ -280,6 +288,11 @@ export class Library {
   setHideStreaming(on: boolean): void {
     this.hideStreaming = on
     localStorage.setItem('hideStreaming', on ? '1' : '0')
+  }
+
+  setBrowserArtwork(style: BrowserArtwork): void {
+    this.browserArtwork = style
+    localStorage.setItem('browserArtwork', style)
   }
 
   onTracksUpdated(listener: (tracks: Track[]) => void): () => void {

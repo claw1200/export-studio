@@ -25,6 +25,7 @@
   import { getApp } from '$lib/context'
   import { formatSize } from '$lib/format'
   import { ACTION_IDS, ACTIONS, chordFromEvent, chordLabel, type ActionGroup, type ActionId } from '$lib/keymap'
+  import type { BrowserArtwork } from '$lib/library.svelte'
   import type { CuePlacement } from '$lib/player.svelte'
   import type { Backup, BackupProgress, BackupReason } from '$lib/types'
   import type { GridMode } from '../../../../preload/analysis'
@@ -55,6 +56,10 @@
   const PLACEMENTS: { id: CuePlacement; label: string }[] = [
     { id: 'playhead', label: 'Playhead' },
     { id: 'cuePoint', label: 'Cue point' }
+  ]
+  const ARTWORK: (Choice & { id: BrowserArtwork })[] = [
+    { id: 'fill', label: 'Fill' },
+    { id: 'whole', label: 'Whole' }
   ]
   const GRID_MODES: (Choice & { id: GridMode })[] = [
     { id: 'normal', label: 'Normal' },
@@ -232,6 +237,13 @@
         {:else if section === 'display'}
           <section class="mb-5">
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Browser</h3>
+            {@render choice(
+              'Artwork',
+              'Fill uses the full width of the column and crops the bottom of the cover. Whole shows the entire image, smaller.',
+              ARTWORK,
+              library.browserArtwork,
+              (id) => library.setBrowserArtwork(id as BrowserArtwork)
+            )}
             {@render toggle(
               'Hide streaming tracks',
               'Leave tracks from streaming services out of the collection, playlists, histories and tags. They stay in rekordbox.',
