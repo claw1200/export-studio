@@ -54,6 +54,7 @@ export interface NativeEngine {
   snapshot(deck: number): NativeSnapshot | null
   anySounding(): boolean
   settle(): void
+  close(): void
 }
 
 export interface NativeTrackAnalysisOptions {

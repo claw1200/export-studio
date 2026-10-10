@@ -104,6 +104,7 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  audio.stop()
   if (process.platform !== 'darwin') app.quit()
 })
 

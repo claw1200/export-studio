@@ -59,7 +59,9 @@ export class AudioBridge {
   stop(): void {
     if (this.ticker) clearInterval(this.ticker)
     this.ticker = null
+    const engine = this.engine
     this.engine = null
+    engine?.close()
   }
 
   /** The engine, opening the output device on first use rather than at launch. */

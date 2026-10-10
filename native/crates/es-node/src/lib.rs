@@ -98,7 +98,7 @@ fn deck_index(deck: u32) -> usize {
 
 #[napi]
 pub struct AudioEngine {
-    engine: Engine,
+    engine: Option<Engine>,
 }
 
 #[napi]
@@ -121,106 +121,152 @@ impl AudioEngine {
         });
         let engine = Engine::new(decks.max(1) as usize, &events)
             .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-        Ok(Self { engine })
+        Ok(Self {
+            engine: Some(engine),
+        })
+    }
+
+    /// Stops playback and drops the device and decode threads. Further commands do nothing.
+    #[napi]
+    pub fn close(&mut self) {
+        self.engine.take();
+    }
+
+    fn engine(&self) -> Option<&Engine> {
+        self.engine.as_ref()
     }
 
     #[napi(getter)]
     pub fn sample_rate(&self) -> u32 {
-        self.engine.sample_rate()
+        self.engine().map(|e| e.sample_rate()).unwrap_or(0)
     }
 
     #[napi]
     pub fn load(&self, deck: u32, path: String, request: f64) {
-        self.engine
-            .load(deck_index(deck), Path::new(&path), request.max(1.0) as u64);
+        let Some(engine) = self.engine() else {
+            return;
+        };
+        engine.load(deck_index(deck), Path::new(&path), request.max(1.0) as u64);
     }
 
     #[napi]
     pub fn unload(&self, deck: u32) {
-        self.engine.unload(deck_index(deck));
+        if let Some(engine) = self.engine() {
+            engine.unload(deck_index(deck));
+        }
     }
 
     #[napi]
     pub fn play(&self, deck: u32) {
-        self.engine.play(deck_index(deck));
+        if let Some(engine) = self.engine() {
+            engine.play(deck_index(deck));
+        }
     }
 
     #[napi]
     pub fn pause(&self, deck: u32) {
-        self.engine.pause(deck_index(deck));
+        if let Some(engine) = self.engine() {
+            engine.pause(deck_index(deck));
+        }
     }
 
     #[napi]
     pub fn seek(&self, deck: u32, ms: f64) {
-        self.engine.seek(deck_index(deck), ms);
+        if let Some(engine) = self.engine() {
+            engine.seek(deck_index(deck), ms);
+        }
     }
 
     #[napi]
     pub fn stop_at(&self, deck: u32, ms: f64) {
-        self.engine.stop_at(deck_index(deck), ms);
+        if let Some(engine) = self.engine() {
+            engine.stop_at(deck_index(deck), ms);
+        }
     }
 
     #[napi]
     pub fn scrub_begin(&self, deck: u32) {
-        self.engine.scrub_begin(deck_index(deck));
+        if let Some(engine) = self.engine() {
+            engine.scrub_begin(deck_index(deck));
+        }
     }
 
     /// `at` is the pointer event's timestamp in ms, from which the scrub's speed is measured.
     #[napi]
     pub fn scrub_to(&self, deck: u32, ms: f64, at: f64) {
-        self.engine.scrub_to(deck_index(deck), ms, at);
+        if let Some(engine) = self.engine() {
+            engine.scrub_to(deck_index(deck), ms, at);
+        }
     }
 
     #[napi]
     pub fn scrub_end(&self, deck: u32) {
-        self.engine.scrub_end(deck_index(deck));
+        if let Some(engine) = self.engine() {
+            engine.scrub_end(deck_index(deck));
+        }
     }
 
     #[napi]
     pub fn set_loop(&self, deck: u32, in_ms: f64, out_ms: f64, enter: bool) {
-        self.engine.set_loop(deck_index(deck), in_ms, out_ms, enter);
+        if let Some(engine) = self.engine() {
+            engine.set_loop(deck_index(deck), in_ms, out_ms, enter);
+        }
     }
 
     #[napi]
     pub fn set_looping(&self, deck: u32, on: bool) {
-        self.engine.set_looping(deck_index(deck), on);
+        if let Some(engine) = self.engine() {
+            engine.set_looping(deck_index(deck), on);
+        }
     }
 
     #[napi]
     pub fn clear_loop(&self, deck: u32) {
-        self.engine.clear_loop(deck_index(deck));
+        if let Some(engine) = self.engine() {
+            engine.clear_loop(deck_index(deck));
+        }
     }
 
     /// Playback speed as a multiple of the file's.
     #[napi]
     pub fn set_tempo(&self, deck: u32, tempo: f64) {
-        self.engine.set_tempo(deck_index(deck), tempo);
+        if let Some(engine) = self.engine() {
+            engine.set_tempo(deck_index(deck), tempo);
+        }
     }
 
     #[napi]
     pub fn set_master_tempo(&self, deck: u32, on: bool) {
-        self.engine.set_master_tempo(deck_index(deck), on);
+        if let Some(engine) = self.engine() {
+            engine.set_master_tempo(deck_index(deck), on);
+        }
     }
 
     #[napi]
     pub fn set_volume(&self, gain: f64) {
-        self.engine.set_volume(gain as f32);
+        if let Some(engine) = self.engine() {
+            engine.set_volume(gain as f32);
+        }
     }
 
     #[napi]
     pub fn snapshot(&self, deck: u32) -> Option<DeckSnapshotJs> {
-        self.engine.snapshot(deck_index(deck)).map(Into::into)
+        self.engine()
+            .and_then(|e| e.snapshot(deck_index(deck)))
+            .map(Into::into)
     }
 
     #[napi]
     pub fn any_sounding(&self) -> bool {
-        self.engine.any_sounding()
+        self.engine().is_some_and(|e| e.any_sounding())
     }
 
     /// Lets the device go idle once nothing is sounding.
     #[napi]
     pub fn settle(&self) {
-        self.engine.settle();
+        if let Some(engine) = self.engine() {
+            engine.settle();
+        }
     }
 }
 

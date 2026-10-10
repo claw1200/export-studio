@@ -38,13 +38,14 @@ enum SinkCommand {
 pub struct CpalSink {
     sample_rate: u32,
     commands: Mutex<Sender<SinkCommand>>,
+    thread: Option<thread::JoinHandle<()>>,
 }
 
 impl CpalSink {
     pub fn open(render: Render) -> Result<Self> {
         let (ready_tx, ready_rx) = mpsc::channel::<Result<u32>>();
         let (tx, rx) = mpsc::channel::<SinkCommand>();
-        thread::Builder::new()
+        let thread = thread::Builder::new()
             .name("es-audio-device".into())
             .spawn(move || {
                 let stream = match build_stream(render) {
@@ -97,6 +98,7 @@ impl CpalSink {
         Ok(Self {
             sample_rate,
             commands: Mutex::new(tx),
+            thread: Some(thread),
         })
     }
 
@@ -109,6 +111,9 @@ impl CpalSink {
 impl Drop for CpalSink {
     fn drop(&mut self) {
         self.send(SinkCommand::Quit);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
     }
 }
 
