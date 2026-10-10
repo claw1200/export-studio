@@ -76,7 +76,7 @@ const audio: AudioApi = {
   },
   onTick: (listener) => subscribe<Tick>('deck:tick', listener),
   onEvent: (listener) => subscribe<DeckEvent>('deck:event', listener),
-  analyse: (trackId, bands) => ipcRenderer.invoke('wave:analyse', trackId, bands)
+  analyse: (trackId, bands, quality = 100) => ipcRenderer.invoke('wave:analyse', trackId, bands, quality)
 }
 
 contextBridge.exposeInMainWorld('api', api)

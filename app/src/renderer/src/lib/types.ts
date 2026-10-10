@@ -37,6 +37,8 @@ export interface Track {
   cueCount: number
   /** Phrase analysis is present, which is one of the CUE stars. */
   phrase: boolean
+  /** False for a file-list row that is not in the collection. Absent means it is. */
+  collected?: boolean
 }
 
 export type EditableField =
@@ -215,9 +217,34 @@ export interface RestoreResult {
   playlists: number
 }
 
+/** Whether a track-list view keeps tracks that sit in a normal playlist. */
+export type PlaylistMembership = 'any' | 'in' | 'out'
+
+export interface TrackViewFilters {
+  title: string
+  artist: string
+  album: string
+  genre: string
+  label: string
+  comment: string
+  bpmMin: number | null
+  bpmMax: number | null
+  /** Seconds. Null means that side of the range is open. */
+  durationMin: number | null
+  durationMax: number | null
+  /** Empty means any key. A track matches when its key is one of these. */
+  keys: string[]
+  playlist: PlaylistMembership
+}
+
+export type View =
+  | { id: string; name: string; type: 'tracks'; filters: TrackViewFilters }
+  | { id: string; name: string; type: 'files'; directory: string; showInCollection: boolean }
+
 export type Source =
   | { type: 'collection' }
   | { type: 'playlist'; id: string }
   | { type: 'history'; id: string }
   | { type: 'tag'; id: string }
   | { type: 'device'; volumeId: string; playlistId: string | null }
+  | { type: 'view'; id: string }

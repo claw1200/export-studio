@@ -1,5 +1,6 @@
 import {
   AudioWaveform,
+  FilePlus,
   FileSearch,
   Folder,
   FolderSearch,
@@ -23,10 +24,7 @@ import type { Player } from './player.svelte'
 import type { Track, TrackEdit } from './types'
 
 export type TrackMenuShortcut =
-  | 'library.editInfo'
-  | 'library.removeFromPlaylist'
-  | 'library.removeFromCollection'
-  | 'library.analyse'
+  'library.editInfo' | 'library.removeFromPlaylist' | 'library.removeFromCollection' | 'library.analyse'
 
 export interface TrackMenuActions {
   edit: (tracks: Track[]) => void
@@ -198,5 +196,71 @@ export function trackMenu(library: Library, player: Player, tracks: Track[], act
     },
     locked && SEPARATOR,
     locked && unlockEntry(library, player)
+  ])
+}
+
+/** Right-click menu for file-list rows that are not in the collection. */
+export function fileMenu(
+  library: Library,
+  player: Player,
+  tracks: Track[],
+  actions: {
+    importFiles: (paths: string[], playlistId: string | null) => void
+    importAndAnalyse: (paths: string[]) => void
+    deleteFiles: (tracks: Track[]) => void
+  },
+  includeUnlock = true
+): MenuEntry[] {
+  const paths = tracks.map((track) => track.path).filter(Boolean)
+  const single = tracks.length === 1 ? tracks[0] : null
+  const locked = !library.writable
+  const count = tracks.length
+  return tidy([
+    count > 1 && { kind: 'header', label: `${count} files` },
+    {
+      label: count === 1 ? 'Import' : `Import ${count} files`,
+      icon: FilePlus,
+      disabled: locked || !paths.length,
+      onselect: () => actions.importFiles(paths, null)
+    },
+    {
+      label: count === 1 ? 'Import and analyse' : `Import and analyse ${count} files`,
+      icon: AudioWaveform,
+      disabled: locked || !paths.length,
+      onselect: () => actions.importAndAnalyse(paths)
+    },
+    {
+      label: 'Add to playlist',
+      icon: ListPlus,
+      disabled: locked || !paths.length,
+      items: tidy([
+        {
+          label: 'New playlist',
+          icon: Plus,
+          onselect: () => {
+            void library.importFiles(paths).then((result) => {
+              if (result?.ids.length) void library.createPlaylist('root', false, result.ids)
+            })
+          }
+        },
+        SEPARATOR,
+        ...playlistItems(library.playlistTree, (id) => actions.importFiles(paths, id))
+      ])
+    },
+    single && {
+      label: REVEAL_LABEL,
+      icon: FolderSearch,
+      onselect: () => window.api.showItemInFolder(single.path)
+    },
+    SEPARATOR,
+    {
+      label: count === 1 ? 'Delete file…' : `Delete ${count} files…`,
+      icon: Trash2,
+      danger: true,
+      disabled: !paths.length,
+      onselect: () => actions.deleteFiles(tracks)
+    },
+    includeUnlock && locked && SEPARATOR,
+    includeUnlock && locked && unlockEntry(library, player)
   ])
 }

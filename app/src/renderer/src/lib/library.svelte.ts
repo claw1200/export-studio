@@ -3,7 +3,19 @@ import { browserPreviews } from './browserPreview.svelte'
 import { clearDetailCache } from './deck/session.svelte'
 import { cueStats, newestFirst, type SortKey, sortTracks, type TrackSort } from './library/sort'
 import { buildTree } from './library/tree'
-import type { Cue, ImportResult, LibraryInfo, Source, SyncProgress, Track, TrackEdit, TreeItem, Volume } from './types'
+import { loadViews, looseTrack, matchesTrack, pathKey, saveViews, type FileEntry } from './library/views'
+import type {
+  Cue,
+  ImportResult,
+  LibraryInfo,
+  Source,
+  SyncProgress,
+  Track,
+  TrackEdit,
+  TreeItem,
+  View,
+  Volume
+} from './types'
 
 export const TRACK_DRAG_TYPE = 'application/x-exportstudio-tracks'
 
@@ -31,6 +43,10 @@ export class Library {
   devices = $state.raw<Volume[]>([])
   devicePlaylists = $state.raw<Record<string, TreeItem[]>>({})
   deviceTracks = $state.raw<Track[]>([])
+  views = $state.raw<View[]>(loadViews())
+  playlistMembers = $state.raw<ReadonlySet<string>>(new Set())
+  /** Files under the open file view, in directory order. */
+  fileEntries = $state.raw<FileEntry[]>([])
   syncing = $state(false)
   syncProgress = $state<SyncProgress | null>(null)
   syncError = $state<string | null>(null)
@@ -65,7 +81,9 @@ export class Library {
   private importListeners = new Set<(tracks: Track[]) => void>()
   private removeListeners = new Set<(ids: string[]) => void>()
 
-  byId = $derived(new Map([...this.tracks, ...this.deviceTracks].map((t) => [t.id, t])))
+  viewById = $derived(new Map(this.views.map((view) => [view.id, view])))
+  private looseTracks = $derived(this.fileEntries.flatMap((entry) => (entry.loose ? [entry.loose] : [])))
+  byId = $derived(new Map([...this.tracks, ...this.deviceTracks, ...this.looseTracks].map((t) => [t.id, t])))
   playlistById = $derived(new Map(this.playlists.map((p) => [p.id, p])))
   playlistTree = $derived(buildTree(this.playlists))
   historyTree = $derived(buildTree(this.histories))
@@ -80,7 +98,7 @@ export class Library {
 
   private haystack = $derived(
     new Map(
-      [...this.tracks, ...this.deviceTracks].map((t) => [
+      [...this.tracks, ...this.deviceTracks, ...this.looseTracks].map((t) => [
         t.id,
         [t.title, t.artist, t.album, t.genre, t.label, t.remixer, t.comment, t.key, t.originalArtist]
           .join('\u0001')
@@ -110,6 +128,7 @@ export class Library {
     if (src.type === 'collection') return this.tracks
     if (src.type === 'device') return this.deviceTracks
     if (src.type === 'tag') return this.tracks.filter((t) => t.myTags.includes(src.id))
+    if (src.type === 'view') return this.viewTracks(src.id)
     if (!this.sourceIds) return []
     const out: Track[] = []
     for (const id of this.sourceIds) {
@@ -132,6 +151,7 @@ export class Library {
     }
     if (this.sort) return sortTracks(list, this.sort, this.positions)
     if (this.source.type === 'collection' || this.source.type === 'tag') return newestFirst(list)
+    if (this.source.type === 'view' && this.viewById.get(this.source.id)?.type === 'tracks') return newestFirst(list)
     return list
   })
 
@@ -159,6 +179,7 @@ export class Library {
         this.devicePlaylists[src.volumeId]?.find((item) => item.id === src.playlistId)?.name ?? volume?.name ?? 'Device'
       )
     }
+    if (src.type === 'view') return this.viewById.get(src.id)?.name ?? 'View'
     const list = src.type === 'playlist' ? this.playlists : src.type === 'history' ? this.histories : this.myTags
     return list.find((i) => i.id === src.id)?.name ?? ''
   })
@@ -355,6 +376,7 @@ export class Library {
     const fresh = new Map(rows.map((r) => [r.id, r]))
     this.tracks = this.tracks.map((t) => fresh.get(t.id) ?? t)
     for (const listener of this.trackListeners) listener(rows)
+    if (!this.sourceLoading) void this.fillFileGaps()
   }
 
   setMissing(id: string, missing: boolean): void {
@@ -378,6 +400,10 @@ export class Library {
 
   async updateTracks(ids: string[], fields: TrackEdit): Promise<boolean> {
     if (!ids.length || !Object.keys(fields).length) return true
+    if (ids.some((id) => id.startsWith('file:'))) {
+      this.notify('Import a file before editing it')
+      return false
+    }
     if (ids.some((id) => id.startsWith('usb:'))) {
       this.notify('Device tracks follow the playlist synced to that volume')
       return false
@@ -421,26 +447,43 @@ export class Library {
    * Import files and folders into the collection. With a playlist they are added to it too, at the
    * end or just before `beforeId` when that is given.
    */
-  async importFiles(paths: string[], playlistId: string | null = null, beforeId?: string | null): Promise<void> {
-    if (!paths.length) return
-    if (!this.writable) return this.notify('Unlock editing to import tracks')
-    if (this.importing) return this.notify('Wait for the current import to finish')
+  async importFiles(
+    paths: string[],
+    playlistId: string | null = null,
+    beforeId?: string | null
+  ): Promise<ImportResult | null> {
+    if (!paths.length) return null
+    if (!this.writable) {
+      this.notify('Unlock editing to import tracks')
+      return null
+    }
+    if (this.importing) {
+      this.notify('Wait for the current import to finish')
+      return null
+    }
     this.importing = true
     try {
       const files = await window.api.expandPaths(paths)
-      if (!files.length) return this.notify('No audio files that rekordbox can import')
+      if (!files.length) {
+        this.notify('No audio files that rekordbox can import')
+        return null
+      }
       const result = await this.edit(() => api.importTracks(files, playlistId, this.importArtwork))
-      if (!result) return
+      if (!result) return null
       const known = new Set(this.tracks.map((t) => t.id))
       const fresh = result.tracks.filter((t) => !known.has(t.id))
       if (fresh.length) this.tracks = [...this.tracks, ...fresh]
       this.applyTracks(result.tracks.filter((t) => known.has(t.id)))
+      this.adoptFileImports(result.ids)
       if (playlistId && result.playlist) {
         this.applyPlaylistIds(playlistId, result.playlist)
         if (beforeId !== undefined && result.ids.length) await this.moveInPlaylist(playlistId, result.ids, beforeId)
+        await this.refreshMembers()
       }
+      void this.fillFileGaps()
       this.notify(this.importSummary(result, playlistId))
       if (result.tracks.length) for (const listener of this.importListeners) listener(result.tracks)
+      return result
     } finally {
       this.importing = false
     }
@@ -488,6 +531,8 @@ export class Library {
     this.selection = new Set([...this.selection].filter((id) => !gone.has(id)))
     if (this.selectedId && gone.has(this.selectedId)) this.selectedId = null
     for (const listener of this.removeListeners) listener(result.removed)
+    await this.refreshMembers()
+    void this.fillFileGaps()
     const count = gone.size === 1 ? 'one track' : `${gone.size} tracks`
     if (trash && paths.length) {
       const failed = await window.api.trash(paths)
@@ -502,6 +547,10 @@ export class Library {
   }
 
   async addToPlaylist(playlistId: string, ids: string[]): Promise<void> {
+    if (ids.some((id) => id.startsWith('file:'))) {
+      this.notify('Import a file before adding it to a playlist')
+      return
+    }
     if (ids.some((id) => id.startsWith('usb:'))) {
       this.notify('Device tracks stay on the volume')
       return
@@ -510,13 +559,17 @@ export class Library {
     const result = await this.edit(() => api.addToPlaylist(playlistId, ids))
     if (!result) return
     this.applyPlaylistIds(playlistId, result)
+    await this.refreshMembers()
     const name = this.playlistById.get(playlistId)?.name ?? 'the playlist'
     if (result.length === before) this.notify(`Already in ${name}`)
   }
 
   async removeFromPlaylist(playlistId: string, ids: string[]): Promise<void> {
     const result = await this.edit(() => api.removeFromPlaylist(playlistId, ids))
-    if (result) this.applyPlaylistIds(playlistId, result)
+    if (result) {
+      this.applyPlaylistIds(playlistId, result)
+      await this.refreshMembers()
+    }
   }
 
   /** Move tracks so they sit just before `beforeId`, or at the end when it is null. */
@@ -540,6 +593,7 @@ export class Library {
     if (!result) return null
     this.playlists = result.playlists
     this.renamingId = result.id
+    if (trackIds.length) await this.refreshMembers()
     return result.id
   }
 
@@ -554,7 +608,10 @@ export class Library {
 
   async deletePlaylist(id: string): Promise<void> {
     const result = await this.edit(() => api.deletePlaylist(id))
-    if (result) this.applyPlaylists(result)
+    if (result) {
+      this.applyPlaylists(result)
+      await this.refreshMembers()
+    }
   }
 
   async setTag(tagId: string, ids: string[], on: boolean): Promise<void> {
@@ -563,16 +620,18 @@ export class Library {
   }
 
   private async refreshContents(): Promise<void> {
-    const [tracks, playlists, histories, myTags] = await Promise.all([
+    const [tracks, playlists, histories, myTags, members] = await Promise.all([
       api.tracks(),
       api.playlists(),
       api.histories(),
-      api.myTags()
+      api.myTags(),
+      api.playlistMembers()
     ])
     this.tracks = tracks
     this.playlists = playlists
     this.histories = histories
     this.myTags = myTags
+    this.playlistMembers = new Set(members)
     this.changed = false
     await this.setSource(this.source)
   }
@@ -635,6 +694,33 @@ export class Library {
     }
   }
 
+  saveView(view: View): void {
+    const next = this.views.some((item) => item.id === view.id)
+      ? this.views.map((item) => (item.id === view.id ? view : item))
+      : [...this.views, view]
+    this.views = next
+    saveViews(next)
+    if (this.isSource({ type: 'view', id: view.id })) void this.setSource({ type: 'view', id: view.id })
+  }
+
+  deleteView(id: string): void {
+    this.views = this.views.filter((view) => view.id !== id)
+    saveViews(this.views)
+    if (this.isSource({ type: 'view', id })) void this.setSource({ type: 'collection' })
+  }
+
+  /** Drop files that were moved to the Trash from the open file view. */
+  dropFiles(paths: string[]): void {
+    const gone = new Set(paths.map((path) => pathKey(path)))
+    const ids = new Set(
+      this.fileEntries.flatMap((entry) => (gone.has(pathKey(entry.path)) && entry.loose ? [entry.loose.id] : []))
+    )
+    this.fileEntries = this.fileEntries.filter((entry) => !gone.has(pathKey(entry.path)))
+    if (!ids.size) return
+    this.selection = new Set([...this.selection].filter((id) => !ids.has(id)))
+    if (this.selectedId && ids.has(this.selectedId)) this.selectedId = null
+  }
+
   async setSource(source: Source): Promise<void> {
     const token = ++this.sourceToken
     if (!this.isSource(source)) {
@@ -645,10 +731,25 @@ export class Library {
     if (source.type === 'collection' || source.type === 'tag') {
       this.sourceIds = null
       this.deviceTracks = []
+      this.fileEntries = []
+      this.sourceLoading = false
+      return
+    }
+    if (source.type === 'view') {
+      this.sourceIds = null
+      this.deviceTracks = []
+      const view = this.viewById.get(source.id)
+      if (!view || view.type === 'tracks') {
+        this.fileEntries = []
+        this.sourceLoading = false
+        return
+      }
+      await this.loadFileView(view.directory, view.showInCollection, token)
       return
     }
     if (source.type === 'device') {
       this.sourceIds = null
+      this.fileEntries = []
       this.sourceLoading = true
       try {
         const rows = await api.usbTracks(source.volumeId, source.playlistId)
@@ -664,6 +765,7 @@ export class Library {
       return
     }
     this.deviceTracks = []
+    this.fileEntries = []
     this.sourceLoading = true
     try {
       const ids = source.type === 'playlist' ? await api.playlistTracks(source.id) : await api.historyTracks(source.id)
@@ -678,6 +780,122 @@ export class Library {
     if (!cur || cur.key !== key) this.sort = { key, dir: 1 }
     else if (cur.dir === 1) this.sort = { key, dir: -1 }
     else this.sort = null
+  }
+
+  private tracksByPath(): Map<string, Track> {
+    const out = new Map<string, Track>()
+    for (const track of this.tracks) {
+      if (track.path) out.set(pathKey(track.path), track)
+    }
+    return out
+  }
+
+  private viewTracks(id: string): Track[] {
+    const view = this.viewById.get(id)
+    if (!view) return []
+    if (view.type === 'tracks') {
+      return this.tracks.filter((track) => matchesTrack(track, view.filters, this.playlistMembers.has(track.id)))
+    }
+    const byPath = this.tracksByPath()
+    const out: Track[] = []
+    for (const entry of this.fileEntries) {
+      const match = byPath.get(pathKey(entry.path))
+      if (match) {
+        if (view.showInCollection) out.push(match)
+      } else if (entry.loose) out.push(entry.loose)
+    }
+    return out
+  }
+
+  private async refreshMembers(): Promise<void> {
+    try {
+      this.playlistMembers = new Set(await api.playlistMembers())
+    } catch {
+      // The previous set stays. The next library refresh replaces it.
+    }
+  }
+
+  /** Point a file-view selection at the collection row once that file has been imported. */
+  private adoptFileImports(ids: string[]): void {
+    if (!this.fileEntries.length || !ids.length) return
+    const imported = new Map<string, string>()
+    for (const id of ids) {
+      const track = this.byId.get(id)
+      if (track?.path) imported.set(pathKey(track.path), id)
+    }
+    const remap = new Map<string, string>()
+    for (const entry of this.fileEntries) {
+      const id = imported.get(pathKey(entry.path))
+      if (id && entry.loose) remap.set(entry.loose.id, id)
+    }
+    if (!remap.size) return
+    if (this.selectedId && remap.has(this.selectedId)) this.selectedId = remap.get(this.selectedId) ?? this.selectedId
+    this.selection = new Set([...this.selection].map((id) => remap.get(id) ?? id))
+  }
+
+  private async loadFileView(directory: string, showInCollection: boolean, token: number): Promise<void> {
+    this.sourceLoading = true
+    this.fileEntries = []
+    try {
+      const files = await window.api.expandPaths([directory])
+      if (token !== this.sourceToken) return
+      const byPath = this.tracksByPath()
+      const entries: FileEntry[] = []
+      const pending: string[] = []
+      for (const path of files) {
+        const match = byPath.get(pathKey(path))
+        if (match) {
+          if (showInCollection) entries.push({ path, loose: null })
+        } else {
+          entries.push({ path, loose: null })
+          pending.push(path)
+        }
+      }
+      if (token !== this.sourceToken) return
+      this.fileEntries = entries
+      await this.readLoosePaths(pending, token)
+    } catch (e) {
+      if (token === this.sourceToken) {
+        this.fileEntries = []
+        this.notify((e as Error).message)
+      }
+    } finally {
+      if (token === this.sourceToken) this.sourceLoading = false
+    }
+  }
+
+  private async readLoosePaths(paths: string[], token: number): Promise<void> {
+    const batch = 40
+    for (let index = 0; index < paths.length; index += batch) {
+      if (token !== this.sourceToken) return
+      const chunk = paths.slice(index, index + batch)
+      let rows: Track[]
+      try {
+        rows = (await api.readFiles(chunk)).map((row, i) => looseTrack(chunk[i], row))
+      } catch (e) {
+        this.notify((e as Error).message)
+        rows = chunk.map((path) => looseTrack(path))
+      }
+      if (token !== this.sourceToken) return
+      const byPath = new Map(rows.map((row) => [pathKey(row.path), row]))
+      this.fileEntries = this.fileEntries.map((entry) => {
+        const loose = byPath.get(pathKey(entry.path))
+        return loose ? { ...entry, loose } : entry
+      })
+    }
+  }
+
+  /** Read tags for file-view paths that have left the collection. */
+  private async fillFileGaps(): Promise<void> {
+    if (this.source.type !== 'view') return
+    const view = this.viewById.get(this.source.id)
+    if (view?.type !== 'files') return
+    const token = this.sourceToken
+    const byPath = this.tracksByPath()
+    const missing = this.fileEntries
+      .filter((entry) => !entry.loose && !byPath.has(pathKey(entry.path)))
+      .map((entry) => entry.path)
+    if (missing.length) await this.readLoosePaths(missing, token)
   }
 
   isSource(source: Source): boolean {

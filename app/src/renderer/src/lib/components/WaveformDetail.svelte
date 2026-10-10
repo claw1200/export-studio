@@ -67,9 +67,9 @@
       canvas.width,
       canvas.height,
       window.devicePixelRatio || 1,
-      player.display.quality > 0 ? player.display.samples : null,
-      player.display.quality,
-      player.display.fallBlocks
+      player.display.paintSamples,
+      player.display.paintQuality,
+      player.display.paintFall
     )
   }
 

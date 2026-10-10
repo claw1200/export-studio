@@ -148,6 +148,39 @@ def _read_vorbis(audio) -> tuple[dict, bytes | None]:
     return fields, front.data if front else None
 
 
+def _bpm(text: str) -> float:
+    match = re.match(r"\s*(\d+(?:\.\d+)?)", text or "")
+    if not match:
+        return 0.0
+    value = float(match.group(1))
+    return value if 0 < value < 1000 else 0.0
+
+
+def _vorbis_value(tags, *names: str) -> str:
+    folded = {str(key).lower(): value for key, value in tags.items()}
+    for name in names:
+        if name.lower() in folded:
+            return _first_text(folded[name.lower()])
+    return ""
+
+
+def _musical(audio) -> tuple[float, str]:
+    """BPM and key written in the file's own tags. Import does not use these."""
+    tags = getattr(audio, "tags", None)
+    if not tags:
+        return 0.0, ""
+    if isinstance(audio, MP4):
+        tempo = tags.get("tmpo")
+        bpm = float(tempo[0]) if tempo else 0.0
+        key = _first_text(tags.get("----:com.apple.iTunes:initialkey")) or _first_text(tags.get("\xa9key"))
+        return (bpm if 0 < bpm < 1000 else 0.0), key
+    if isinstance(audio, FLAC):
+        return _bpm(_vorbis_value(tags, "BPM")), _vorbis_value(tags, "INITIALKEY", "KEY")
+    if isinstance(tags, ID3):
+        return _bpm(_first_text(tags.get("TBPM"))), _first_text(tags.get("TKEY"))
+    return 0.0, ""
+
+
 def read(path: Path) -> dict:
     """Read the track fields, stream info and front cover from an audio file's own tags."""
     audio = open_audio(path)
@@ -167,6 +200,7 @@ def read(path: Path) -> dict:
         if name in fields:
             fields[name] = _number(fields[name])
     info = audio.info
+    bpm, key = _musical(audio)
     return {
         "fields": fields,
         "artwork": art,
@@ -174,7 +208,95 @@ def read(path: Path) -> dict:
         "bitrate": int(round((getattr(info, "bitrate", 0) or 0) / 1000)),
         "sampleRate": int(getattr(info, "sample_rate", 0) or 0),
         "bitDepth": int(getattr(info, "bits_per_sample", 0) or 0),
+        "bpm": bpm,
+        "key": key,
     }
+
+
+def _empty_browse(path: Path) -> dict:
+    suffix = path.suffix.lstrip(".").upper()
+    if suffix == "AIF":
+        suffix = "AIFF"
+    size = path.stat().st_size if path.is_file() else 0
+    return {
+        "title": path.stem,
+        "artist": "",
+        "album": "",
+        "genre": "",
+        "label": "",
+        "remixer": "",
+        "originalArtist": "",
+        "composer": "",
+        "key": "",
+        "bpm": 0,
+        "duration": 0,
+        "rating": 0,
+        "color": 0,
+        "comment": "",
+        "year": 0,
+        "dateAdded": "",
+        "dateCreated": "",
+        "playCount": 0,
+        "bitrate": 0,
+        "sampleRate": 0,
+        "bitDepth": 0,
+        "fileType": suffix,
+        "path": str(path).replace("\\", "/"),
+        "missing": not path.is_file(),
+        "streaming": False,
+        "fileSize": size,
+        "hasArtwork": False,
+        "trackNo": 0,
+        "analysed": False,
+        "myTags": [],
+        "cueStars": 0,
+        "cueCount": 0,
+        "phrase": False,
+        "collected": False,
+    }
+
+
+def browse(path: Path) -> dict:
+    """Track-shaped metadata for a file that is not in the collection.
+
+    Artwork bytes stay out of the result. BPM and key come from the file's tags.
+    """
+    row = _empty_browse(path)
+    try:
+        info = read(path)
+    except Exception:
+        return row
+    fields = info["fields"]
+    row.update(
+        {
+            "title": fields.get("title") or path.stem,
+            "artist": fields.get("artist") or "",
+            "album": fields.get("album") or "",
+            "genre": fields.get("genre") or "",
+            "label": fields.get("label") or "",
+            "remixer": fields.get("remixer") or "",
+            "originalArtist": fields.get("originalArtist") or "",
+            "composer": fields.get("composer") or "",
+            "comment": fields.get("comment") or "",
+            "year": fields.get("year") or 0,
+            "trackNo": fields.get("trackNo") or 0,
+            "key": info.get("key") or "",
+            "bpm": info.get("bpm") or 0,
+            "duration": info["length"],
+            "bitrate": info["bitrate"],
+            "sampleRate": info["sampleRate"],
+            "bitDepth": info["bitDepth"],
+            "hasArtwork": False,
+        }
+    )
+    return row
+
+
+def browse_many(paths: list[str]) -> list[dict]:
+    """Read tags for a batch of files. Callers keep batches small so the engine lock is brief."""
+    if not isinstance(paths, list):
+        raise ValueError("paths must be a list")
+    return [browse(Path(path)) for path in paths[:80]]
 
 
 def write(path: Path, fields: dict) -> None:

@@ -283,6 +283,8 @@ pub struct WaveJs {
 pub struct Analyse {
     path: String,
     bands: bool,
+    /// 1–100. 100 is the full scan; lower values thin the waveform so a preview finishes quickly.
+    quality: u32,
 }
 
 impl Task for Analyse {
@@ -290,7 +292,7 @@ impl Task for Analyse {
     type JsValue = Option<WaveJs>;
 
     fn compute(&mut self) -> Result<Self::Output> {
-        es_wave::analyse(Path::new(&self.path), self.bands)
+        es_wave::analyse(Path::new(&self.path), self.bands, self.quality)
             .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))
     }
 
@@ -307,8 +309,12 @@ impl Task for Analyse {
 
 /// Decodes and analyses a file off the main thread. Null when it is too short to draw.
 #[napi(ts_return_type = "Promise<WaveJs | null>")]
-pub fn analyse(path: String, bands: bool) -> AsyncTask<Analyse> {
-    AsyncTask::new(Analyse { path, bands })
+pub fn analyse(path: String, bands: bool, quality: u32) -> AsyncTask<Analyse> {
+    AsyncTask::new(Analyse {
+        path,
+        bands,
+        quality,
+    })
 }
 
 #[napi(object)]

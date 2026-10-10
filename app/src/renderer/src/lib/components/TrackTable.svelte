@@ -1,6 +1,6 @@
 <script lang="ts">
   import { flushSync } from 'svelte'
-  import { ArrowUp, ArrowDown, Star, AudioLines, Music } from '@lucide/svelte'
+  import { ArrowUp, ArrowDown, Star, AudioLines, Music, X } from '@lucide/svelte'
   import { browserPreviews } from '$lib/browserPreview.svelte'
   import { getApp } from '$lib/context'
   import { artworkUrl } from '$lib/api'
@@ -9,9 +9,10 @@
   import { TRACK_DRAG_TYPE } from '$lib/library.svelte'
   import { droppedPaths, isFileDrag } from '$lib/library/drop'
   import type { SortKey } from '$lib/library/sort'
-  import { menuAt, type MenuEntry, type MenuRequest } from '$lib/menu'
-  import { trackMenu, type TrackMenuShortcut } from '$lib/trackMenu'
+  import { menuAt, tidy, type MenuEntry, type MenuRequest } from '$lib/menu'
+  import { fileMenu, trackMenu, type TrackMenuShortcut } from '$lib/trackMenu'
   import type { Track } from '$lib/types'
+  import ConfirmDialog from './ConfirmDialog.svelte'
   import ContextMenu from './ContextMenu.svelte'
   import WaveformThumb from './WaveformThumb.svelte'
 
@@ -31,7 +32,7 @@
     onanalyse: (tracks: Track[]) => void
   } = $props()
 
-  const { library, player, keybinds } = getApp()
+  const { library, player, keybinds, analysis } = getApp()
   const isMac = window.api.platform === 'darwin'
 
   type Column = {
@@ -315,7 +316,7 @@
 
   $effect(() => {
     if (!wantsPreview) return
-    const ids = rows.map((track) => track.id)
+    const ids = rows.filter((track) => track.collected !== false).map((track) => track.id)
     void browserPreviews.revision
     browserPreviews.request(ids)
   })
@@ -356,6 +357,19 @@
   }
 
   let rowMenu = $state<MenuRequest | null>(null)
+  let deletingFiles = $state<Track[] | null>(null)
+  const trashName = window.api.platform === 'win32' ? 'Recycle Bin' : 'Trash'
+
+  async function trashFiles(tracks: Track[]): Promise<void> {
+    const paths = tracks.map((track) => track.path).filter(Boolean)
+    const failed = await window.api.trash(paths)
+    const gone = new Set(failed)
+    library.dropFiles(paths.filter((path) => !gone.has(path)))
+    if (failed.length) {
+      const files = failed.length === 1 ? 'one file' : `${failed.length} files`
+      library.notify(`Couldn’t move ${files} to the ${trashName}`)
+    }
+  }
 
   function shortcut(id: TrackMenuShortcut): string | undefined {
     const chord = keybinds.bindings[id][0]
@@ -366,16 +380,41 @@
     e.preventDefault()
     pendingCollapse = null
     if (!library.selection.has(track.id)) onselect(track)
+    const selected = library.selectedTracks
+    const loose = selected.filter((item) => item.collected === false)
+    const owned = selected.filter((item) => item.collected !== false)
     rowMenu = menuAt(
       e,
-      'Track',
-      trackMenu(library, player, library.selectedTracks, {
-        edit: onedit,
-        autoRelocate: onautorelocate,
-        remove: onremove,
-        analyse: onanalyse,
-        shortcut
-      })
+      loose.length && !owned.length ? 'File' : 'Track',
+      tidy([
+        ...(owned.length
+          ? trackMenu(library, player, owned, {
+              edit: onedit,
+              autoRelocate: onautorelocate,
+              remove: onremove,
+              analyse: onanalyse,
+              shortcut
+            })
+          : []),
+        owned.length && loose.length && { kind: 'separator' },
+        ...(loose.length
+          ? fileMenu(
+              library,
+              player,
+              loose,
+              {
+                importFiles: (paths, playlistId) => void library.importFiles(paths, playlistId),
+                importAndAnalyse: (paths) => {
+                  void library.importFiles(paths).then((result) => {
+                    if (result?.tracks.length) analysis.analyse(result.tracks)
+                  })
+                },
+                deleteFiles: (files) => (deletingFiles = files)
+              },
+              owned.length === 0
+            )
+          : [])
+      ])
     )
   }
 
@@ -387,10 +426,17 @@
   const AUTOSCROLL_STEP = 14
 
   function dragStart(e: DragEvent, track: Track): void {
-    if (library.source.type === 'device') return
+    if (library.source.type === 'device' || track.collected === false) {
+      e.preventDefault()
+      return
+    }
     pendingCollapse = null
     if (!library.selection.has(track.id)) onselect(track)
-    const ids = library.selectedTracks.map((t) => t.id)
+    const ids = library.selectedTracks.filter((item) => item.collected !== false).map((item) => item.id)
+    if (!ids.length) {
+      e.preventDefault()
+      return
+    }
     library.dragging = ids
     const transfer = e.dataTransfer
     if (!transfer) return
@@ -544,18 +590,24 @@
     {@const row = browserPreviews.preview(track.id)}
     <WaveformThumb {track} wave={row?.wave ?? null} cues={row?.cues ?? []} />
   {:else if column.id === 'cue'}
-    {@const preview = browserPreviews.preview(track.id)}
-    {@const labels = CUE_STARS.filter((star) => preview?.[star.key]).map((star) => star.label)}
-    {#if labels.length}
-      <span class="flex items-center gap-0.5" aria-label={labels.join(', ')} title={labels.join(', ')}>
-        {#each CUE_STARS as star (star.key)}
-          {#if preview?.[star.key]}
-            <span class="inline-flex" style:color={star.color} aria-hidden="true">
-              <Star class="size-3.5 fill-current" strokeWidth={0} />
-            </span>
-          {/if}
-        {/each}
+    {#if track.collected === false}
+      <span class="text-faint" title="Not in the collection" aria-label="Not in the collection">
+        <X class="size-3.5" />
       </span>
+    {:else}
+      {@const preview = browserPreviews.preview(track.id)}
+      {@const labels = CUE_STARS.filter((star) => preview?.[star.key]).map((star) => star.label)}
+      {#if labels.length}
+        <span class="flex items-center gap-0.5" aria-label={labels.join(', ')} title={labels.join(', ')}>
+          {#each CUE_STARS as star (star.key)}
+            {#if preview?.[star.key]}
+              <span class="inline-flex" style:color={star.color} aria-hidden="true">
+                <Star class="size-3.5 fill-current" strokeWidth={0} />
+              </span>
+            {/if}
+          {/each}
+        </span>
+      {/if}
     {/if}
   {:else if column.id === 'rating'}
     <span class="flex gap-px">
@@ -690,7 +742,7 @@
               tabindex="-1"
               aria-selected={selected}
               title={track.missing ? 'Audio file not found. Right-click to relocate it.' : undefined}
-              draggable={library.source.type !== 'device'}
+              draggable={library.source.type !== 'device' && track.collected !== false}
               onmousedown={(e) => rowMousedown(e, track)}
               onmouseup={(e) => rowMouseup(e, track)}
               oncontextmenu={(e) => rowContextMenu(e, track)}
@@ -746,6 +798,20 @@
 
   {#if rowMenu}
     <ContextMenu menu={rowMenu} onclose={() => (rowMenu = null)} />
+  {/if}
+
+  {#if deletingFiles}
+    {@const files = deletingFiles}
+    <ConfirmDialog
+      title={files.length === 1 ? 'Delete file' : 'Delete files'}
+      message={files.length === 1
+        ? `Move “${files[0].title}” to the ${trashName}? This file is not in the collection.`
+        : `Move ${files.length} files to the ${trashName}? They are not in the collection.`}
+      confirmLabel={`Move to ${trashName}`}
+      danger
+      onconfirm={() => void trashFiles(files)}
+      onclose={() => (deletingFiles = null)}
+    />
   {/if}
 
   <div

@@ -73,5 +73,6 @@ export interface AudioApi {
   send(command: DeckCommand): number
   onTick(listener: (tick: Tick) => void): () => void
   onEvent(listener: (event: DeckEvent) => void): () => void
-  analyse(trackId: string, bands: boolean): Promise<WaveAnalysis | null>
+  /** `quality` is 1–100. 100 is the full scan; lower values thin it. Omitted means the full scan. */
+  analyse(trackId: string, bands: boolean, quality?: number): Promise<WaveAnalysis | null>
 }

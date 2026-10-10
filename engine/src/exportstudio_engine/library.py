@@ -554,6 +554,23 @@ class Library:
         )
         return [cid for (cid,) in self.db.session.execute(stmt)]
 
+    def playlist_member_ids(self) -> list[str]:
+        """Content ids that sit in at least one normal playlist. Smart playlists are not counted."""
+        SP, P, C = t.DjmdSongPlaylist, t.DjmdPlaylist, t.DjmdContent
+        stmt = (
+            select(SP.ContentID)
+            .join(P, P.ID == SP.PlaylistID)
+            .join(C, C.ID == SP.ContentID)
+            .where(
+                P.Attribute == NORMAL_PLAYLIST,
+                P.ID.notin_(HIDDEN_PLAYLISTS),
+                C.rb_local_deleted == 0,
+                SP.rb_local_deleted == 0,
+            )
+            .distinct()
+        )
+        return [str(cid) for (cid,) in self.db.session.execute(stmt)]
+
     def histories(self) -> list[dict]:
         H, SH = t.DjmdHistory, t.DjmdSongHistory
         counts = self._counts(SH.HistoryID)

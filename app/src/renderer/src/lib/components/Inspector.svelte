@@ -20,10 +20,12 @@
 
   const { library, player } = getApp()
   const track = $derived(library.selected)
-  const editable = $derived(library.writable)
+  const loose = $derived(track?.collected === false)
+  const editable = $derived(library.writable && !loose)
+  const canEditSelection = $derived(library.writable && library.selectedTracks.some((item) => item.collected !== false))
   const MAX_NUMBER = 9999
 
-  const detailPromise = $derived(track ? loadDetail(track.id).then((d) => d.detail) : null)
+  const detailPromise = $derived(track && !loose ? loadDetail(track.id).then((d) => d.detail) : null)
 
   type Row = { label: string; value: string; field?: EditableField; numeric?: boolean }
 
@@ -87,9 +89,9 @@
       <span class="min-w-0 flex-1 truncate text-muted">{library.selectedTracks.length} tracks selected</span>
       <button
         class="flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium text-accent hover:bg-accent-soft disabled:pointer-events-none disabled:opacity-40"
-        disabled={!editable}
-        title={editable ? undefined : 'Unlock editing to change tracks'}
-        onclick={() => onedit(library.selectedTracks)}
+        disabled={!canEditSelection}
+        title={canEditSelection ? undefined : 'Unlock editing to change tracks'}
+        onclick={() => onedit(library.selectedTracks.filter((item) => item.collected !== false))}
       >
         <Pencil class="size-3" />
         Edit all
@@ -256,15 +258,19 @@
       </div>
     {/if}
 
-    {#await detailPromise}
-      {@render cues(null)}
+    {#if loose}
       {@render file()}
-    {:then detail}
-      {@render cues(player.detail?.id === detail.id ? player.detail : detail)}
-      {@render file()}
-    {:catch}
-      {@render file()}
-    {/await}
+    {:else}
+      {#await detailPromise}
+        {@render cues(null)}
+        {@render file()}
+      {:then detail}
+        {@render cues(player.detail?.id === detail?.id ? player.detail : detail)}
+        {@render file()}
+      {:catch}
+        {@render file()}
+      {/await}
+    {/if}
   {:else}
     <div class="grid h-full place-items-center p-6 text-center text-[12px] text-faint">
       Select a track to see its details
@@ -338,7 +344,9 @@
 {#snippet file()}
   {#if track}
     <div class="mt-auto border-t border-line-soft px-4 py-3">
-      {#if track.missing}
+      {#if track.collected === false}
+        <p class="mb-2 text-[11px] text-faint">Not in the collection</p>
+      {:else if track.missing}
         <p class="mb-2 flex items-center gap-1.5 text-[11px] text-danger">
           <AlertTriangle class="size-3.5" /> File missing on disk
         </p>

@@ -39,9 +39,17 @@ pub struct WaveRates {
 
 /// How many input samples each band and envelope entry covers, for a mono signal of `length`.
 pub fn wave_rates(length: usize, sample_rate: f64) -> WaveRates {
+    scaled_rates(length, sample_rate, 100)
+}
+
+/// `quality` is 1–100. 100 is the full scan; lower values thin the entries so a preview is cheap.
+fn scaled_rates(length: usize, sample_rate: f64, quality: u32) -> WaveRates {
+    let scale = quality.clamp(1, 100) as f64 / 100.0;
     let duration = length as f64 / sample_rate;
-    let band_rate = BAND_RATE.min(sample_rate).min(MAX_BAND_FRAMES / duration);
-    let env_rate = ENVELOPE_RATE.min(MAX_ENVELOPE_SAMPLES / duration);
+    let band_rate = (BAND_RATE * scale)
+        .min(sample_rate)
+        .min(MAX_BAND_FRAMES / duration);
+    let env_rate = (ENVELOPE_RATE * scale).min(MAX_ENVELOPE_SAMPLES / duration);
     let band_step = sample_rate / band_rate;
     let env_step = sample_rate / env_rate;
     WaveRates {
@@ -86,7 +94,24 @@ pub fn plan_wave(
     want_bands: bool,
     want_env: bool,
 ) -> Vec<ScanSpec> {
-    let rates = wave_rates(length, sample_rate);
+    plan_with(
+        length,
+        sample_rate,
+        parts,
+        want_bands,
+        want_env,
+        wave_rates(length, sample_rate),
+    )
+}
+
+fn plan_with(
+    length: usize,
+    sample_rate: f64,
+    parts: usize,
+    want_bands: bool,
+    want_env: bool,
+    rates: WaveRates,
+) -> Vec<ScanSpec> {
     let band_frames = if want_bands { rates.band_frames } else { 0 };
     let env_frames = if want_env { rates.env_frames } else { 0 };
     let slices = parts.min(band_frames.max(env_frames).max(1)).max(1);
@@ -325,12 +350,29 @@ pub struct Wave {
 
 /// Analyses mono samples in up to `parts` parts at once. None when the audio is too short to draw.
 pub fn build(mono: &[f32], sample_rate: f64, parts: usize, want_bands: bool) -> Option<Wave> {
-    let rates = wave_rates(mono.len(), sample_rate);
+    build_scaled(mono, sample_rate, parts, want_bands, 100)
+}
+
+fn build_scaled(
+    mono: &[f32],
+    sample_rate: f64,
+    parts: usize,
+    want_bands: bool,
+    quality: u32,
+) -> Option<Wave> {
+    let rates = scaled_rates(mono.len(), sample_rate, quality);
     if rates.env_frames < 2 {
         return None;
     }
     let want_bands = want_bands && rates.band_frames >= 2;
-    let specs = plan_wave(mono.len(), sample_rate, parts.max(1), want_bands, true);
+    let specs = plan_with(
+        mono.len(),
+        sample_rate,
+        parts.max(1),
+        want_bands,
+        true,
+        rates,
+    );
     let scanned: Vec<ScanOut> = specs
         .par_iter()
         .map(|spec| scan_part(spec, &mono[spec.origin..spec.to]))
@@ -377,7 +419,8 @@ pub fn mix_mono(interleaved: &[f32]) -> Vec<f32> {
 }
 
 /// Decodes `path` at its own sample rate, through the same decoder the deck plays, and analyses it.
-pub fn analyse(path: &Path, want_bands: bool) -> Result<Option<Wave>, DecodeError> {
+/// `quality` is a percent of the full scan. 0 and 100 are the full scan.
+pub fn analyse(path: &Path, want_bands: bool, quality: u32) -> Result<Option<Wave>, DecodeError> {
     let mut streamer = Streamer::open(path, 0)?;
     let rate = f64::from(streamer.output_rate());
     let mut mono = Vec::with_capacity(usize::try_from(streamer.total_frames()).unwrap_or(0));
@@ -389,5 +432,41 @@ pub fn analyse(path: &Path, want_bands: bool) -> Result<Option<Wave>, DecodeErro
         }
         mono.extend(mix_mono(&buffer[..frames * 2]));
     }
-    Ok(build(&mono, rate, rayon::current_num_threads(), want_bands))
+    let quality = if quality == 0 {
+        100
+    } else {
+        quality.clamp(1, 100)
+    };
+    Ok(build_scaled(
+        &mono,
+        rate,
+        rayon::current_num_threads(),
+        want_bands,
+        quality,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_quality_matches_the_fixed_rates() {
+        let full = wave_rates(44_100 * 60, 44_100.0);
+        let scaled = scaled_rates(44_100 * 60, 44_100.0, 100);
+        assert_eq!(full.env_frames, scaled.env_frames);
+        assert_eq!(full.band_frames, scaled.band_frames);
+        assert_eq!(full.env_step, scaled.env_step);
+        assert_eq!(full.band_step, scaled.band_step);
+    }
+
+    #[test]
+    fn two_percent_is_about_a_fiftieth() {
+        let full = wave_rates(44_100 * 60, 44_100.0);
+        let fast = scaled_rates(44_100 * 60, 44_100.0, 2);
+        let ratio = full.env_frames as f64 / fast.env_frames as f64;
+        assert!((40.0..60.0).contains(&ratio), "{ratio}");
+        let bands = full.band_frames as f64 / fast.band_frames as f64;
+        assert!((40.0..60.0).contains(&bands), "{bands}");
+    }
 }

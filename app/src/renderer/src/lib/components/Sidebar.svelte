@@ -17,6 +17,8 @@
     HardDrive,
     FilePlus,
     FolderInput,
+    FolderSearch,
+    ListFilter,
     Eject,
     LoaderCircle
   } from '@lucide/svelte'
@@ -25,10 +27,11 @@
   import { buildTree, type TreeNode } from '$lib/library/tree'
   import { menuAt, tidy, type MenuEntry, type MenuRequest } from '$lib/menu'
   import { SEPARATOR, unlockEntry } from '$lib/trackMenu'
-  import type { Source, Volume } from '$lib/types'
+  import type { Source, View, Volume } from '$lib/types'
   import ConfirmDialog from './ConfirmDialog.svelte'
   import ContextMenu from './ContextMenu.svelte'
   import SyncDialog from './SyncDialog.svelte'
+  import ViewDialog from './ViewDialog.svelte'
 
   let { onsource }: { onsource?: () => void } = $props()
 
@@ -200,6 +203,21 @@
   let menu = $state<MenuRequest | null>(null)
   let deleting = $state<TreeNode | null>(null)
   let syncing = $state<TreeNode | null>(null)
+  let viewDialog = $state<View | 'new' | null>(null)
+  let deletingView = $state<View | null>(null)
+
+  function viewsMenu(e: MouseEvent): void {
+    e.preventDefault()
+    menu = menuAt(e, 'Views', [{ label: 'New view', icon: Plus, onselect: () => (viewDialog = 'new') }])
+  }
+
+  function viewMenu(e: MouseEvent, view: View): void {
+    e.preventDefault()
+    menu = menuAt(e, 'View', [
+      { label: 'Edit', icon: Pencil, onselect: () => (viewDialog = view) },
+      { label: 'Delete', icon: Trash2, danger: true, onselect: () => (deletingView = view) }
+    ])
+  }
 
   function create(parentId: string, folder: boolean): void {
     if (parentId !== 'root') expanded.add(`playlist:${parentId}`)
@@ -532,6 +550,48 @@
     {/if}
   </div>
 
+  <div class="mt-4">
+    <div class="group/section flex items-center pr-1" role="presentation" oncontextmenu={viewsMenu}>
+      <button
+        class="flex flex-1 items-center gap-1 px-2 pb-1 text-[10.5px] font-semibold tracking-wider text-faint uppercase hover:text-muted"
+        onclick={() => toggleSection('views')}
+      >
+        <ChevronRight class={['size-3 transition-transform', sectionOpen('views') && 'rotate-90']} />
+        Views
+      </button>
+      <button
+        class="-mt-1 grid size-5 place-items-center rounded text-faint opacity-0 group-hover/section:opacity-100 hover:bg-hover hover:text-fg focus-visible:opacity-100"
+        aria-label="New view"
+        title="New view"
+        onclick={() => (viewDialog = 'new')}
+      >
+        <Plus class="size-3.5" />
+      </button>
+    </div>
+    {#if sectionOpen('views')}
+      {#each library.views as view (view.id)}
+        {@const active = library.isSource({ type: 'view', id: view.id })}
+        <button
+          class={[
+            'flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-[12.5px]',
+            active ? 'bg-select text-fg' : 'text-muted hover:bg-hover hover:text-fg'
+          ]}
+          onclick={() => setSource({ type: 'view', id: view.id })}
+          oncontextmenu={(e) => viewMenu(e, view)}
+        >
+          {#if view.type === 'files'}
+            <FolderSearch class="size-3.5 shrink-0 text-faint" />
+          {:else}
+            <ListFilter class="size-3.5 shrink-0 text-faint" />
+          {/if}
+          <span class="min-w-0 flex-1 truncate">{view.name || 'Untitled'}</span>
+        </button>
+      {:else}
+        <p class="px-2 py-1 text-[12px] text-faint">No views yet</p>
+      {/each}
+    {/if}
+  </div>
+
   {@render section('playlists', 'Playlists', library.playlistTree, 'playlist')}
   {@render section('tags', 'My Tag', library.tagTree, 'tag')}
   {@render section('histories', 'Histories', library.historyTree, 'history')}
@@ -556,4 +616,20 @@
 {#if syncing}
   {@const node = syncing}
   <SyncDialog playlistId={node.id} onclose={() => (syncing = null)} />
+{/if}
+
+{#if viewDialog}
+  <ViewDialog view={viewDialog === 'new' ? null : viewDialog} onclose={() => (viewDialog = null)} />
+{/if}
+
+{#if deletingView}
+  {@const view = deletingView}
+  <ConfirmDialog
+    title="Delete view"
+    message={`Delete the view “${view.name || 'Untitled'}”?`}
+    confirmLabel="Delete"
+    danger
+    onconfirm={() => library.deleteView(view.id)}
+    onclose={() => (deletingView = null)}
+  />
 {/if}

@@ -83,7 +83,7 @@ export interface NativeTrackAnalysis {
 
 export interface NativeModule {
   AudioEngine: new (decks: number, onEvent: (event: NativeDeckEvent) => void) => NativeEngine
-  analyse(path: string, bands: boolean): Promise<NativeWave | null>
+  analyse(path: string, bands: boolean, quality: number): Promise<NativeWave | null>
   analyseTrack(path: string, options: NativeTrackAnalysisOptions): Promise<NativeTrackAnalysis>
 }
 

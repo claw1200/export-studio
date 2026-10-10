@@ -7,6 +7,7 @@ import traceback
 
 from pathlib import Path
 
+from . import tags as file_tags
 from .backup import Backups
 from .library import WRITE_BLOCKED, Library, _rekordbox_db_path
 from .usb import browse
@@ -48,6 +49,8 @@ class Engine:
             "library.playlists": lambda: self.lib.playlists(),
             "library.histories": lambda: self.lib.histories(),
             "library.myTags": lambda: self.lib.my_tags(),
+            "library.playlistMembers": lambda: self.lib.playlist_member_ids(),
+            "files.read": lambda paths: file_tags.browse_many(paths),
             "playlist.tracks": lambda id: self.lib.playlist_tracks(id),
             "history.tracks": lambda id: self.lib.history_tracks(id),
             "track.detail": lambda id: self.track_detail(id),

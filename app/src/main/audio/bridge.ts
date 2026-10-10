@@ -53,7 +53,9 @@ export class AudioBridge {
       this.seq = Math.max(this.seq, seq)
       this.queueTick()
     })
-    ipcMain.handle('wave:analyse', (_e, trackId: string, bands: boolean) => this.analyse(trackId, bands))
+    ipcMain.handle('wave:analyse', (_e, trackId: string, bands: boolean, quality?: number) =>
+      this.analyse(trackId, bands, quality ?? 100)
+    )
   }
 
   stop(): void {
@@ -134,6 +136,14 @@ export class AudioBridge {
   }
 
   private async resolvePath(trackId: string): Promise<string | null> {
+    if (trackId.startsWith('file:')) {
+      try {
+        const path = decodeURIComponent(trackId.slice('file:'.length))
+        return path || null
+      } catch {
+        return null
+      }
+    }
     return this.library.call<string | null>('media.resolve', { kind: 'audio', id: trackId, size: '' })
   }
 
@@ -161,12 +171,12 @@ export class AudioBridge {
     this.queueTick()
   }
 
-  private async analyse(trackId: string, bands: boolean): Promise<WaveAnalysis | null> {
+  private async analyse(trackId: string, bands: boolean, quality = 100): Promise<WaveAnalysis | null> {
     if (!this.native) return null
     const path = await this.resolvePath(trackId).catch(() => null)
     if (!path) return null
     try {
-      const wave = await this.native.analyse(path, bands)
+      const wave = await this.native.analyse(path, bands, quality)
       if (!wave) return null
       return {
         rate: wave.rate,

@@ -18,7 +18,15 @@
   function paint(canvas: HTMLCanvasElement): void {
     if (!width || !height) return
     const ctx = setupCanvas(canvas, width, height)
-    if (player.waveform) drawOverview(ctx, player.waveform, player.display.mode, canvas.width, canvas.height)
+    if (player.waveform)
+      drawOverview(
+        ctx,
+        player.waveform,
+        player.display.mode,
+        canvas.width,
+        canvas.height,
+        player.display.prepared ? player.display.samples : null
+      )
     else ctx.clearRect(0, 0, canvas.width, canvas.height)
   }
 

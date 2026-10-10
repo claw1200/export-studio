@@ -39,6 +39,16 @@ export class TrackSession {
     this.waveform = null
     this.error = null
     this.editError = null
+    if (track.collected === false) {
+      this.detail = {
+        id: track.id,
+        cues: [],
+        beatgrid: null,
+        waveform: { rate: 1, rgb: null, threeBand: null, threeBandPreview: null, mono: null }
+      }
+      this.loading = false
+      return
+    }
     this.loading = true
     try {
       const { detail, waveform } = await loadDetail(track.id)
@@ -64,7 +74,7 @@ export class TrackSession {
 
   async refresh(): Promise<void> {
     const id = this.track?.id
-    if (!id) return
+    if (!id || this.track?.collected === false) return
     const token = this.token
     clearDetailCache()
     try {

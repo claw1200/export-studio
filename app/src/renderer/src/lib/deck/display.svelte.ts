@@ -12,12 +12,42 @@ export class WaveformDisplay {
   zoom = $state(Number(localStorage.getItem('waveformZoom')) || 1)
 
   private readonly waves = new WaveLoader()
+  private readonly trackId: () => string | null
+  private readonly isLoose: () => boolean
 
-  /** `trackId` is the loaded track, for the engine to analyse. */
-  constructor(private trackId: () => string | null) {}
+  /** `trackId` is the loaded track. `isLoose` is a file that is not in the collection. */
+  constructor(trackId: () => string | null, isLoose: () => boolean) {
+    this.trackId = trackId
+    this.isLoose = isLoose
+  }
 
   get samples(): WaveSamples | null {
     return this.waves.samples
+  }
+
+  /** True when the samples were generated at the resolution they should be drawn at. */
+  get prepared(): boolean {
+    return this.waves.prepared
+  }
+
+  /** Samples for the canvas. A loose file always draws its own; a collection track only while quality is on. */
+  get paintSamples(): WaveSamples | null {
+    if (this.prepared) return this.samples
+    return this.quality > 0 ? this.samples : null
+  }
+
+  /**
+   * Stride passed to the canvas. Loose samples are already as coarse as their quality, so every
+   * entry is drawn. Collection samples are a full scan, thinned here.
+   */
+  get paintQuality(): number {
+    return this.prepared ? 100 : this.quality
+  }
+
+  /** Fall for the samples on screen. The fast preview, and a loose file with quality off, use none. */
+  get paintFall(): number {
+    if (this.prepared && (this.waves.previewing || this.quality <= 0)) return 0
+    return this.fallBlocks
   }
 
   setMode(mode: WaveformMode): void {
@@ -33,7 +63,7 @@ export class WaveformDisplay {
     const wasOff = this.quality <= 0
     this.quality = q
     localStorage.setItem('waveQuality', String(q))
-    if (q <= 0 || wasOff) this.reload()
+    if (this.isLoose() || q <= 0 || wasOff) this.reload()
   }
 
   setFallBlocks(blocks: number): void {
@@ -51,7 +81,15 @@ export class WaveformDisplay {
   /** Fetches the samples for the loaded track, or drops them when they are not drawn. */
   reload(): void {
     const id = this.trackId()
-    if (!id || this.quality <= 0) this.waves.clear()
+    if (!id) {
+      this.waves.clear()
+      return
+    }
+    if (this.isLoose()) {
+      this.waves.loadLoose(id, this.mode === '3band', this.quality)
+      return
+    }
+    if (this.quality <= 0) this.waves.clear()
     else this.waves.load(id, this.mode === '3band')
   }
 }

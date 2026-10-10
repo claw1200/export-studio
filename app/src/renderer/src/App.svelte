@@ -131,17 +131,22 @@
   let removing = $state.raw<Track[] | null>(null)
   let settings = $state<SettingsSection | null>(null)
 
+  function collectionTracks(tracks: Track[]): Track[] {
+    return tracks.filter((track) => track.collected !== false && !track.id.startsWith('usb:'))
+  }
+
   function remove(tracks: Track[]): void {
-    const local = tracks.filter((t) => !t.id.startsWith('usb:'))
+    const local = collectionTracks(tracks)
     if (!local.length) return
     if (!library.writable) library.notify('Unlock editing to remove tracks')
     else removing = local
   }
 
   function analyse(tracks: Track[]): void {
-    if (!tracks.length) return
+    const rows = collectionTracks(tracks)
+    if (!rows.length) return
     if (!library.writable) library.notify('Unlock editing to analyse tracks')
-    else analysis.analyse(tracks)
+    else analysis.analyse(rows)
   }
 
   function autoRelocate(tracks: Track[]): void {
@@ -151,9 +156,10 @@
   }
 
   function edit(tracks: Track[]): void {
-    if (!tracks.length) return
+    const rows = collectionTracks(tracks)
+    if (!rows.length) return
     if (!library.writable) library.notify('Unlock editing to change track info')
-    else editing = tracks
+    else editing = rows
   }
 
   function select(track: Track): void {

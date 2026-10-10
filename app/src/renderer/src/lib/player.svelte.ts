@@ -22,6 +22,8 @@ import type { Beatgrid, Cue, Track, TrackDetail } from './types'
 import type { Waveform } from './waveform/data'
 
 const CUE_HIT_TOLERANCE = 0.05
+/** Rekordbox's detail rate, so zoom covers the same time for a file that has no analysis. */
+const LOOSE_WAVE_RATE = 150
 /** Matches the error the audio bridge sends when a track's file can't be resolved. */
 const FILE_MISSING = 'Audio file not found'
 const STREAMING = 'Streaming tracks can’t be played here'
@@ -51,7 +53,10 @@ export class Player {
   readonly cues = new CueEditor(this.session, this.grid)
   readonly tempo = new TempoControl(this.deck)
   readonly output = new Output(this.deck)
-  readonly display = new WaveformDisplay(() => this.track?.id ?? null)
+  readonly display = new WaveformDisplay(
+    () => this.track?.id ?? null,
+    () => this.track?.collected === false
+  )
 
   quantise = $state(storedFlag('quantise', true))
   cuePlacement = $state<CuePlacement>(localStorage.getItem('cuePlacement') === 'playhead' ? 'playhead' : 'cuePoint')
@@ -88,7 +93,12 @@ export class Player {
   }
 
   get waveform(): Waveform | null {
-    return this.session.waveform
+    if (this.session.waveform) return this.session.waveform
+    if (this.track?.collected !== false) return null
+    const samples = this.display.samples
+    if (!samples || samples.rate <= 0 || samples.data.length < 2) return null
+    const duration = samples.data.length / samples.rate
+    return { rate: LOOSE_WAVE_RATE, length: Math.max(2, duration * LOOSE_WAVE_RATE) }
   }
 
   get loading(): boolean {
