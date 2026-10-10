@@ -21,13 +21,13 @@ Playlists you pick are checked before they replace what is on the stick. Playlis
 
 DeviceLibrary and OneLibrary are both written to the device, so that compatibility is preserved across all players.
 
-![Choosing which playlists to copy onto a USB stick.](preview/images/usb_sync.webp)
+<img src="preview/images/usb_sync.webp" alt="Choosing which playlists to copy onto a USB stick." height="240">
 
 ### Backups
 
 Backups are run when you unlock editing, and once a day when something has changed. You can restore any backup from Settings, a backup is taken before you restore, so you can undo the restore if you made a mistake.
 
-![Saved library backups, with restore, in Settings.](preview/images/backups.webp)
+<img src="preview/images/backups.webp" alt="Saved library backups, with restore, in Settings." height="240">
 
 ### High-resolution waveforms
 
@@ -35,10 +35,10 @@ ExportStudio adds custom high-resolution waveforms, drawn from the audio, at up 
 
 A quality slider changes the number of samples used to draw the waveform. Off uses the waveform rekordbox stored during analysis.
 
-![A zoomed waveform drawn from the audio.](preview/images/highres_waveform.webp)
+<img src="preview/images/highres_waveform.webp" alt="A zoomed waveform drawn from the audio." height="240">
 
 ### Editing
 
 A snapshot until you unlock. Writes only while rekordbox is closed.
 
-![Editing a track's title, artist, rating, and colour.](preview/images/editing_metadata.webp)
+<img src="preview/images/editing_metadata.webp" alt="Editing a track's title, artist, rating, and colour." height="240">
