@@ -67,6 +67,19 @@ jobs:
             name="${line#*\"}"
             printf '%s' "${name%\"*}"
           }
+          mask_identities() {
+            local source="$1"
+            local line identity
+            while IFS= read -r line; do
+              [[ "${line}" == *'"'* ]] || continue
+              identity="${line#*\"}"
+              identity="${identity%\"*}"
+              [[ -n "${identity}" ]] || continue
+              echo "::add-mask::${identity}"
+            done <<< "${source}"
+          }
+          mask_identities "${identities_app}"
+          mask_identities "${identities_all}"
           app_id="$(extract_identity 'Developer ID Application:' "${identities_app}")"
           if [[ -z "${app_id}" ]]; then
             app_id="$(extract_identity 'Developer ID Application:' "${identities_all}")"
@@ -84,7 +97,7 @@ jobs:
             printf '%s\n' "${app_id}"
             echo "EOF"
           } >> "${GITHUB_ENV}"
-          echo "Application: ${app_id}"
+          echo "Found a Developer ID Application identity"
 
       - name: Resolve version
         env:
