@@ -31,8 +31,8 @@ const STORAGE_KEY = 'analysisSettings'
 const DEFAULTS: AnalysisSettings = {
   auto: true,
   gridMode: 'normal',
-  minBpm: 70,
-  maxBpm: 180,
+  minBpm: 88,
+  maxBpm: 175,
   highPrecision: true,
   roundBpm: true,
   key: true,

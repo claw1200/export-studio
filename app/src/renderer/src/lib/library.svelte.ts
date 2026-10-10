@@ -55,7 +55,7 @@ export class Library {
   editError = $state<string | null>(null)
   writeFileTags = $state(localStorage.getItem('writeFileTags') === '1')
   importArtwork = $state(localStorage.getItem('importArtwork') !== '0')
-  hideStreaming = $state(localStorage.getItem('hideStreaming') === '1')
+  hideStreaming = $state(localStorage.getItem('hideStreaming') !== '0')
   browserArtwork = $state<BrowserArtwork>(storedArtwork())
   importing = $state(false)
   renamingId = $state<string | null>(null)

@@ -6,7 +6,7 @@ import { WaveLoader, type WaveSamples } from './waves.svelte'
 export class WaveformDisplay {
   mode = $state<WaveformMode>((localStorage.getItem('waveformMode') as WaveformMode) || 'rgb')
   /** Detail of the engine's own waveform, 0 to 100; 0 draws rekordbox's analysis instead. */
-  quality = $state(storedPercent('waveQuality', 50))
+  quality = $state(storedPercent('waveQuality', 30))
   /** How far the 3-band levels fall after a peak, 0 to 100 blocks. */
   fallBlocks = $state(storedPercent('fallBlocks', 40))
   zoom = $state(Number(localStorage.getItem('waveformZoom')) || 1)

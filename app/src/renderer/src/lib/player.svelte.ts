@@ -53,8 +53,8 @@ export class Player {
   readonly output = new Output(this.deck)
   readonly display = new WaveformDisplay(() => this.track?.id ?? null)
 
-  quantise = $state(storedFlag('quantise'))
-  cuePlacement = $state<CuePlacement>(localStorage.getItem('cuePlacement') === 'cuePoint' ? 'cuePoint' : 'playhead')
+  quantise = $state(storedFlag('quantise', true))
+  cuePlacement = $state<CuePlacement>(localStorage.getItem('cuePlacement') === 'playhead' ? 'playhead' : 'cuePoint')
   /** Also the loop in point: LOOP OUT closes a loop from here. */
   cuePoint = $state(0)
   previewAt = $state<number | null>(null)
