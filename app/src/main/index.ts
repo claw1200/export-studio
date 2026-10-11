@@ -81,6 +81,9 @@ app.whenReady().then(() => {
     }
   })
   ipcMain.handle('shell:showItem', (_e, path: string) => shell.showItemInFolder(path))
+  ipcMain.on('app:music', (event) => {
+    event.returnValue = app.getPath('music').replaceAll('\\', '/')
+  })
   ipcMain.handle('dialog:choose', async (e, kind: 'audio' | 'folder', defaultPath?: string) => {
     const options: OpenDialogOptions =
       kind === 'audio'

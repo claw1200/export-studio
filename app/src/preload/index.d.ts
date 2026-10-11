@@ -3,6 +3,8 @@ import type { AudioApi } from './audio'
 
 export interface Api {
   platform: string
+  /** The operating system's Music folder. */
+  musicDirectory: string
   call<T = unknown>(method: string, params?: unknown): Promise<T>
   onEvent(listener: (event: string, data: unknown) => void): () => void
   showItemInFolder(path: string): Promise<void>

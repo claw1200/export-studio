@@ -1,30 +1,17 @@
 import { formatDuration } from '$lib/format'
 import { isDurationSlack } from '$lib/library/duplicates'
 import type { DuplicateMatch, PlaylistMembership, Track, TrackViewFilters, View } from '$lib/types'
+import { seedStoredViews } from './defaults'
+
+export { emptyFilters } from './defaults'
 
 const STORAGE_KEY = 'views'
+const SEEDED_KEY = 'viewsSeeded'
 
 export interface FileEntry {
   path: string
   /** Tag metadata for a file that is not in the collection. Null until it has been read. */
   loose: Track | null
-}
-
-export function emptyFilters(): TrackViewFilters {
-  return {
-    title: '',
-    artist: '',
-    album: '',
-    genre: '',
-    label: '',
-    comment: '',
-    bpmMin: null,
-    bpmMax: null,
-    durationMin: null,
-    durationMax: null,
-    keys: [],
-    playlist: 'any'
-  }
 }
 
 export function pathKey(path: string): string {
@@ -181,13 +168,26 @@ function isView(value: unknown): value is View {
   return false
 }
 
-export function loadViews(): View[] {
+function readStoredViews(): View[] {
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as unknown
     return Array.isArray(raw) ? raw.filter(isView) : []
   } catch {
     return []
   }
+}
+
+export function loadViews(): View[] {
+  const stored = readStoredViews()
+  const alreadySeeded = localStorage.getItem(SEEDED_KEY) === '1'
+  const music = window.api.musicDirectory
+  if (!alreadySeeded && typeof music !== 'string') return stored
+  const views = seedStoredViews(stored, music ?? '', alreadySeeded)
+  if (!alreadySeeded) {
+    localStorage.setItem(SEEDED_KEY, '1')
+    if (views !== stored) saveViews(views)
+  }
+  return views
 }
 
 export function saveViews(views: View[]): void {

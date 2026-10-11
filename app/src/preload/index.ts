@@ -6,6 +6,7 @@ type CallResult = { ok: true; result: unknown } | { ok: false; error: { message:
 
 const api = {
   platform: process.platform,
+  musicDirectory: ipcRenderer.sendSync('app:music') as string,
 
   async call<T = unknown>(method: string, params?: unknown): Promise<T> {
     const res = (await ipcRenderer.invoke('engine:call', method, params)) as CallResult
