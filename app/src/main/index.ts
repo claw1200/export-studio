@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow, dialog, ipcMain, nativeTheme, type OpenDialo
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import macIcon from '../../resources/icon-mac.png?asset'
 import { AnalysisQueue } from './analysis'
 import { AudioBridge } from './audio/bridge'
 import { Engine } from './engine'
@@ -59,7 +60,7 @@ function createWindow(): BrowserWindow {
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.exportstudio.app')
   nativeTheme.themeSource = 'dark'
-  if (process.platform === 'darwin' && is.dev) app.dock?.setIcon(icon)
+  if (process.platform === 'darwin' && is.dev) app.dock?.setIcon(macIcon)
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window, { zoom: true })

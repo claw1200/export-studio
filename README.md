@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="export-studio-header.webp" alt="Export Studio" width="512">
+</p>
+
 # ExportStudio - The Export Mode You Actually Want
 
 ExportStudio is a library browser for rekordbox. Browse your collection, preview tracks, edit playlists and tags, analyse new files, and copy playlists to a USB stick. Your library stays in rekordbox's own database.
