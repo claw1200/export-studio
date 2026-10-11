@@ -16,3 +16,4 @@ app/.eslintcache
 # native
 native/target/
 app/resources/native/
+vendor/rbxport/target/

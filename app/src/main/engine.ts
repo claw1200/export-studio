@@ -16,6 +16,12 @@ export class EngineError extends Error {
   }
 }
 
+function usbExport(): string {
+  const name = process.platform === 'win32' ? 'es-usb.exe' : 'es-usb'
+  if (is.dev) return resolve(app.getAppPath(), '..', 'vendor', 'rbxport', 'target', 'release', name)
+  return join(process.resourcesPath, 'engine', name)
+}
+
 function engineCommand(): { cmd: string; args: string[]; cwd: string } {
   if (is.dev) {
     const cwd = resolve(app.getAppPath(), '..', 'engine')
@@ -37,7 +43,10 @@ export class Engine {
     if (this.ready) return this.ready
     const { cmd, args, cwd } = engineCommand()
     this.ready = new Promise((resolveReady, rejectReady) => {
-      const proc = spawn(cmd, args, { cwd, env: { ...process.env, PYTHONUNBUFFERED: '1' } })
+      const proc = spawn(cmd, args, {
+        cwd,
+        env: { ...process.env, PYTHONUNBUFFERED: '1', EXPORTSTUDIO_USB_EXPORT: usbExport() }
+      })
       this.proc = proc
 
       createInterface({ input: proc.stdout, crlfDelay: Infinity }).on('line', (line) => {

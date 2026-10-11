@@ -1,0 +1,18 @@
+[package]
+name = "es-usb"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "ExportStudio command for rbxport USB sync."
+
+[lints]
+workspace = true
+
+[dependencies]
+rbl-anlz = { path = "../rbl-anlz" }
+rbl-core = { path = "../rbl-core" }
+rbl-export = { path = "../rbl-export" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

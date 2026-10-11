@@ -88,10 +88,6 @@ _SORTS = (
     "0600050000060000",
     "0B000C0000070000",
 )
-_HISTORY = bytes.fromhex(
-    "80020000000000000000000017323032362D30392D3137191E0B3130303003000000000000000000"
-)
-
 COLORS = ("Pink", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple")
 FORMATS = {"MP3": 1, "M4A": 4, "AAC": 4, "FLAC": 5, "WAV": 11, "AIFF": 12, "AIF": 12}
 
@@ -164,6 +160,8 @@ class PdbLibrary:
     playlists: list[PlaylistRow] = field(default_factory=list)
     entries: list[EntryRow] = field(default_factory=list)
     preserved: dict[int, list[bytes]] = field(default_factory=dict)
+    device_name: str = ""
+    background: int = 0
 
 
 def _u16(buf: bytes, offset: int) -> int:
@@ -178,10 +176,10 @@ def encode_string(text: str) -> bytes:
     if text.isascii():
         raw = text.encode("ascii")
         marker = (len(raw) + 1) * 2 + 1
-        if marker < 0x40:
+        if marker < 0x100:
             return bytes([marker]) + raw
         return bytes([0x40]) + struct.pack("<H", 4 + len(raw)) + b"\x00" + raw
-    raw = text.encode("utf-16-le") + b"\x00\x00"
+    raw = text.encode("utf-16-le")
     return bytes([0x90]) + struct.pack("<H", 4 + len(raw)) + b"\x00" + raw
 
 
@@ -198,7 +196,7 @@ def decode_string(buf: bytes, offset: int) -> str:
         if raw.endswith(b"\x00\x00"):
             raw = raw[:-2]
         return raw.decode("utf-16-le", "replace")
-    if marker < 0x40 and (marker - 1) % 2 == 0:
+    if marker < 0x100 and (marker - 1) % 2 == 0:
         count = (marker - 1) // 2 - 1
         if count < 0:
             return ""
@@ -206,9 +204,24 @@ def decode_string(buf: bytes, offset: int) -> str:
     return ""
 
 
+def _id_name(export_id: int, name: str) -> bytes:
+    return struct.pack("<I", export_id) + encode_string(name)
+
+
+def _key_row(export_id: int, name: str) -> bytes:
+    return struct.pack("<II", export_id, export_id) + encode_string(name)
+
+
+def _aligned_name(encoded: bytes, start: int) -> int:
+    if encoded[:1] in (b"\x40", b"\x90"):
+        return (start + 3) & ~3
+    return start
+
+
 def _named(subtype: int, export_id: int, name: str, *, second_id: int | None = None) -> bytes:
     encoded = encode_string(name)
-    if second_id is None and len(encoded) + 10 < 256:
+    long_string = encoded[:1] in (b"\x40", b"\x90")
+    if second_id is None and not long_string and len(encoded) + 10 < 256:
         row = bytearray(10)
         struct.pack_into("<H", row, 0, subtype)
         struct.pack_into("<I", row, 4, export_id)
@@ -230,12 +243,13 @@ def _named(subtype: int, export_id: int, name: str, *, second_id: int | None = N
 
 def _album(row: NamedRow) -> bytes:
     encoded = encode_string(row.name)
-    body = bytearray(22)
+    start = _aligned_name(encoded, 22)
+    body = bytearray(start)
     struct.pack_into("<H", body, 0, 0x80)
     struct.pack_into("<I", body, 8, row.artist_id)
     struct.pack_into("<I", body, 0x0C, row.export_id)
     body[0x14] = 0x03
-    body[0x15] = 22
+    body[0x15] = start
     return bytes(body) + encoded
 
 
@@ -273,9 +287,13 @@ def _track(row: TrackRow, shift: int) -> bytes:
     body = bytearray(0x5E + TRACK_STRINGS * 2)
     struct.pack_into("<H", body, 0, 0x24)
     struct.pack_into("<H", body, 2, shift)
+    struct.pack_into("<I", body, 0x04, 0x000C0700)
     struct.pack_into("<I", body, 0x08, row.sample_rate)
     struct.pack_into("<I", body, 0x0C, row.composer_id)
     struct.pack_into("<I", body, 0x10, min(row.file_size, 0xFFFFFFFF))
+    struct.pack_into("<I", body, 0x14, 0x00100000 + (row.export_id & 0xFFFFFFFF))
+    struct.pack_into("<H", body, 0x18, 0xAE49)
+    struct.pack_into("<H", body, 0x1A, 0x03DD)
     struct.pack_into("<I", body, 0x1C, row.artwork_id)
     struct.pack_into("<I", body, 0x20, row.key_id)
     struct.pack_into("<I", body, 0x24, row.original_artist_id)
@@ -301,15 +319,28 @@ def _track(row: TrackRow, shift: int) -> bytes:
     cursor = len(body)
     blob = bytearray(body)
     for index, piece in enumerate(encoded):
+        cursor = _aligned_name(piece, cursor)
+        if cursor > len(blob):
+            blob += b"\x00" * (cursor - len(blob))
         struct.pack_into("<H", blob, 0x5E + index * 2, cursor)
         blob += piece
         cursor += len(piece)
     return bytes(blob)
 
 
-def _history(day: date) -> bytes:
-    row = bytearray(_HISTORY)
-    row[13:23] = day.isoformat().encode("ascii")
+def _property(count: int, day: date, device_name: str = "", background: int = 0) -> bytes:
+    """Device Library property row. `count` is numberOfContents, shared with OneLibrary."""
+    row = bytearray(12)
+    row[0:2] = b"\x80\x02"
+    struct.pack_into("<I", row, 4, count & 0xFFFFFFFF)
+    row[9] = background & 0xFF
+    row += encode_string(day.isoformat())
+    row += b"\x19\x1e"
+    row += encode_string("1000")
+    row += encode_string(device_name)
+    row += b"\x00" * 8
+    if len(row) % 4:
+        row += b"\x00" * (4 - len(row) % 4)
     return bytes(row)
 
 
@@ -366,9 +397,10 @@ def _finish_data(page: bytearray, index: int, table: int, nxt: int, count: int, 
         struct.pack_into("<H", page, 0x22, count)
 
 
-def _finish_index(page: bytearray, index: int, table: int, first_data: int | None) -> None:
+def _finish_index(page: bytearray, index: int, table: int, first_data: int | None, empty_page: int) -> None:
     struct.pack_into("<I", page, 0x04, index)
     struct.pack_into("<I", page, 0x08, table)
+    struct.pack_into("<I", page, 0x0C, first_data if first_data is not None else empty_page)
     struct.pack_into("<I", page, 0x10, 1)
     page[0x1B] = 0x64
     struct.pack_into("<H", page, 0x20, 0x1FFF)
@@ -457,6 +489,25 @@ def _parse_track(page: bytes, start: int) -> TrackRow | None:
     )
 
 
+def _parse_id_name(page: bytes, start: int) -> NamedRow | None:
+    if start + 5 > len(page):
+        return None
+    export_id = _u32(page, start)
+    name = decode_string(page, start + 4)
+    if not export_id:
+        return None
+    return NamedRow(export_id, name)
+
+
+def _parse_key(page: bytes, start: int) -> NamedRow | None:
+    if start + 9 > len(page):
+        return None
+    export_id = _u32(page, start)
+    if not export_id:
+        return None
+    return NamedRow(export_id, decode_string(page, start + 8))
+
+
 def _parse_named(page: bytes, start: int) -> NamedRow | None:
     if start + 10 > len(page):
         return None
@@ -498,15 +549,15 @@ def build_pdb(library: PdbLibrary, *, today: date | None = None) -> bytes:
     for index, row in enumerate(library.tracks):
         table_rows[0].append(_track(row, (index % 16) * 32))
     for row in library.genres:
-        table_rows[1].append(_named(0x60, row.export_id, row.name))
+        table_rows[1].append(_id_name(row.export_id, row.name))
     for row in library.artists:
         table_rows[2].append(_named(0x60, row.export_id, row.name))
     for row in library.albums:
         table_rows[3].append(_album(row))
     for row in library.labels:
-        table_rows[4].append(_named(0x60, row.export_id, row.name))
+        table_rows[4].append(_id_name(row.export_id, row.name))
     for row in library.keys:
-        table_rows[5].append(_named(0x60, row.export_id, row.name, second_id=row.export_id))
+        table_rows[5].append(_key_row(row.export_id, row.name))
     for index, name in enumerate(COLORS, 1):
         table_rows[6].append(_color(index, name))
     for row in library.playlists:
@@ -516,7 +567,7 @@ def build_pdb(library: PdbLibrary, *, today: date | None = None) -> bytes:
     table_rows[16] = [bytes.fromhex(item) for item in _COLUMNS]
     table_rows[17] = [bytes.fromhex(item) for item in _CATEGORIES]
     table_rows[18] = [bytes.fromhex(item) for item in _SORTS]
-    table_rows[19] = list(library.preserved.get(19) or [_history(today)])
+    table_rows[19] = [_property(len(library.tracks), today, library.device_name, library.background)]
     for table in (11, 12, 13):
         if library.preserved.get(table):
             table_rows[table] = list(library.preserved[table])
@@ -535,7 +586,13 @@ def build_pdb(library: PdbLibrary, *, today: date | None = None) -> bytes:
     meta = []
     for table, index_at, data_at, chunks in plans:
         pages[index_at] = bytearray(PAGE)
-        _finish_index(pages[index_at], index_at, table, data_at[0] if data_at else None)
+        _finish_index(
+            pages[index_at],
+            index_at,
+            table,
+            data_at[0] if data_at else None,
+            candidate_base + table,
+        )
         for chunk_index, chunk in enumerate(chunks):
             number = data_at[chunk_index]
             page = bytearray(PAGE)
@@ -660,11 +717,11 @@ def read_pdb(data: bytes) -> PdbLibrary:
                 preserved[table] = rows
     return PdbLibrary(
         tracks=[row for row in take(0, _parse_track) if row.export_id],
-        genres=take(1, _parse_named),
+        genres=take(1, _parse_id_name),
         artists=take(2, _parse_named),
         albums=take(3, _parse_named),
-        labels=take(4, _parse_named),
-        keys=take(5, _parse_named),
+        labels=take(4, _parse_id_name),
+        keys=take(5, _parse_key),
         playlists=[row for row in take(7, _parse_playlist) if row.export_id],
         entries=[row for row in take(8, _parse_entry) if row.track_id and row.playlist_id],
         preserved=preserved,

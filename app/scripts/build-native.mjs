@@ -15,6 +15,10 @@ const target = targetAt >= 0 ? args[targetAt + 1] : process.env.ES_NATIVE_TARGET
 const cargo = ['build', '-p', 'es-node', ...(debug ? [] : ['--release']), ...(target ? ['--target', target] : [])]
 execFileSync('cargo', cargo, { cwd: native, stdio: 'inherit' })
 
+const usbRoot = resolve(native, '..', 'vendor', 'rbxport')
+const usbCargo = ['build', '-p', 'es-usb', ...(debug ? [] : ['--release']), ...(target ? ['--target', target] : [])]
+execFileSync('cargo', usbCargo, { cwd: usbRoot, stdio: 'inherit' })
+
 const platform = target ? (target.includes('windows') ? 'win32' : target.includes('apple') ? 'darwin' : 'linux') : process.platform
 const file = platform === 'win32' ? 'es_node.dll' : platform === 'darwin' ? 'libes_node.dylib' : 'libes_node.so'
 const built = join(native, 'target', ...(target ? [target] : []), debug ? 'debug' : 'release', file)
@@ -25,3 +29,8 @@ mkdirSync(out, { recursive: true })
 rmSync(join(out, 'es_node.node'), { force: true })
 copyFileSync(built, join(out, 'es_node.node'))
 console.log(`[native] ${built} -> ${join(out, 'es_node.node')}`)
+
+const usbName = platform === 'win32' ? 'es-usb.exe' : 'es-usb'
+const usbBuilt = join(usbRoot, 'target', ...(target ? [target] : []), debug ? 'debug' : 'release', usbName)
+copyFileSync(usbBuilt, join(out, usbName))
+console.log(`[native] ${usbBuilt} -> ${join(out, usbName)}`)

@@ -231,6 +231,8 @@ def to_pdb(library: DeviceLibrary, *, today: date | None = None) -> bytes:
             ],
             entries=entries,
             preserved=library.pdb_rows,
+            device_name=library.device_name or "USB",
+            background=library.background,
         ),
         today=today,
     )
@@ -388,8 +390,9 @@ def write_onelibrary(path: Path, library: DeviceLibrary, *, encrypt: bool, today
                     content_id, title, titleForSearch, bpmx100, length, trackNo, artist_id_artist, album_id,
                     genre_id, label_id, key_id, color_id, djComment, rating, releaseYear, dateAdded, path,
                     fileName, fileSize, fileType, bitrate, bitDepth, samplingRate, djPlayCount,
-                    isHotCueAutoLoadOn, masterDbId, masterContentId, analysisDataFilePath, analysedBits
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    isHotCueAutoLoadOn, masterDbId, masterContentId, analysisDataFilePath, analysedBits,
+                    cueUpdateCount
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     row.export_id,
                     row.title,
@@ -419,7 +422,8 @@ def write_onelibrary(path: Path, library: DeviceLibrary, *, encrypt: bool, today
                     dbid,
                     master,
                     row.analysis,
-                    1 if row.analysis else 0,
+                    105 if row.analysis else 0,
+                    len(row.cues),
                 ),
             )
             for index, cue in enumerate(row.cues, 1):
