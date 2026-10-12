@@ -34,6 +34,47 @@ def stored_file_type(value) -> str | None:
         return FILE_TYPES.get(int(value))
     except (TypeError, ValueError):
         return None
+
+
+def file_type_code(path: Path) -> int | None:
+    """Rekordbox file-type code for a path. AIF and AIFF are the same code."""
+    suffix = path.suffix.lstrip(".").upper()
+    if suffix == "AIF":
+        suffix = "AIFF"
+    for code, name in FILE_TYPES.items():
+        if name == suffix:
+            return code
+    return None
+
+
+# Stream columns that describe the audio file itself. A converted MP3 keeps these after the
+# path is pointed back at a WAV, which is what a CDJ trusts.
+STREAM_COLUMNS = ("FileType", "BitRate", "SampleRate", "BitDepth")
+
+
+def stream_fields(path: Path, info: dict | None = None) -> dict:
+    """File type and stream numbers read from the audio file, for a revived collection row."""
+    info = info or {}
+    fields: dict = {"FileNameL": path.name}
+    code = file_type_code(path)
+    if code is not None:
+        fields["FileType"] = code
+    for column, key in (
+        ("BitRate", "bitrate"),
+        ("SampleRate", "sampleRate"),
+        ("BitDepth", "bitDepth"),
+        ("Length", "length"),
+    ):
+        value = info.get(key) or 0
+        if value:
+            fields[column] = int(value)
+    try:
+        fields["FileSize"] = path.stat().st_size
+    except OSError:
+        pass
+    return fields
+
+
 CLOUD_LIBRARY_SYNC = "100000"
 HIDDEN_PLAYLISTS = {CLOUD_LIBRARY_SYNC}
 WRITE_BLOCKED = "Close rekordbox before editing the library"
@@ -194,6 +235,25 @@ def _whole(value) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def analysis_files(share_dir: Path, relative: str | None) -> list[Path]:
+    """The DAT, EXT and 2EX files for one analysis path, limited to the library share folder."""
+    if not relative or not str(relative).strip():
+        return []
+    root = share_dir.resolve()
+    dat = (share_dir / str(relative).strip("/\\")).resolve()
+    if not dat.is_relative_to(root):
+        return []
+    return [dat.with_suffix(f".{suffix}") for suffix in ("DAT", "EXT", "2EX")]
+
+
+def discard_analysis_files(paths: list[Path]) -> None:
+    for path in paths:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            log.warning("Could not delete %s", path)
 
 
 def _pick_candidate(candidates: list[Path], size: int | None) -> Path | None:
@@ -1004,7 +1064,7 @@ class Library:
         """Add audio files to the collection, and optionally to the end of a playlist.
 
         Files already in the collection are not added twice, but still go into the playlist. A track
-        that was removed from the collection comes back with its cues and analysis.
+        that was removed comes back as the same row, without the cues and beatgrid deleted with it.
         """
         db = self._writable_db()
         pl = self._editable_playlist(db, playlist_id) if playlist_id else None
@@ -1054,7 +1114,8 @@ class Library:
                 if existing:
                     content = existing[0]
                     content.rb_local_deleted = 0
-                    _set(content, "FileSize", path.stat().st_size)
+                    for column, value in stream_fields(path, infos.get(key)).items():
+                        _set(content, column, value)
                     _set(content, "StockDate", today)
                 else:
                     info = infos[key]
@@ -1089,11 +1150,15 @@ class Library:
         }
 
     def remove_from_collection(self, ids: list[str]) -> dict:
-        """Remove tracks from the collection the way rekordbox does: out of every playlist, with the
-        row marked deleted. Cues, tags, history and analysis files stay, as rekordbox leaves them."""
+        """Hide tracks and drop the data a later import would otherwise restore.
+
+        The content row stays, marked deleted, so titles can return. Cues, the beatgrid, and the
+        stored file type do not. Import reads the file type from the audio file again.
+        """
         db = self._writable_db()
         contents = [self._content(cid) for cid in dict.fromkeys(ids)]
         drop = {c.ID for c in contents}
+        files = [path for content in contents for path in analysis_files(self.share_dir, content.AnalysisDataPath)]
         SP = t.DjmdSongPlaylist
         playlist_ids = [
             pid for (pid,) in db.session.execute(select(SP.PlaylistID).where(SP.ContentID.in_(drop)).distinct())
@@ -1109,11 +1174,19 @@ class Library:
                     if song.ContentID in drop:
                         db.delete(song)
                 _renumber(db, [s for s in songs if s.ContentID not in drop])
+            if drop:
+                for cue in db.query(t.DjmdCue).filter(t.DjmdCue.ContentID.in_(drop)).all():
+                    db.delete(cue)
             for content in contents:
+                _set(content, "AnalysisDataPath", None)
+                _set(content, "Analysed", 0)
+                for column in STREAM_COLUMNS:
+                    _set(content, column, None)
                 _set(content, "rb_local_deleted", 1)
 
         if contents:
             _commit(db, remove)
+            discard_analysis_files(files)
         self._content_cache.clear()
         return {"removed": sorted(drop), "playlists": self.playlists()}
 

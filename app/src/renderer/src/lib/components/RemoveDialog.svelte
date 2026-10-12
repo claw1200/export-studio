@@ -12,8 +12,8 @@
 
   const message = $derived(
     tracks.length === 1
-      ? `Remove “${tracks[0].title}” from the collection and every playlist? Its cues and analysis stay, so importing the file again brings them back.`
-      : `Remove ${tracks.length} tracks from the collection and every playlist? Their cues and analysis stay, so importing the files again brings them back.`
+      ? `Remove “${tracks[0].title}” from the collection and every playlist? Its cues, beatgrid, and stored file type are deleted. Importing the file again reads the type from the audio file.`
+      : `Remove ${tracks.length} tracks from the collection and every playlist? Their cues, beatgrids, and stored file types are deleted. Importing the files again reads the type from each audio file.`
   )
 
   function confirm(): void {

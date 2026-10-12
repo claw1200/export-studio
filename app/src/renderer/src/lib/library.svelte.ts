@@ -545,7 +545,7 @@ export class Library {
     return parts.join(' ') || 'Nothing to import'
   }
 
-  /** Remove tracks from the collection and every playlist, optionally moving their files to the Trash. */
+  /** Remove tracks from the collection and every playlist, deleting cues and the beatgrid. */
   async removeFromCollection(ids: string[], trash = false): Promise<boolean> {
     const local = ids.filter((id) => !id.startsWith('usb:'))
     if (!local.length) {
