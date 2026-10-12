@@ -1,11 +1,8 @@
-<p align="center">
-  <img src="export-studio-header.webp" alt="Export Studio" width="512">
-</p>
+woukl![Export Studio](export-studio-header.webp)
 
 # ExportStudio - The Export Mode You Actually Want
 
 ExportStudio is a library browser for rekordbox. Browse your collection, preview tracks, edit playlists and tags, analyse new files, and copy playlists to a USB stick. Your library stays in rekordbox's own database.
-
 
 ## Why ExportStudio?
 
@@ -15,28 +12,34 @@ ExportStudio looks to compltly overhaul the avalible feature set of a library ma
 
 ## Roadmap and Vision
 
-| Key | Status |
-| --- | --- |
-| 🟢 | Comparable or better |
-| 🟡 | Planned / Working on it |
-| 🔴 | Can't |
-| ⚫️ | Maybe |
+I would eventally like to add support for Serato and other DJ software libraries, so that DJs using these programs can also export a rekordbox USB for their DJ sets. However, I want to get full feature parity with rekordbox before I add support for other libraries.
 
-| Feature | ExportStudio | rekordbox |
-| --- | --- | --- |
-| Lightweight and responsive UI | 🟢 | ❌ |
-| High-resolution waveforms | 🟢 | ❌ |
-| Backups | 🟢 | ❌ |
-| Standard beatgrid editing | 🟢 | ✅ |
-| Dynamic beatgrid editing | 🟡 | ✅ |
-| Track Analysis | 🟢 | ✅ |
-| USB sync | 🟢 | ✅ |
-| Streaming | ⚫️ | ✅ |
-| Playlist conversion | 🟡 | ❌ |
-| USB Hardware compatibility checks | 🟡 | ❌ |
-| Phrase analysis | 🟡 | ✅ |
-| Duel Player | 🟡 | ✅ |
-| Support Serato Library | 🟡 | ❌ |
+
+| Key | Status                  |
+| --- | ----------------------- |
+| 🟢  | Comparable or better    |
+| 🟡  | Planned / Working on it |
+| 🔴  | Can't                   |
+| ⚫️  | Maybe                   |
+
+
+
+| Feature                           | ExportStudio | rekordbox |
+| --------------------------------- | ------------ | --------- |
+| Lightweight and responsive UI     | 🟢           | ❌         |
+| High-resolution waveforms         | 🟢           | ❌         |
+| Backups                           | 🟢           | ❌         |
+| Standard beatgrid editing         | 🟢           | ✅         |
+| Dynamic beatgrid editing          | 🟡           | ✅         |
+| Track Analysis                    | 🟢           | ✅         |
+| USB sync                          | 🟢           | ✅         |
+| Streaming                         | ⚫️           | ✅         |
+| Playlist conversion               | 🟡           | ❌         |
+| USB Hardware compatibility checks | 🟡           | ❌         |
+| Phrase analysis                   | 🟡           | ✅         |
+| Duel Player                       | 🟡           | ✅         |
+| Support Serato Library            | 🟡           | ❌         |
+
 
 ## Key Features
 
@@ -54,13 +57,13 @@ ExportStudio adds custom high-resolution waveforms, drawn from the audio, at up 
 
 A quality slider changes the number of samples used to draw the waveform. Off uses the waveform rekordbox stored during analysis.
 
-<img src="preview/images/highres_waveform.webp" alt="A zoomed waveform drawn from the audio." height="480">
+![A zoomed waveform drawn from the audio.](preview/images/highres_waveform.webp)
 
 ### Grid editing
 
 Stop spending hours holding down the nudge button to get the beatgrid just right. ExportStudio lets you grab the beatgrid and drag it to the position you want, then use nudge to fine-tune it.
 
-<img src="preview/images/grid_edit.webp" alt="Editing a beatgrid on the deck, with nudge, half, and double." height="480">
+![Editing a beatgrid on the deck, with nudge, half, and double.](preview/images/grid_edit.webp)
 
 ### Analysis
 
@@ -68,7 +71,7 @@ ExportStudio works out tempo, beatgrid, and key itself. A normal grid fits one t
 
 Tested on vast rekordbox libraries, it almost always matches or improves on rekordbox's analysis for beatgrids, tempo, and key.
 
-<img src="preview/images/analysis.webp" alt="Analysis settings: grid type, BPM range, precision, and key detection." height="480">
+![Analysis settings: grid type, BPM range, precision, and key detection.](preview/images/analysis.webp)
 
 ### USB sync
 
@@ -76,7 +79,7 @@ Playlists you pick are checked before they replace what is on the stick. Playlis
 
 DeviceLibrary and OneLibrary are both written to the device, so that compatibility is preserved across all players.
 
-<img src="preview/images/usb_sync.webp" alt="Choosing which playlists to copy onto a USB stick." height="480">
+![Choosing which playlists to copy onto a USB stick.](preview/images/usb_sync.webp)
 
 ### Backups
 
@@ -85,8 +88,7 @@ Backups are run when you unlock editing, and once a day when something has chang
 > [!NOTE]
 > Audio files are not included in the backup.
 
-<img src="preview/images/backups.webp" alt="Saved library backups, with restore, in Settings." height="480">
-
+![Saved library backups, with restore, in Settings.](preview/images/backups.webp)
 
 ### Editing
 
@@ -96,7 +98,7 @@ Select multiple tracks to edit their metadata in bulk.
 
 You can also change your preferences to write the changes to the actual file as well as the database.
 
-<img src="preview/images/editing_metadata.webp" alt="Editing a track's title, artist, rating, and colour." height="480">
+![Editing a track's title, artist, rating, and colour.](preview/images/editing_metadata.webp)
 
 ## Download
 
