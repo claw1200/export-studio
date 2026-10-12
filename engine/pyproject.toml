@@ -1,7 +1,7 @@
 [project]
 name = "exportstudio-engine"
 version = "0.1.0"
-description = "Library engine for ExportStudio: reads rekordbox 6/7 libraries via pyrekordbox"
+description = "Library engine for Export Studio: reads rekordbox 6/7 libraries via pyrekordbox"
 readme = "README.md"
 authors = [
     { name = "claw1200", email = "carstenwood12@gmail.com" }

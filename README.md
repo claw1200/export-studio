@@ -2,16 +2,16 @@
   <img src="export-studio-header.webp" alt="Export Studio" width="512">
 </p>
 
-# ExportStudio - The Export Mode You Actually Want
+# Export Studio - The Export Mode You Actually Want
 
-ExportStudio is a library browser for rekordbox. Browse your collection, preview tracks, edit playlists and tags, analyse new files, and copy playlists to a USB stick. Your library stays in rekordbox's own database.
+Export Studio is a library browser for rekordbox. Browse your collection, preview tracks, edit playlists and tags, analyse new files, and copy playlists to a USB stick. Your library stays in rekordbox's own database.
 
 
-## Why ExportStudio?
+## Why Export Studio?
 
-ExportStudio is a library browser for rekordbox, with with a fundemtaly different vision to other alternate tools like [rbxport](https://github.com/chrisle/rbxport).
+Export Studio is a library browser for rekordbox, with with a fundemtaly different vision to other alternate tools like [rbxport](https://github.com/chrisle/rbxport).
 
-ExportStudio looks to compltly overhaul the avalible feature set of a library manager, not just to strip down Rekordbox to its essentials. I beleive that rekordbox does not just need optimization, but a redesign from the ground up, hence why I have chosen not to copy the old interface and workflow.
+Export Studio looks to compltly overhaul the avalible feature set of a library manager, not just to strip down Rekordbox to its essentials. I beleive that rekordbox does not just need optimization, but a redesign from the ground up, hence why I have chosen not to copy the old interface and workflow.
 
 ## Roadmap and Vision
 
@@ -27,7 +27,7 @@ I would eventally like to add support for Serato and other DJ software libraries
 
 
 
-| Feature                           | ExportStudio | rekordbox |
+| Feature                           | Export Studio | rekordbox |
 | --------------------------------- | ------------ | --------- |
 | Lightweight and responsive UI     | 🟢           | ❌         |
 | High-resolution waveforms         | 🟢           | ❌         |
@@ -46,7 +46,7 @@ I would eventally like to add support for Serato and other DJ software libraries
 
 ## Key Features
 
-ExportStudio's goal is not just to strip down Rekordbox, but improve on the feature set. ExportStudio improves:
+Export Studio's goal is not just to strip down Rekordbox, but improve on the feature set. Export Studio improves:
 
 ### UI
 
@@ -56,7 +56,7 @@ Collection, playlists, histories, tags, and devices in one responsive window.
 
 ### High-resolution waveforms
 
-ExportStudio adds custom high-resolution waveforms, drawn from the audio, at up to 16,000 samples a second. This lets you zoom in on the waveform in far greater detail than rekordbox's built-in waveforms, so you can be confident your beatgrid is accurate.
+Export Studio adds custom high-resolution waveforms, drawn from the audio, at up to 16,000 samples a second. This lets you zoom in on the waveform in far greater detail than rekordbox's built-in waveforms, so you can be confident your beatgrid is accurate.
 
 A quality slider changes the number of samples used to draw the waveform. Off uses the waveform rekordbox stored during analysis.
 
@@ -64,13 +64,13 @@ A quality slider changes the number of samples used to draw the waveform. Off us
 
 ### Grid editing
 
-Stop spending hours holding down the nudge button to get the beatgrid just right. ExportStudio lets you grab the beatgrid and drag it to the position you want, then use nudge to fine-tune it.
+Stop spending hours holding down the nudge button to get the beatgrid just right. Export Studio lets you grab the beatgrid and drag it to the position you want, then use nudge to fine-tune it.
 
 <img src="preview/images/grid_edit.webp" alt="Editing a beatgrid on the deck, with nudge, half, and double." height="480">
 
 ### Analysis
 
-ExportStudio works out tempo, beatgrid, and key itself. A normal grid fits one tempo to the whole track. Dynamic follows tempo changes, for live recordings and tracks that speed up. Cues are kept.
+Export Studio works out tempo, beatgrid, and key itself. A normal grid fits one tempo to the whole track. Dynamic follows tempo changes, for live recordings and tracks that speed up. Cues are kept.
 
 Tested on vast rekordbox libraries, it almost always matches or improves on rekordbox's analysis for beatgrids, tempo, and key.
 
@@ -106,4 +106,4 @@ You can also change your preferences to write the changes to the actual file as 
 
 ## Download
 
-ExportStudio is currently in alpha, and can be downloaded from the [releases page](https://github.com/claw1200/export-studio/releases).
+Export Studio is currently in alpha, and can be downloaded from the [releases page](https://github.com/claw1200/export-studio/releases).

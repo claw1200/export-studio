@@ -1,6 +1,6 @@
 {
   "name": "exportstudio",
-  "productName": "ExportStudio",
+  "productName": "Export Studio",
   "version": "0.1.0",
   "description": "A modern library browser for rekordbox",
   "main": "./out/main/index.js",

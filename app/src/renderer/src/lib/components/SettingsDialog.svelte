@@ -495,7 +495,7 @@
           </section>
 
           <p class="px-2 text-[11px] leading-snug text-faint">
-            This is ExportStudio’s own analysis system, not rekordbox’s.
+            This is Export Studio’s own analysis system, not rekordbox’s.
           </p>
         {:else}
           {#each groups as { group, ids } (group)}

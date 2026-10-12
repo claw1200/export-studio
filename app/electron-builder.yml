@@ -1,5 +1,5 @@
 appId: com.exportstudio.app
-productName: ExportStudio
+productName: Export Studio
 directories:
   buildResources: build
 files:
