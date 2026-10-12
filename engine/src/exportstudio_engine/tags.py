@@ -241,6 +241,7 @@ def _empty_browse(path: Path) -> dict:
         "sampleRate": 0,
         "bitDepth": 0,
         "fileType": suffix,
+        "storedType": None,
         "path": str(path).replace("\\", "/"),
         "missing": not path.is_file(),
         "streaming": False,

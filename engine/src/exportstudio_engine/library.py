@@ -20,11 +20,20 @@ from sqlalchemy.orm import aliased
 from . import anlz_build, artwork
 from . import tags as file_tags
 from . import waveform
+from .inspect import inspect_file, same_fingerprint
 
 log = logging.getLogger(__name__)
 
 DB_SUFFIXES = ("", "-wal", "-shm")
 FILE_TYPES = {1: "MP3", 4: "M4A", 5: "FLAC", 11: "WAV", 12: "AIFF"}
+
+
+def stored_file_type(value) -> str | None:
+    """Rekordbox file-type code as MP3, M4A, FLAC, WAV, or AIFF. None when the code is unknown."""
+    try:
+        return FILE_TYPES.get(int(value))
+    except (TypeError, ValueError):
+        return None
 CLOUD_LIBRARY_SYNC = "100000"
 HIDDEN_PLAYLISTS = {CLOUD_LIBRARY_SYNC}
 WRITE_BLOCKED = "Close rekordbox before editing the library"
@@ -178,6 +187,13 @@ def _check_grid(times: list[int], beats: list[int], bpms: list[float]) -> None:
 
 def _is_local(path: str) -> bool:
     return bool(path) and not STREAMING_URI.match(path)
+
+
+def _whole(value) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _pick_candidate(candidates: list[Path], size: int | None) -> Path | None:
@@ -511,7 +527,8 @@ class Library:
                 "bitrate": bitrate or 0,
                 "sampleRate": rate or 0,
                 "bitDepth": depth or 0,
-                "fileType": FILE_TYPES.get(ftype) or Path(path).suffix.lstrip(".").upper(),
+                "fileType": stored_file_type(ftype) or Path(path).suffix.lstrip(".").upper(),
+                "storedType": stored_file_type(ftype),
                 "path": path,
                 "missing": _is_local(path) and not Path(path).is_file(),
                 "streaming": bool(path) and not _is_local(path),
@@ -909,6 +926,45 @@ class Library:
             raise
         self._content_cache.clear()
         return self.tracks(ids=[content.ID for content, _, _ in plan])
+
+    def inspect_tracks(self, tracks: list) -> list[dict]:
+        """Header, size, and length checks for a batch of collection tracks.
+
+        Each item is `{id, size?, mtime?}`. When size and mtime still match the file, the header
+        is not read again and the result is `same`. Streaming tracks are left out.
+        """
+        if not isinstance(tracks, list):
+            raise ValueError("tracks must be a list")
+        out = []
+        for item in tracks[:80]:
+            if not isinstance(item, dict) or not item.get("id"):
+                raise ValueError("tracks must be a list of track ids")
+            content = self._content(str(item["id"]))
+            stored_path = content.FolderPath or ""
+            if not _is_local(stored_path):
+                out.append({"id": content.ID, "size": 0, "mtime": None, "same": False, "issues": []})
+                continue
+            path = Path(stored_path)
+            if "size" in item and "mtime" in item:
+                cached = same_fingerprint(path, item.get("size"), item.get("mtime"))
+                if cached is not None:
+                    size, mtime = cached
+                    out.append({
+                        "id": content.ID,
+                        "size": size,
+                        "mtime": None if mtime is None else str(mtime),
+                        "same": True,
+                        "issues": [],
+                    })
+                    continue
+            result = inspect_file(
+                path,
+                stored_file_type(content.FileType),
+                _whole(content.FileSize),
+                _whole(content.Length),
+            )
+            out.append({"id": content.ID, "same": False, **result})
+        return out
 
     def find_missing(self, ids: list[str], directory: str) -> dict:
         """Look under `directory` for files with the same name as each missing track."""

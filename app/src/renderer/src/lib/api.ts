@@ -8,6 +8,7 @@ import type {
   ImportResult,
   LibraryInfo,
   MissingScan,
+  TrackInspection,
   RemoveResult,
   RestoreResult,
   Track,
@@ -47,6 +48,8 @@ export const api = {
     call<TrackUpdate>('track.update', { ids, fields, writeTags }),
   relocate: (moves: Record<string, string>) => call<Track[]>('track.relocate', { moves }),
   findMissing: (ids: string[], directory: string) => call<MissingScan>('track.findMissing', { ids, directory }),
+  inspectTracks: (tracks: { id: string; size?: number; mtime?: string | null }[]) =>
+    call<TrackInspection[]>('track.inspect', { tracks }),
   importTracks: (paths: string[], playlistId: string | null, artwork: boolean) =>
     call<ImportResult>('track.import', { paths, playlistId, artwork }),
   removeFromCollection: (ids: string[]) => call<RemoveResult>('track.removeFromCollection', { ids }),

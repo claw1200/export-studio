@@ -138,9 +138,19 @@
   let order = $state(initial.order)
 
   const duplicateView = $derived(library.sourceView?.type === 'duplicates')
+  const problemView = $derived(library.sourceView?.type === 'problems')
+  const issueColumn: Column = {
+    id: 'issue',
+    name: 'Issue',
+    label: 'Issue',
+    width: 280,
+    min: 160,
+    max: 720,
+    fr: 1.8
+  }
 
   function columnWidth(column: Column): number {
-    const width = widths[column.id]
+    const width = widths[column.id] ?? column.width
     return duplicateView && column.id === 'index' ? Math.max(width, 72) : width
   }
 
@@ -153,8 +163,9 @@
     return [...COLUMNS].sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
   })
   const shownColumns = $derived(orderedColumns.filter((column) => !hidden.includes(column.id)))
+  const tableColumns = $derived(problemView ? [issueColumn, ...shownColumns] : shownColumns)
   const template = $derived(
-    shownColumns
+    tableColumns
       .map((column) => {
         const width = columnWidth(column)
         return column.fr && !sized.includes(column.id) ? `minmax(${column.width}px, ${column.fr}fr)` : `${width}px`
@@ -162,7 +173,7 @@
       .join(' ')
   )
   const minWidth = $derived(
-    shownColumns.reduce((sum, column) => {
+    tableColumns.reduce((sum, column) => {
       if (column.fr && !sized.includes(column.id)) return sum + column.width
       return sum + columnWidth(column)
     }, 0)
@@ -266,7 +277,7 @@
     const target = e.target
     if (!(target instanceof Element) || target.closest('[role="separator"]')) return
     const id = target.closest<HTMLElement>('[data-column]')?.dataset.column
-    if (!id) return
+    if (!id || id === 'issue') return
     moving = { id, startX: e.clientX, startY: e.clientY, active: false, index: 0, dropX: 0 }
   }
 
@@ -275,7 +286,9 @@
     const current = moving
     if (!current || !headerEl) return
     if (!current.active && Math.hypot(e.clientX - current.startX, e.clientY - current.startY) < 4) return
-    const cells = [...headerEl.querySelectorAll<HTMLElement>('[data-column]')]
+    const cells = [...headerEl.querySelectorAll<HTMLElement>('[data-column]')].filter(
+      (cell) => cell.dataset.column !== 'issue'
+    )
     const header = headerEl.getBoundingClientRect()
     let index = cells.length
     for (let i = 0; i < cells.length; i++) {
@@ -632,6 +645,9 @@
         />
       {/each}
     </span>
+  {:else if column.id === 'issue'}
+    {@const issue = library.problemText.get(track.id)}
+    <span class="truncate text-warn" title={issue}>{issue}</span>
   {:else if column.id === 'fileType'}
     <span
       class={[
@@ -667,7 +683,7 @@
         onpointerdown={startMove}
         oncontextmenu={openColumnMenu}
       >
-        {#each shownColumns as column (column.id)}
+        {#each tableColumns as column (column.id)}
           <div
             class={[
               'relative flex h-full min-w-0 items-center',
@@ -702,22 +718,24 @@
                 {headerLabel(column)}
               </span>
             {/if}
-            <div
-              class="group/resize absolute top-0 -right-1 z-20 h-full w-2 cursor-col-resize touch-none"
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize {column.name}"
-              title="Drag to resize. Double-click to reset."
-              onpointerdown={(e) => startResize(e, column)}
-              ondblclick={(e) => resetWidth(e, column)}
-            >
-              <span
-                class={[
-                  'pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2',
-                  drag?.id === column.id ? 'bg-accent' : 'bg-faint/55 group-hover/resize:bg-muted'
-                ]}
-              ></span>
-            </div>
+            {#if column.id !== 'issue'}
+              <div
+                class="group/resize absolute top-0 -right-1 z-20 h-full w-2 cursor-col-resize touch-none"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize {column.name}"
+                title="Drag to resize. Double-click to reset."
+                onpointerdown={(e) => startResize(e, column)}
+                ondblclick={(e) => resetWidth(e, column)}
+              >
+                <span
+                  class={[
+                    'pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2',
+                    drag?.id === column.id ? 'bg-accent' : 'bg-faint/55 group-hover/resize:bg-muted'
+                  ]}
+                ></span>
+              </div>
+            {/if}
           </div>
         {/each}
         {#if moving?.active}
@@ -755,7 +773,8 @@
               role="row"
               tabindex="-1"
               aria-selected={selected}
-              title={track.missing ? 'Audio file not found. Right-click to relocate it.' : undefined}
+              title={library.problemText.get(track.id) ??
+                (track.missing ? 'Audio file not found. Right-click to relocate it.' : undefined)}
               draggable={library.source.type !== 'device' && track.collected !== false}
               onmousedown={(e) => rowMousedown(e, track)}
               onmouseup={(e) => rowMouseup(e, track)}
@@ -764,7 +783,7 @@
               ondragend={dragEnd}
               ondblclick={() => onactivate(track)}
             >
-              {#each shownColumns as column (column.id)}
+              {#each tableColumns as column (column.id)}
                 <div
                   class={[
                     'flex min-w-0 items-center overflow-hidden px-2 whitespace-nowrap',

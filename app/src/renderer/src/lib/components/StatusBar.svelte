@@ -57,6 +57,20 @@
     </span>
   {/if}
 
+  {#if library.problemScan}
+    {@const { done, total } = library.problemScan}
+    <span class="ml-auto flex items-center gap-2 text-muted" role="status">
+      <LoaderCircle class="size-3 animate-spin text-accent" />
+      <span>Checking files {Math.min(done + 1, total).toLocaleString()} of {total.toLocaleString()}</span>
+      <span class="h-1 w-20 overflow-hidden rounded-full bg-line">
+        <span
+          class="block h-full rounded-full bg-accent transition-[width]"
+          style:width="{(100 * done) / Math.max(total, 1)}%"
+        ></span>
+      </span>
+    </span>
+  {/if}
+
   {#if analysis.running && analysis.progress}
     {@const { total, done, failed } = analysis.progress}
     <span class="ml-auto flex items-center gap-2 text-muted" role="status">
@@ -83,7 +97,10 @@
     </span>
   {/if}
 
-  <span class="truncate {analysis.running || backups.progress ? '' : 'ml-auto'}" title={library.info?.dbPath}>
+  <span
+    class="truncate {analysis.running || backups.progress || library.problemScan ? '' : 'ml-auto'}"
+    title={library.info?.dbPath}
+  >
     {library.info?.rekordboxRunning ? 'rekordbox is running' : 'rekordbox is closed'}
     {#if library.info}
       · {library.writable ? 'editing' : 'read-only'}

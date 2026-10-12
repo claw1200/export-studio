@@ -4,6 +4,7 @@ import { clearDetailCache } from './deck/session.svelte'
 import { cueStats, newestFirst, type SortKey, sortTracks, type TrackSort } from './library/sort'
 import { buildTree } from './library/tree'
 import { duplicateGroups, rankCopies } from './library/duplicates'
+import { problemRows } from './library/problems'
 import { loadViews, looseTrack, matchesTrack, pathKey, saveViews, type FileEntry } from './library/views'
 import type {
   Cue,
@@ -13,6 +14,7 @@ import type {
   SyncProgress,
   Track,
   TrackEdit,
+  TrackIssue,
   TreeItem,
   View,
   Volume
@@ -84,6 +86,12 @@ export class Library {
 
   viewById = $derived(new Map(this.views.map((view) => [view.id, view])))
   sourceView = $derived(this.source.type === 'view' ? (this.viewById.get(this.source.id) ?? null) : null)
+  /** Header probes for the open damaged-tracks view, keyed by track id. */
+  private probedIssues = $state.raw<Record<string, TrackIssue[]>>({})
+  /** Session cache of header probes, keyed by path. Size and mtime decide when to read again. */
+  private problemCache = new Map<string, { size: number; mtime: string | null; issues: TrackIssue[] }>()
+  problemScan = $state<{ done: number; total: number } | null>(null)
+
   /** Open duplicates view, keeper first inside each group. */
   private listedDuplicates = $derived.by(() => {
     const view = this.sourceView
@@ -98,6 +106,14 @@ export class Library {
     })
     return { tracks, groups }
   })
+  /** Open damaged-tracks view, severe problems first. */
+  private listedProblems = $derived.by(() => {
+    const view = this.sourceView
+    if (view?.type !== 'problems') return null
+    const rows = problemRows(this.tracks, view.checks, this.probedIssues)
+    return { tracks: rows.map((row) => row.track), text: new Map(rows.map((row) => [row.track.id, row.text])) }
+  })
+  problemText = $derived(this.listedProblems?.text ?? new Map<string, string>())
   private looseTracks = $derived(this.fileEntries.flatMap((entry) => (entry.loose ? [entry.loose] : [])))
   byId = $derived(new Map([...this.tracks, ...this.deviceTracks, ...this.looseTracks].map((t) => [t.id, t])))
   playlistById = $derived(new Map(this.playlists.map((p) => [p.id, p])))
@@ -746,6 +762,8 @@ export class Library {
       this.selection = this.selectedId ? new Set([this.selectedId]) : new Set()
     }
     this.source = source
+    const problems = source.type === 'view' && this.viewById.get(source.id)?.type === 'problems'
+    if (!problems) this.problemScan = null
     if (source.type === 'collection' || source.type === 'tag') {
       this.sourceIds = null
       this.deviceTracks = []
@@ -757,6 +775,12 @@ export class Library {
       this.sourceIds = null
       this.deviceTracks = []
       const view = this.viewById.get(source.id)
+      if (view?.type === 'problems') {
+        this.fileEntries = []
+        this.sourceLoading = false
+        void this.scanProblems(token)
+        return
+      }
       if (!view || view.type !== 'files') {
         this.fileEntries = []
         this.sourceLoading = false
@@ -815,6 +839,7 @@ export class Library {
       return this.tracks.filter((track) => matchesTrack(track, view.filters, this.playlistMembers.has(track.id)))
     }
     if (view.type === 'duplicates') return this.listedDuplicates?.tracks ?? []
+    if (view.type === 'problems') return this.listedProblems?.tracks ?? []
     const byPath = this.tracksByPath()
     const out: Track[] = []
     for (const entry of this.fileEntries) {
@@ -850,6 +875,57 @@ export class Library {
     if (!remap.size) return
     if (this.selectedId && remap.has(this.selectedId)) this.selectedId = remap.get(this.selectedId) ?? this.selectedId
     this.selection = new Set([...this.selection].map((id) => remap.get(id) ?? id))
+  }
+
+  private async scanProblems(token: number): Promise<void> {
+    const tracks = this.tracks.filter((track) => !track.streaming)
+    const seeded: Record<string, TrackIssue[]> = {}
+    for (const track of tracks) {
+      if (!track.path) continue
+      const cached = this.problemCache.get(pathKey(track.path))
+      if (cached) seeded[track.id] = cached.issues
+    }
+    this.probedIssues = seeded
+    if (!tracks.length) {
+      this.problemScan = null
+      return
+    }
+    this.problemScan = { done: 0, total: tracks.length }
+    const batch = 40
+    try {
+      for (let index = 0; index < tracks.length; index += batch) {
+        if (token !== this.sourceToken) return
+        const chunk = tracks.slice(index, index + batch)
+        let rows
+        try {
+          rows = await api.inspectTracks(
+            chunk.map((track) => {
+              const cached = track.path ? this.problemCache.get(pathKey(track.path)) : undefined
+              return cached ? { id: track.id, size: cached.size, mtime: cached.mtime } : { id: track.id }
+            })
+          )
+        } catch (error) {
+          if (token === this.sourceToken) this.notify((error as Error).message)
+          break
+        }
+        if (token !== this.sourceToken) return
+        const next = { ...this.probedIssues }
+        for (const row of rows) {
+          const track = this.byId.get(row.id)
+          const key = track?.path ? pathKey(track.path) : ''
+          if (row.same && key) {
+            next[row.id] = this.problemCache.get(key)?.issues ?? []
+          } else {
+            if (key) this.problemCache.set(key, { size: row.size, mtime: row.mtime, issues: row.issues })
+            next[row.id] = row.issues
+          }
+        }
+        this.probedIssues = next
+        this.problemScan = { done: Math.min(index + chunk.length, tracks.length), total: tracks.length }
+      }
+    } finally {
+      if (token === this.sourceToken) this.problemScan = null
+    }
   }
 
   private async loadFileView(directory: string, showInCollection: boolean, token: number): Promise<void> {

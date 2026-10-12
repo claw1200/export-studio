@@ -63,6 +63,7 @@ class Engine:
             "track.update": lambda ids, fields, writeTags=False: self.lib.update_tracks(ids, fields, writeTags),
             "track.relocate": lambda moves: self.lib.relocate_tracks(moves),
             "track.findMissing": lambda ids, directory: self.lib.find_missing(ids, directory),
+            "track.inspect": lambda tracks: self.lib.inspect_tracks(tracks),
             "track.import": lambda paths, playlistId=None, artwork=True: self.lib.import_tracks(paths, playlistId, artwork),
             "track.removeFromCollection": lambda ids: self.lib.remove_from_collection(ids),
             "track.applyAnalysis": lambda id, result, options: self.lib.apply_analysis(id, result, options),

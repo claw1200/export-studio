@@ -20,6 +20,7 @@
     FolderSearch,
     ListFilter,
     Copy,
+    AlertTriangle,
     Eject,
     LoaderCircle
   } from '@lucide/svelte'
@@ -584,6 +585,8 @@
             <FolderSearch class="size-3.5 shrink-0 text-faint" />
           {:else if view.type === 'duplicates'}
             <Copy class="size-3.5 shrink-0 text-faint" />
+          {:else if view.type === 'problems'}
+            <AlertTriangle class="size-3.5 shrink-0 text-faint" />
           {:else}
             <ListFilter class="size-3.5 shrink-0 text-faint" />
           {/if}

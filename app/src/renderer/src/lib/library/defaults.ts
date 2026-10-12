@@ -1,5 +1,9 @@
 import { emptyDuplicateMatch } from './duplicates'
+import { emptyProblemChecks } from './problems'
 import type { TrackViewFilters, View } from '../types'
+
+/** Built-in views that existed before Damaged tracks. A deleted copy of one of these stays deleted. */
+export const LEGACY_VIEW_IDS = ['default:not-in-playlist', 'default:music', 'default:duplicates']
 
 export function emptyFilters(): TrackViewFilters {
   return {
@@ -45,6 +49,12 @@ export function defaultViews(musicDirectory: string): View[] {
     match: emptyDuplicateMatch(),
     durationSlack: 2
   })
+  views.push({
+    id: 'default:problems',
+    name: 'Damaged tracks',
+    type: 'problems',
+    checks: emptyProblemChecks()
+  })
   return views
 }
 
@@ -54,4 +64,30 @@ export function seedStoredViews(stored: View[], musicDirectory: string, alreadyS
   const ids = new Set(stored.map((view) => view.id))
   const added = defaultViews(musicDirectory).filter((view) => !ids.has(view.id))
   return added.length ? [...added, ...stored] : stored
+}
+
+/**
+ * Offers each built-in once. Views introduced before `introduced` was stored count as already
+ * offered, so deleting Suspected duplicates and then updating does not bring it back.
+ */
+export function introduceViews(
+  stored: View[],
+  musicDirectory: string,
+  alreadySeeded: boolean,
+  introduced: readonly string[]
+): { views: View[]; introduced: string[] } {
+  const defaults = defaultViews(musicDirectory)
+  if (!alreadySeeded) {
+    return {
+      views: seedStoredViews(stored, musicDirectory, false),
+      introduced: [...new Set([...introduced, ...LEGACY_VIEW_IDS, ...defaults.map((view) => view.id)])]
+    }
+  }
+  const known = new Set(introduced.length ? introduced : LEGACY_VIEW_IDS)
+  const present = new Set(stored.map((view) => view.id))
+  const added = defaults.filter((view) => !known.has(view.id) && !present.has(view.id))
+  return {
+    views: added.length ? [...added, ...stored] : stored,
+    introduced: [...new Set([...known, ...defaults.map((view) => view.id)])]
+  }
 }

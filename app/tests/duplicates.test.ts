@@ -26,6 +26,7 @@ function track(row: Partial<Track> & Pick<Track, 'id' | 'title'>): Track {
     sampleRate: 0,
     bitDepth: 0,
     fileType: '',
+    storedType: null,
     path: '',
     missing: false,
     streaming: false,

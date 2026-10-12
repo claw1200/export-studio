@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from .. import waveform
-from ..library import FILE_TYPES
+from ..library import stored_file_type
 from .device import DeviceLibrary, DeviceTrack, read_device
 from .ids import parse_track_key, track_key
 from .paths import pioneer_dir, volume_path
@@ -92,7 +92,8 @@ def track_row(volume: Path, track: DeviceTrack) -> dict:
         "bitrate": track.bitrate,
         "sampleRate": track.sample_rate,
         "bitDepth": track.bit_depth,
-        "fileType": FILE_TYPES.get(track.file_type) or Path(track.filename or track.path).suffix.lstrip(".").upper(),
+        "fileType": stored_file_type(track.file_type) or Path(track.filename or track.path).suffix.lstrip(".").upper(),
+        "storedType": stored_file_type(track.file_type),
         "path": path,
         "missing": audio is None or not audio.is_file(),
         "streaming": False,

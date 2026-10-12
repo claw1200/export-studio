@@ -1,12 +1,14 @@
 import { formatDuration } from '$lib/format'
 import { isDurationSlack } from '$lib/library/duplicates'
+import { isProblemChecks } from '$lib/library/problems'
 import type { DuplicateMatch, PlaylistMembership, Track, TrackViewFilters, View } from '$lib/types'
-import { seedStoredViews } from './defaults'
+import { introduceViews } from './defaults'
 
 export { emptyFilters } from './defaults'
 
 const STORAGE_KEY = 'views'
 const SEEDED_KEY = 'viewsSeeded'
+const INTRODUCED_KEY = 'viewsIntroduced'
 
 export interface FileEntry {
   path: string
@@ -50,6 +52,7 @@ export function looseTrack(path: string, row: Partial<Track> = {}): Track {
     sampleRate: row.sampleRate ?? 0,
     bitDepth: row.bitDepth ?? 0,
     fileType: row.fileType || (suffix === 'AIF' ? 'AIFF' : suffix),
+    storedType: row.storedType ?? null,
     path: stored,
     missing: row.missing ?? false,
     streaming: false,
@@ -165,6 +168,7 @@ function isView(value: unknown): value is View {
   if (view.type === 'tracks') return isFilters(view.filters)
   if (view.type === 'files') return typeof view.directory === 'string' && typeof view.showInCollection === 'boolean'
   if (view.type === 'duplicates') return isDuplicateMatch(view.match) && isDurationSlack(view.durationSlack)
+  if (view.type === 'problems') return isProblemChecks(view.checks)
   return false
 }
 
@@ -177,17 +181,25 @@ function readStoredViews(): View[] {
   }
 }
 
+function readIntroduced(): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(INTRODUCED_KEY) ?? '[]') as unknown
+    return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 export function loadViews(): View[] {
   const stored = readStoredViews()
   const alreadySeeded = localStorage.getItem(SEEDED_KEY) === '1'
   const music = window.api.musicDirectory
   if (!alreadySeeded && typeof music !== 'string') return stored
-  const views = seedStoredViews(stored, music ?? '', alreadySeeded)
-  if (!alreadySeeded) {
-    localStorage.setItem(SEEDED_KEY, '1')
-    if (views !== stored) saveViews(views)
-  }
-  return views
+  const seeded = introduceViews(stored, music ?? '', alreadySeeded, readIntroduced())
+  if (!alreadySeeded) localStorage.setItem(SEEDED_KEY, '1')
+  localStorage.setItem(INTRODUCED_KEY, JSON.stringify(seeded.introduced))
+  if (seeded.views !== stored) saveViews(seeded.views)
+  return seeded.views
 }
 
 export function saveViews(views: View[]): void {
