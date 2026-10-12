@@ -6,6 +6,7 @@ import { buildTree } from './library/tree'
 import { duplicateGroups, rankCopies } from './library/duplicates'
 import { problemRows } from './library/problems'
 import { loadViews, looseTrack, matchesTrack, pathKey, saveViews, type FileEntry } from './library/views'
+import { getSetting, setSetting } from './settings'
 import type {
   Cue,
   ImportResult,
@@ -26,7 +27,7 @@ export const TRACK_DRAG_TYPE = 'application/x-exportstudio-tracks'
 export type BrowserArtwork = 'fill' | 'whole'
 
 function storedArtwork(): BrowserArtwork {
-  return localStorage.getItem('browserArtwork') === 'whole' ? 'whole' : 'fill'
+  return getSetting('browserArtwork') === 'whole' ? 'whole' : 'fill'
 }
 
 function dropCaches(): void {
@@ -72,9 +73,9 @@ export class Library {
   private anchorId: string | null = null
 
   editError = $state<string | null>(null)
-  writeFileTags = $state(localStorage.getItem('writeFileTags') === '1')
-  importArtwork = $state(localStorage.getItem('importArtwork') !== '0')
-  hideStreaming = $state(localStorage.getItem('hideStreaming') !== '0')
+  writeFileTags = $state(getSetting('writeFileTags') === '1')
+  importArtwork = $state(getSetting('importArtwork') !== '0')
+  hideStreaming = $state(getSetting('hideStreaming') !== '0')
   browserArtwork = $state<BrowserArtwork>(storedArtwork())
   importing = $state(false)
   renamingId = $state<string | null>(null)
@@ -332,22 +333,22 @@ export class Library {
 
   setWriteFileTags(on: boolean): void {
     this.writeFileTags = on
-    localStorage.setItem('writeFileTags', on ? '1' : '0')
+    setSetting('writeFileTags', on ? '1' : '0')
   }
 
   setImportArtwork(on: boolean): void {
     this.importArtwork = on
-    localStorage.setItem('importArtwork', on ? '1' : '0')
+    setSetting('importArtwork', on ? '1' : '0')
   }
 
   setHideStreaming(on: boolean): void {
     this.hideStreaming = on
-    localStorage.setItem('hideStreaming', on ? '1' : '0')
+    setSetting('hideStreaming', on ? '1' : '0')
   }
 
   setBrowserArtwork(style: BrowserArtwork): void {
     this.browserArtwork = style
-    localStorage.setItem('browserArtwork', style)
+    setSetting('browserArtwork', style)
   }
 
   onTracksUpdated(listener: (tracks: Track[]) => void): () => void {

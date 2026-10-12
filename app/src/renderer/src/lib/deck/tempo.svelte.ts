@@ -1,3 +1,4 @@
+import { getSetting, setSetting } from '../settings'
 import type { Deck } from './deck.svelte'
 import { storedFlag, storeFlag } from './stored'
 
@@ -9,7 +10,7 @@ export type TempoRange = (typeof TEMPO_RANGES)[number]
 export const TEMPO_STEP = 0.01
 
 function storedRange(): TempoRange {
-  const n = Number(localStorage.getItem('tempoRange'))
+  const n = Number(getSetting('tempoRange'))
   return TEMPO_RANGES.find((r) => r === n) ?? 10
 }
 
@@ -52,7 +53,7 @@ export class TempoControl {
   /** A narrower range pulls the tempo in to fit it, as moving the range switch does. */
   setRange(range: TempoRange): void {
     this.range = range
-    localStorage.setItem('tempoRange', String(range))
+    setSetting('tempoRange', String(range))
     this.setPercent(this.percent)
   }
 

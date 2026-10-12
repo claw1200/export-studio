@@ -10,6 +10,7 @@
   import { droppedPaths, isFileDrag } from '$lib/library/drop'
   import type { SortKey } from '$lib/library/sort'
   import { menuAt, tidy, type MenuEntry, type MenuRequest } from '$lib/menu'
+  import { getSetting, setSetting } from '$lib/settings'
   import { fileMenu, trackMenu, type TrackMenuShortcut } from '$lib/trackMenu'
   import type { Track } from '$lib/types'
   import ConfirmDialog from './ConfirmDialog.svelte'
@@ -85,7 +86,7 @@
     let hidden = defaultHidden()
     let order = defaultOrder()
     try {
-      const raw = localStorage.getItem(STORAGE_KEY)
+      const raw = getSetting(STORAGE_KEY)
       if (raw) {
         const prefs = JSON.parse(raw) as {
           layout?: unknown
@@ -180,7 +181,7 @@
   )
 
   function save(): void {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ layout: LAYOUT_VERSION, widths, sized, hidden, order }))
+    setSetting(STORAGE_KEY, JSON.stringify({ layout: LAYOUT_VERSION, widths, sized, hidden, order }))
   }
 
   function toggleColumn(id: string): void {

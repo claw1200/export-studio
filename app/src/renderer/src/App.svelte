@@ -11,6 +11,7 @@
   import { HOT_CUE_ACTIONS } from '$lib/keymap'
   import { HOT_CUE_KINDS } from '$lib/format'
   import { isFileDrag } from '$lib/library/drop'
+  import { getSetting, setSetting } from '$lib/settings'
   import type { Track } from '$lib/types'
   import TitleBar from '$lib/components/TitleBar.svelte'
   import Sidebar from '$lib/components/Sidebar.svelte'
@@ -63,11 +64,11 @@
   }
 
   function readWidth(panel: Panel): number {
-    const n = Number(localStorage.getItem(`${panel}Width`))
+    const n = Number(getSetting(`${panel}Width`))
     return Number.isFinite(n) ? clampWidth(panel, n) : PANELS[panel].fallback
   }
 
-  let inspectorOpen = $state(localStorage.getItem('inspectorOpen') !== 'false')
+  let inspectorOpen = $state(getSetting('inspectorOpen') !== 'false')
   let sidebarWidth = $state(readWidth('sidebar'))
   let inspectorWidth = $state(readWidth('inspector'))
   let panelDrag = $state<{ side: Panel; startX: number; startW: number } | null>(null)
@@ -102,12 +103,12 @@
     const drag = panelDrag
     if (!drag) return
     panelDrag = null
-    localStorage.setItem(`${drag.side}Width`, String(widthOf(drag.side)))
+    setSetting(`${drag.side}Width`, String(widthOf(drag.side)))
   }
 
   function resetPanel(side: Panel): void {
     setWidth(side, PANELS[side].fallback)
-    localStorage.setItem(`${side}Width`, String(widthOf(side)))
+    setSetting(`${side}Width`, String(widthOf(side)))
   }
 
   let searchInput = $state<HTMLInputElement>()
@@ -314,7 +315,7 @@
       () => inspectorOpen,
       (v) => {
         inspectorOpen = v
-        localStorage.setItem('inspectorOpen', String(v))
+        setSetting('inspectorOpen', String(v))
       }
     }
   />

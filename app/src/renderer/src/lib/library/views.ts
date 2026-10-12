@@ -1,6 +1,7 @@
 import { formatDuration } from '$lib/format'
 import { isDurationSlack } from '$lib/library/duplicates'
 import { isProblemChecks } from '$lib/library/problems'
+import { getSetting, setSetting } from '$lib/settings'
 import type { DuplicateMatch, PlaylistMembership, Track, TrackViewFilters, View } from '$lib/types'
 import { introduceViews } from './defaults'
 
@@ -174,7 +175,7 @@ function isView(value: unknown): value is View {
 
 function readStoredViews(): View[] {
   try {
-    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as unknown
+    const raw = JSON.parse(getSetting(STORAGE_KEY) ?? '[]') as unknown
     return Array.isArray(raw) ? raw.filter(isView) : []
   } catch {
     return []
@@ -183,7 +184,7 @@ function readStoredViews(): View[] {
 
 function readIntroduced(): string[] {
   try {
-    const raw = JSON.parse(localStorage.getItem(INTRODUCED_KEY) ?? '[]') as unknown
+    const raw = JSON.parse(getSetting(INTRODUCED_KEY) ?? '[]') as unknown
     return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === 'string') : []
   } catch {
     return []
@@ -192,16 +193,16 @@ function readIntroduced(): string[] {
 
 export function loadViews(): View[] {
   const stored = readStoredViews()
-  const alreadySeeded = localStorage.getItem(SEEDED_KEY) === '1'
+  const alreadySeeded = getSetting(SEEDED_KEY) === '1'
   const music = window.api.musicDirectory
   if (!alreadySeeded && typeof music !== 'string') return stored
   const seeded = introduceViews(stored, music ?? '', alreadySeeded, readIntroduced())
-  if (!alreadySeeded) localStorage.setItem(SEEDED_KEY, '1')
-  localStorage.setItem(INTRODUCED_KEY, JSON.stringify(seeded.introduced))
+  if (!alreadySeeded) setSetting(SEEDED_KEY, '1')
+  setSetting(INTRODUCED_KEY, JSON.stringify(seeded.introduced))
   if (seeded.views !== stored) saveViews(seeded.views)
   return seeded.views
 }
 
 export function saveViews(views: View[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(views))
+  setSetting(STORAGE_KEY, JSON.stringify(views))
 }

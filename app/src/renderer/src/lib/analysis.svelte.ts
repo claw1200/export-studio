@@ -1,4 +1,5 @@
 import type { AnalysisOptions, AnalysisProgress, GridMode } from '../../../preload/analysis'
+import { getSetting, setSetting } from './settings'
 import type { Track } from './types'
 
 /** The tempo ranges rekordbox offers, as the lowest and highest BPM the analysis may pick. */
@@ -42,7 +43,7 @@ const DEFAULTS: AnalysisSettings = {
 
 function load(): AnalysisSettings {
   try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') as Partial<AnalysisSettings>
+    const stored = JSON.parse(getSetting(STORAGE_KEY) ?? '{}') as Partial<AnalysisSettings>
     const out = { ...DEFAULTS }
     for (const key of Object.keys(DEFAULTS) as (keyof AnalysisSettings)[]) {
       if (typeof stored[key] === typeof DEFAULTS[key]) Object.assign(out, { [key]: stored[key] })
@@ -81,7 +82,8 @@ export class Analysis {
       const finished = progress.finished
       if (!finished) return
       if (finished.error) this.lastError = finished.error
-      for (const listener of this.finishListeners) listener((finished.track as Track) ?? null, finished.id, finished.error)
+      for (const listener of this.finishListeners)
+        listener((finished.track as Track) ?? null, finished.id, finished.error)
       if (!this.running) {
         for (const listener of this.batchListeners) listener(progress.done, progress.failed, this.lastError)
       }
@@ -96,7 +98,7 @@ export class Analysis {
 
   set<K extends keyof AnalysisSettings>(key: K, value: AnalysisSettings[K]): void {
     this.settings[key] = value
-    localStorage.setItem(STORAGE_KEY, JSON.stringify($state.snapshot(this.settings)))
+    setSetting(STORAGE_KEY, JSON.stringify($state.snapshot(this.settings)))
   }
 
   setRange(minBpm: number, maxBpm: number): void {

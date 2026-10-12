@@ -8,6 +8,7 @@ import { AudioBridge } from './audio/bridge'
 import { Engine } from './engine'
 import { buildMenu, registerFiles } from './files'
 import { handleMediaProtocol, registerMediaScheme } from './media'
+import { flushSettings, loadSettings, registerSettings } from './settings'
 
 const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'aac', 'mp4', 'flac', 'wav', 'aif', 'aiff', 'ogg', 'alac']
 
@@ -72,6 +73,8 @@ app.whenReady().then(() => {
   analysis.register()
   buildMenu()
   registerFiles()
+  loadSettings()
+  registerSettings()
 
   ipcMain.handle('engine:call', async (_e, method: string, params?: unknown) => {
     try {
@@ -113,6 +116,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
+  flushSettings()
   audio.stop()
   engine.stop()
 })

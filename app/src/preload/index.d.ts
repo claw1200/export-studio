@@ -20,6 +20,10 @@ export interface Api {
   analyse(jobs: AnalysisJob[], concurrency: number): Promise<void>
   cancelAnalysis(): Promise<void>
   onAnalysis(listener: (progress: AnalysisProgress) => void): () => void
+  /** Preferences already on disk. `exists` is false until the file has been written. */
+  loadSettings(): { exists: boolean; values: Record<string, string> }
+  writeSetting(key: string, value: string): void
+  replaceSettings(values: Record<string, string>): void
 }
 
 declare global {

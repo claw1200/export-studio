@@ -1,3 +1,4 @@
+import { setSetting } from '../settings'
 import type { Deck } from './deck.svelte'
 import { clampUnit, storedFlag, storedVolume, storeFlag } from './stored'
 
@@ -21,7 +22,7 @@ export class Output {
       this.muted = false
     }
     this.deck.setVolume(this.muted ? 0 : v)
-    localStorage.setItem('volume', String(v))
+    setSetting('volume', String(v))
     storeFlag('muted', this.muted)
   }
 

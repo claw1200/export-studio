@@ -8,6 +8,7 @@ import { WaveformDisplay } from './deck/display.svelte'
 import { Output } from './deck/output.svelte'
 import { storedFlag, storeFlag } from './deck/stored'
 import { TempoControl } from './deck/tempo.svelte'
+import { getSetting, setSetting } from './settings'
 import {
   beatLoop,
   CUE_TOLERANCE,
@@ -59,7 +60,7 @@ export class Player {
   )
 
   quantise = $state(storedFlag('quantise', true))
-  cuePlacement = $state<CuePlacement>(localStorage.getItem('cuePlacement') === 'playhead' ? 'playhead' : 'cuePoint')
+  cuePlacement = $state<CuePlacement>(getSetting('cuePlacement') === 'playhead' ? 'playhead' : 'cuePoint')
   /** Also the loop in point: LOOP OUT closes a loop from here. */
   cuePoint = $state(0)
   previewAt = $state<number | null>(null)
@@ -446,7 +447,7 @@ export class Player {
 
   setCuePlacement(placement: CuePlacement): void {
     this.cuePlacement = placement
-    localStorage.setItem('cuePlacement', placement)
+    setSetting('cuePlacement', placement)
   }
 
   private placementMs(): number {

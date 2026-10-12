@@ -7,6 +7,7 @@ import {
   chordTypesText,
   DEFAULT_BINDINGS
 } from './keymap'
+import { getSetting, setSetting } from './settings'
 
 export type ActionHandler = (() => void) | { down: () => void; up: () => void }
 
@@ -17,7 +18,7 @@ const TEXT_INPUTS = new Set(['text', 'search', 'email', 'password', 'url', 'numb
 
 function storedOverrides(): Overrides {
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')
+    const parsed = JSON.parse(getSetting(STORAGE_KEY) ?? '{}')
     const overrides: Overrides = {}
     for (const id of ACTION_IDS) {
       const chords = parsed?.[id]
@@ -134,7 +135,7 @@ export class Keybinds {
   }
 
   private save(): void {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify($state.snapshot(this.overrides)))
+    setSetting(STORAGE_KEY, JSON.stringify($state.snapshot(this.overrides)))
   }
 
   keydown = (e: KeyboardEvent): void => {

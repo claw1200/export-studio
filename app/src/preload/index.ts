@@ -58,6 +58,18 @@ const api = {
 
   onAnalysis(listener: (progress: AnalysisProgress) => void): () => void {
     return subscribe<AnalysisProgress>('analysis:progress', listener)
+  },
+
+  loadSettings(): { exists: boolean; values: Record<string, string> } {
+    return ipcRenderer.sendSync('settings:load')
+  },
+
+  writeSetting(key: string, value: string): void {
+    ipcRenderer.send('settings:set', key, value)
+  },
+
+  replaceSettings(values: Record<string, string>): void {
+    ipcRenderer.send('settings:replace', values)
   }
 }
 
