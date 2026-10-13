@@ -4,6 +4,7 @@
   import { browserPreviews } from '$lib/browserPreview.svelte'
   import { getApp } from '$lib/context'
   import { artworkUrl } from '$lib/api'
+  import { assess, factsFromProbe, factsFromTrack, type Verdict } from '$lib/hardware/compatibility'
   import { formatBpm, formatDuration, keyColor, TRACK_COLORS } from '$lib/format'
   import { chordLabel } from '$lib/keymap'
   import { TRACK_DRAG_TYPE } from '$lib/library.svelte'
@@ -59,6 +60,7 @@
     { id: 'bpm', name: 'BPM', label: 'BPM', width: 64, min: 48, max: 120, align: 'right', sort: 'bpm' },
     { id: 'key', name: 'Key', label: 'Key', width: 52, min: 40, max: 120, align: 'center', sort: 'key' },
     { id: 'duration', name: 'Time', label: 'Time', width: 60, min: 48, max: 120, align: 'right', sort: 'duration' },
+    { id: 'compat', name: 'Hardware', label: 'Hardware', width: 104, min: 96, max: 180, align: 'center', sort: 'compat' },
     { id: 'wave', name: 'Waveform', label: 'Waveform', width: 148, min: 80, max: 480, sort: 'cueCount' },
     { id: 'cue', name: 'CUE', label: 'CUE', width: 72, min: 52, max: 110, align: 'center', sort: 'cueStars' },
     { id: 'rating', name: 'Rating', label: 'Rating', width: 78, min: 64, max: 140, sort: 'rating' },
@@ -67,13 +69,32 @@
   ]
 
   const STORAGE_KEY = 'browserColumns'
-  const LAYOUT_VERSION = 2
-  const SHOWN_BY_DEFAULT = ['index', 'cue', 'wave', 'art', 'title', 'artist', 'bpm', 'key', 'duration', 'dateAdded']
+  const LAYOUT_VERSION = 3
+  const SHOWN_BY_DEFAULT = [
+    'index',
+    'compat',
+    'cue',
+    'wave',
+    'art',
+    'title',
+    'artist',
+    'bpm',
+    'key',
+    'duration',
+    'dateAdded'
+  ]
 
   function defaultOrder(): string[] {
     const order = SHOWN_BY_DEFAULT.filter((id) => COLUMNS.some((column) => column.id === id))
     for (const column of COLUMNS) if (!order.includes(column.id)) order.push(column.id)
     return order
+  }
+
+  function placeAfter(ids: string[], id: string, after: string): string[] {
+    const next = ids.filter((item) => item !== id)
+    const at = next.indexOf(after)
+    next.splice(at + 1, 0, id)
+    return next
   }
 
   function defaultHidden(): string[] {
@@ -95,7 +116,7 @@
           hidden?: unknown
           order?: unknown
         }
-        const currentLayout = prefs.layout === LAYOUT_VERSION
+        const savedLayout = prefs.layout === 2 || prefs.layout === LAYOUT_VERSION
         if (prefs.widths && typeof prefs.widths === 'object') {
           for (const column of COLUMNS) {
             const width = prefs.widths[column.id]
@@ -109,11 +130,11 @@
             (id): id is string => typeof id === 'string' && COLUMNS.some((column) => column.id === id && column.fr)
           )
         }
-        if (currentLayout && Array.isArray(prefs.hidden)) {
+        if (savedLayout && Array.isArray(prefs.hidden)) {
           hidden = prefs.hidden.filter((id): id is string => typeof id === 'string' && widths[id] !== undefined)
           if (hidden.length >= COLUMNS.length) hidden = []
         }
-        if (currentLayout && Array.isArray(prefs.order)) {
+        if (savedLayout && Array.isArray(prefs.order)) {
           const seen: Record<string, true> = {}
           const next: string[] = []
           for (const id of prefs.order) {
@@ -123,7 +144,7 @@
             }
           }
           for (const id of order) if (!seen[id]) next.push(id)
-          order = next
+          order = prefs.layout === LAYOUT_VERSION ? next : placeAfter(next, 'compat', 'index')
         }
       }
     } catch {
@@ -139,16 +160,6 @@
   let order = $state(initial.order)
 
   const duplicateView = $derived(library.sourceView?.type === 'duplicates')
-  const problemView = $derived(library.sourceView?.type === 'problems')
-  const issueColumn: Column = {
-    id: 'issue',
-    name: 'Issue',
-    label: 'Issue',
-    width: 280,
-    min: 160,
-    max: 720,
-    fr: 1.8
-  }
 
   function columnWidth(column: Column): number {
     const width = widths[column.id] ?? column.width
@@ -164,7 +175,7 @@
     return [...COLUMNS].sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
   })
   const shownColumns = $derived(orderedColumns.filter((column) => !hidden.includes(column.id)))
-  const tableColumns = $derived(problemView ? [issueColumn, ...shownColumns] : shownColumns)
+  const tableColumns = $derived(shownColumns)
   const template = $derived(
     tableColumns
       .map((column) => {
@@ -278,7 +289,7 @@
     const target = e.target
     if (!(target instanceof Element) || target.closest('[role="separator"]')) return
     const id = target.closest<HTMLElement>('[data-column]')?.dataset.column
-    if (!id || id === 'issue') return
+    if (!id) return
     moving = { id, startX: e.clientX, startY: e.clientY, active: false, index: 0, dropX: 0 }
   }
 
@@ -287,9 +298,7 @@
     const current = moving
     if (!current || !headerEl) return
     if (!current.active && Math.hypot(e.clientX - current.startX, e.clientY - current.startY) < 4) return
-    const cells = [...headerEl.querySelectorAll<HTMLElement>('[data-column]')].filter(
-      (cell) => cell.dataset.column !== 'issue'
-    )
+    const cells = [...headerEl.querySelectorAll<HTMLElement>('[data-column]')]
     const header = headerEl.getBoundingClientRect()
     let index = cells.length
     for (let i = 0; i < cells.length; i++) {
@@ -338,12 +347,50 @@
   const last = $derived(Math.min(list.length, Math.ceil((scrollTop + height) / ROW) + OVERSCAN))
   const rows = $derived(list.slice(first, last))
   const wantsPreview = $derived(shownColumns.some((column) => column.id === 'wave' || column.id === 'cue'))
+  const wantsCompat = $derived(shownColumns.some((column) => column.id === 'compat'))
+  let compatTip = $state<{ id: string; top: number; left: number; above: boolean } | null>(null)
+  const shownTip = $derived.by(() => {
+    const tip = compatTip
+    if (!tip || !rows.some((track) => track.id === tip.id)) return null
+    return tip
+  })
+
+  function compatibilityOf(track: Track): Verdict {
+    const probe = library.probeOf(track)
+    const facts = probe?.audio ? factsFromProbe(probe.audio, track) : factsFromTrack(track)
+    return assess(facts, {
+      missing: track.missing || !!probe?.missing,
+      unreadable: !!probe?.unreadable,
+      streaming: track.streaming,
+      greenId: library.hardwareGreen
+    })
+  }
+
+  function showCompat(node: HTMLElement, id: string): void {
+    const rect = node.getBoundingClientRect()
+    const above = rect.bottom + 150 > window.innerHeight
+    compatTip = {
+      id,
+      top: above ? rect.top - 6 : rect.bottom + 6,
+      left: Math.max(8, Math.min(rect.left - 8, window.innerWidth - 280)),
+      above
+    }
+  }
+
+  function hideCompat(id: string): void {
+    if (compatTip?.id === id) compatTip = null
+  }
 
   $effect(() => {
     if (!wantsPreview) return
     const ids = rows.filter((track) => track.collected !== false).map((track) => track.id)
     void browserPreviews.revision
     browserPreviews.request(ids)
+  })
+
+  $effect(() => {
+    if (!wantsCompat) return
+    library.probeVisible(rows.filter((track) => track.collected !== false).map((track) => track.id))
   })
 
   const CUE_STARS = [
@@ -646,9 +693,24 @@
         />
       {/each}
     </span>
-  {:else if column.id === 'issue'}
-    {@const issue = library.problemText.get(track.id)}
-    <span class="truncate text-warn" title={issue}>{issue}</span>
+  {:else if column.id === 'compat'}
+    {@const verdict = compatibilityOf(track)}
+    <span
+      class="grid size-full place-items-center"
+      role="img"
+      aria-label={verdict.summary || verdict.problems[0] || 'Compatibility'}
+      onmouseenter={(e) => showCompat(e.currentTarget, track.id)}
+      onmouseleave={() => hideCompat(track.id)}
+    >
+      <span
+        class={[
+          'block size-2.5 rounded-full',
+          verdict.color === 'green' && 'bg-ok',
+          verdict.color === 'yellow' && 'bg-warn',
+          verdict.color === 'red' && 'bg-danger'
+        ]}
+      ></span>
+    </span>
   {:else if column.id === 'fileType'}
     <span
       class={[
@@ -774,8 +836,7 @@
               role="row"
               tabindex="-1"
               aria-selected={selected}
-              title={library.problemText.get(track.id) ??
-                (track.missing ? 'Audio file not found. Right-click to relocate it.' : undefined)}
+              title={track.missing ? 'Audio file not found. Right-click to relocate it.' : undefined}
               draggable={library.source.type !== 'device' && track.collected !== false}
               onmousedown={(e) => rowMousedown(e, track)}
               onmouseup={(e) => rowMouseup(e, track)}
@@ -855,4 +916,34 @@
   >
     {ghostLabel}
   </div>
+
+  {#if shownTip}
+    {@const tipped = library.byId.get(shownTip.id)}
+    {#if tipped}
+      {@const verdict = compatibilityOf(tipped)}
+      <div
+        class="pointer-events-none fixed z-50 w-72 rounded-md border border-line bg-surface px-2.5 py-2 text-[11.5px] leading-snug text-muted shadow-lg shadow-black/40"
+        style:top="{shownTip.top}px"
+        style:left="{shownTip.left}px"
+        style:transform={shownTip.above ? 'translateY(-100%)' : undefined}
+      >
+        {#if verdict.summary}
+          <p class="text-fg">{verdict.summary}</p>
+        {/if}
+        {#if verdict.problems.length}
+          <ul class={['list-disc space-y-0.5 pl-4', verdict.summary && 'mt-1.5']}>
+            {#each verdict.problems as problem (problem)}
+              <li>{problem}</li>
+            {/each}
+          </ul>
+        {/if}
+        {#if verdict.incompatible.length}
+          <p class={verdict.summary || verdict.problems.length ? 'mt-1.5' : ''}>
+            <span class="text-fg">Incompatible:</span>
+            {verdict.incompatible.join(', ')}
+          </p>
+        {/if}
+      </div>
+    {/if}
+  {/if}
 </div>

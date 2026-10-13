@@ -1,8 +1,7 @@
 import { emptyDuplicateMatch } from './duplicates'
-import { emptyProblemChecks } from './problems'
 import type { TrackViewFilters, View } from '../types'
 
-/** Built-in views that existed before Damaged tracks. A deleted copy of one of these stays deleted. */
+/** Built-in views. A deleted copy of one of these stays deleted. */
 export const LEGACY_VIEW_IDS = ['default:not-in-playlist', 'default:music', 'default:duplicates']
 
 export function emptyFilters(): TrackViewFilters {
@@ -48,12 +47,6 @@ export function defaultViews(musicDirectory: string): View[] {
     type: 'duplicates',
     match: emptyDuplicateMatch(),
     durationSlack: 2
-  })
-  views.push({
-    id: 'default:problems',
-    name: 'Damaged tracks',
-    type: 'problems',
-    checks: emptyProblemChecks()
   })
   return views
 }

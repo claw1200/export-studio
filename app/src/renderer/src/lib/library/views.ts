@@ -1,6 +1,5 @@
 import { formatDuration } from '$lib/format'
 import { isDurationSlack } from '$lib/library/duplicates'
-import { isProblemChecks } from '$lib/library/problems'
 import { getSetting, setSetting } from '$lib/settings'
 import type { DuplicateMatch, PlaylistMembership, Track, TrackViewFilters, View } from '$lib/types'
 import { introduceViews } from './defaults'
@@ -169,14 +168,17 @@ function isView(value: unknown): value is View {
   if (view.type === 'tracks') return isFilters(view.filters)
   if (view.type === 'files') return typeof view.directory === 'string' && typeof view.showInCollection === 'boolean'
   if (view.type === 'duplicates') return isDuplicateMatch(view.match) && isDurationSlack(view.durationSlack)
-  if (view.type === 'problems') return isProblemChecks(view.checks)
   return false
+}
+
+/** Drops views this build no longer understands, including a saved Damaged tracks view. */
+export function keepViews(value: unknown): View[] {
+  return Array.isArray(value) ? value.filter(isView) : []
 }
 
 function readStoredViews(): View[] {
   try {
-    const raw = JSON.parse(getSetting(STORAGE_KEY) ?? '[]') as unknown
-    return Array.isArray(raw) ? raw.filter(isView) : []
+    return keepViews(JSON.parse(getSetting(STORAGE_KEY) ?? '[]') as unknown)
   } catch {
     return []
   }

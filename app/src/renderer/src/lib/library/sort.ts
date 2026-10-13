@@ -22,6 +22,7 @@ export type SortKey =
   | 'position'
   | 'cueStars'
   | 'cueCount'
+  | 'compat'
 
 export interface TrackSort {
   key: SortKey
@@ -36,7 +37,7 @@ function camelotRank(key: string): number {
   return Number(m[1]) * 2 + (m[2].toUpperCase() === 'B' ? 1 : 0)
 }
 
-function compare(a: Track, b: Track, key: Exclude<SortKey, 'position'>): number {
+function compare(a: Track, b: Track, key: Exclude<SortKey, 'position' | 'compat'>): number {
   switch (key) {
     case 'bpm':
     case 'duration':
@@ -60,13 +61,20 @@ function compare(a: Track, b: Track, key: Exclude<SortKey, 'position'>): number 
   }
 }
 
-/** Sorts by `sort`, ties broken by title; `positions` orders by playlist position. */
-export function sortTracks(list: Track[], sort: TrackSort, positions: ReadonlyMap<string, number>): Track[] {
+/** Sorts by `sort`, ties broken by title. `positions` orders a playlist. `ranks` orders the hardware light. */
+export function sortTracks(
+  list: Track[],
+  sort: TrackSort,
+  positions: ReadonlyMap<string, number>,
+  ranks?: ReadonlyMap<string, number>
+): Track[] {
   const { key, dir } = sort
   const order =
     key === 'position'
       ? (a: Track, b: Track) => (positions.get(a.id) ?? 0) - (positions.get(b.id) ?? 0)
-      : (a: Track, b: Track) => compare(a, b, key)
+      : key === 'compat'
+        ? (a: Track, b: Track) => (ranks?.get(a.id) ?? 0) - (ranks?.get(b.id) ?? 0)
+        : (a: Track, b: Track) => compare(a, b, key)
   return [...list].sort((a, b) => order(a, b) * dir || collator.compare(a.title, b.title))
 }
 

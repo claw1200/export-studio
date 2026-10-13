@@ -988,7 +988,7 @@ class Library:
         return self.tracks(ids=[content.ID for content, _, _ in plan])
 
     def inspect_tracks(self, tracks: list) -> list[dict]:
-        """Header, size, and length checks for a batch of collection tracks.
+        """Header checks for a batch of collection tracks.
 
         Each item is `{id, size?, mtime?}`. When size and mtime still match the file, the header
         is not read again and the result is `same`. Streaming tracks are left out.
@@ -1002,7 +1002,7 @@ class Library:
             content = self._content(str(item["id"]))
             stored_path = content.FolderPath or ""
             if not _is_local(stored_path):
-                out.append({"id": content.ID, "size": 0, "mtime": None, "same": False, "issues": []})
+                out.append({"id": content.ID, "size": 0, "mtime": None, "same": False, "issues": [], "audio": None})
                 continue
             path = Path(stored_path)
             if "size" in item and "mtime" in item:
@@ -1015,14 +1015,10 @@ class Library:
                         "mtime": None if mtime is None else str(mtime),
                         "same": True,
                         "issues": [],
+                        "audio": None,
                     })
                     continue
-            result = inspect_file(
-                path,
-                stored_file_type(content.FileType),
-                _whole(content.FileSize),
-                _whole(content.Length),
-            )
+            result = inspect_file(path)
             out.append({"id": content.ID, "same": False, **result})
         return out
 

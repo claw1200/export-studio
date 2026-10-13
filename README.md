@@ -32,16 +32,16 @@ I would eventally like to add support for Serato and other DJ software libraries
 | Lightweight and responsive UI     | 🟢           | ❌         |
 | High-resolution waveforms         | 🟢           | ❌         |
 | Backups                           | 🟢           | ❌         |
+| Hardware compatibility checks     | 🟢           | ❌         |
 | Standard beatgrid editing         | 🟢           | ✅         |
-| Dynamic beatgrid editing          | 🟡           | ✅         |
 | Track Analysis                    | 🟢           | ✅         |
 | USB sync                          | 🟢           | ✅         |
-| Streaming                         | ⚫️           | ✅         |
-| Playlist conversion               | 🟡           | ❌         |
-| USB Hardware compatibility checks | 🟡           | ❌         |
-| Phrase analysis                   | 🟡           | ✅         |
+| Dynamic beatgrid editing          | 🟡           | ✅         |
 | Duel Player                       | 🟡           | ✅         |
+| Phrase analysis                   | 🟡           | ✅         |
+| Playlist conversion               | 🟡           | ❌         |
 | Support Serato Library            | 🟡           | ❌         |
+| Streaming                         | ⚫️           | ✅         |
 
 
 ## Key Features

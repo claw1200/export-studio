@@ -3,16 +3,8 @@
   import { getApp } from '$lib/context'
   import { api } from '$lib/api'
   import { emptyDuplicateMatch } from '$lib/library/duplicates'
-  import { emptyProblemChecks } from '$lib/library/problems'
   import { emptyFilters, formatDurationInput, parseDurationInput } from '$lib/library/views'
-  import type {
-    DuplicateMatch,
-    DurationSlack,
-    PlaylistMembership,
-    ProblemChecks,
-    TrackViewFilters,
-    View
-  } from '$lib/types'
+  import type { DuplicateMatch, DurationSlack, PlaylistMembership, TrackViewFilters, View } from '$lib/types'
 
   let { view = null, onclose }: { view?: View | null; onclose: () => void } = $props()
 
@@ -21,12 +13,12 @@
   const opened = untrack(() => view)
   const initial = opened?.type === 'tracks' ? opened.filters : emptyFilters()
   const initialMatch = opened?.type === 'duplicates' ? opened.match : emptyDuplicateMatch()
-  const initialChecks = opened?.type === 'problems' ? opened.checks : emptyProblemChecks()
   let name = $state(opened?.name ?? '')
-  let kind = $state<'tracks' | 'files' | 'duplicates' | 'problems'>(opened?.type ?? 'tracks')
+  let kind = $state<'tracks' | 'files' | 'duplicates'>(
+    opened?.type === 'tracks' || opened?.type === 'files' || opened?.type === 'duplicates' ? opened.type : 'tracks'
+  )
   let filters = $state<TrackViewFilters>({ ...initial, keys: [...initial.keys] })
   let match = $state<DuplicateMatch>({ ...initialMatch })
-  let checks = $state<ProblemChecks>({ ...initialChecks })
   let durationSlack = $state<DurationSlack>(opened?.type === 'duplicates' ? opened.durationSlack : 2)
   let directory = $state(opened?.type === 'files' ? opened.directory : '')
   let showInCollection = $state(opened?.type === 'files' ? opened.showInCollection : true)
@@ -62,8 +54,7 @@
   const blurbs = {
     tracks: 'List collection tracks that match every filter you fill in.',
     files: 'List the audio files under a folder. Files already in the collection keep their library data.',
-    duplicates: 'List collection tracks that match each other on every field you turn on.',
-    problems: 'List collection tracks whose audio is missing, unreadable, or does not match what rekordbox stored.'
+    duplicates: 'List collection tracks that match each other on every field you turn on.'
   }
   const blurb = $derived(blurbs[kind])
 
@@ -115,33 +106,6 @@
         return false
       }
       library.saveView({ id, name: trimmed, type: 'files', directory: folder, showInCollection })
-      return true
-    }
-    if (kind === 'problems') {
-      if (
-        !checks.missing &&
-        !checks.type &&
-        !checks.unreadable &&
-        !checks.incompatible &&
-        !checks.size &&
-        !checks.duration
-      ) {
-        error = 'Turn on at least one check'
-        return false
-      }
-      library.saveView({
-        id,
-        name: trimmed,
-        type: 'problems',
-        checks: {
-          missing: checks.missing,
-          unreadable: checks.unreadable,
-          type: checks.type,
-          incompatible: checks.incompatible,
-          size: checks.size,
-          duration: checks.duration
-        }
-      })
       return true
     }
     if (kind === 'duplicates') {
@@ -227,7 +191,7 @@
           bind:value={name}
           class={inputClass}
           spellcheck="false"
-          placeholder={kind === 'duplicates' ? 'Suspected duplicates' : kind === 'problems' ? 'Damaged tracks' : ''}
+          placeholder={kind === 'duplicates' ? 'Suspected duplicates' : ''}
         />
       </label>
 
@@ -267,18 +231,6 @@
           onclick={() => (kind = 'duplicates')}
         >
           Duplicates
-        </button>
-        <button
-          type="button"
-          class={[
-            'h-7 flex-1 rounded-[5px] text-[12.5px]',
-            kind === 'problems' ? 'bg-raised font-medium text-fg' : 'text-muted hover:text-fg'
-          ]}
-          role="radio"
-          aria-checked={kind === 'problems'}
-          onclick={() => (kind = 'problems')}
-        >
-          Problems
         </button>
       </div>
 
@@ -419,8 +371,7 @@
           </label>
         </div>
         <p class="mt-3 text-[11.5px] leading-snug text-faint">
-          Title and artist ignore case and punctuation. Mix names stay in the title, so an original mix and a dub stay
-          apart. File size has to match exactly.
+          Filter tracks that are suspected to be duplicates of each other.
         </p>
         {#if match.title || match.fileSize}
           <p class="mt-1.5 text-[11.5px] leading-snug text-faint">
@@ -458,37 +409,6 @@
             </div>
           </div>
         {/if}
-      {:else}
-        <div class="mt-4 grid grid-cols-2 gap-2">
-          <label class="flex items-center gap-2 text-[12.5px] text-muted">
-            <input type="checkbox" class="accent-accent" bind:checked={checks.missing} />
-            File missing
-          </label>
-          <label class="flex items-center gap-2 text-[12.5px] text-muted">
-            <input type="checkbox" class="accent-accent" bind:checked={checks.type} />
-            Type doesn't match the file
-          </label>
-          <label class="flex items-center gap-2 text-[12.5px] text-muted">
-            <input type="checkbox" class="accent-accent" bind:checked={checks.unreadable} />
-            File can't be read
-          </label>
-          <label class="flex items-center gap-2 text-[12.5px] text-muted">
-            <input type="checkbox" class="accent-accent" bind:checked={checks.incompatible} />
-            Not safe for a CDJ
-          </label>
-          <label class="flex items-center gap-2 text-[12.5px] text-muted">
-            <input type="checkbox" class="accent-accent" bind:checked={checks.size} />
-            File size doesn't match
-          </label>
-          <label class="flex items-center gap-2 text-[12.5px] text-muted">
-            <input type="checkbox" class="accent-accent" bind:checked={checks.duration} />
-            Length doesn't match
-          </label>
-        </div>
-        <p class="mt-3 text-[11.5px] leading-snug text-faint">
-          Type covers a file rekordbox still calls an MP3 after it was pointed at a WAV. Length allows two seconds of
-          difference. Streaming tracks are left out.
-        </p>
       {/if}
 
       {#if error}

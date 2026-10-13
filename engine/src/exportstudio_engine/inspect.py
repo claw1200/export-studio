@@ -1,7 +1,7 @@
-"""Compare a collection file's header with the type, size, and length rekordbox stored.
+"""Read a collection file's container header.
 
-Reads the container header only. MP3 length comes from a Xing or VBRI tag in the first
-frame, not from walking the file.
+Returns measurements the client compares with player limits. MP3 length is not
+read; a Xing or VBRI tag is not required.
 """
 
 from __future__ import annotations
@@ -10,31 +10,15 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path
 
-LENGTH_SLACK = 2
-CDJ_RATES = {44_100, 48_000}
-
-SUFFIXES = {
-    ".mp3": "MP3",
-    ".m4a": "M4A",
-    ".mp4": "M4A",
-    ".flac": "FLAC",
-    ".wav": "WAV",
-    ".aif": "AIFF",
-    ".aiff": "AIFF",
-}
-
-_SEVERITY = {"missing": 0, "unreadable": 1, "type": 2, "incompatible": 3, "size": 4, "duration": 5}
-
 
 @dataclass
 class Header:
     kind: str
-    length: int | None
-    incompatible: str | None
-
-
-def extension_type(path: Path) -> str | None:
-    return SUFFIXES.get(path.suffix.lower())
+    sample_rate: int
+    bit_depth: int
+    channels: int
+    encoding: str
+    bitrate: int = 0
 
 
 def same_fingerprint(path: Path, size: object, mtime: object) -> tuple[int, int | None] | None:
@@ -63,107 +47,48 @@ def same_fingerprint(path: Path, size: object, mtime: object) -> tuple[int, int 
     return None
 
 
-def inspect_file(path: Path, stored_type: str | None, stored_size: int, stored_length: int) -> dict:
-    """Issues for one local file. `stored_type` is MP3, M4A, FLAC, WAV, AIFF, or None."""
+def inspect_file(path: Path) -> dict:
+    """Header measurements for one local file. Missing and unreadable files have no audio."""
     if not path.is_file():
-        issues = [{"code": "missing", "detail": "File missing"}]
-        _type_issue(issues, stored_type, extension_type(path), None)
-        return {"size": 0, "mtime": None, "issues": _ordered(issues)}
+        return {"size": 0, "mtime": None, "issues": [{"code": "missing", "detail": "File missing"}], "audio": None}
 
     try:
         stat = path.stat()
     except OSError:
-        return {"size": 0, "mtime": None, "issues": [{"code": "missing", "detail": "File missing"}]}
+        return {"size": 0, "mtime": None, "issues": [{"code": "missing", "detail": "File missing"}], "audio": None}
 
     size = stat.st_size
     # Nanoseconds don't fit in a JSON number, so the client keeps this as text.
     mtime = str(stat.st_mtime_ns)
-    issues: list[dict] = []
+    unreadable = {"code": "unreadable", "detail": "File can't be read"}
     if size <= 0:
-        issues.append({"code": "unreadable", "detail": "File can't be read"})
-    else:
-        try:
-            header = _read_header(path, size)
-        except OSError:
-            header = None
-        if header is None:
-            issues.append({"code": "unreadable", "detail": "File can't be read"})
-            _type_issue(issues, stored_type, extension_type(path), None)
-        else:
-            _type_issue(issues, stored_type, extension_type(path), header.kind)
-            if header.incompatible:
-                issues.append({"code": "incompatible", "detail": header.incompatible})
-            if (
-                header.length is not None
-                and stored_length > 0
-                and abs(header.length - stored_length) > LENGTH_SLACK
-            ):
-                issues.append({"code": "duration", "detail": "Length doesn't match the library"})
-    if stored_size > 0 and size != stored_size:
-        issues.append({"code": "size", "detail": "File size doesn't match the library"})
-    return {"size": size, "mtime": mtime, "issues": _ordered(issues)}
+        return {"size": size, "mtime": mtime, "issues": [unreadable], "audio": None}
+    try:
+        header = _read_header(path, size)
+    except OSError:
+        header = None
+    if header is None:
+        return {"size": size, "mtime": mtime, "issues": [unreadable], "audio": None}
+    return {"size": size, "mtime": mtime, "issues": [], "audio": _audio(header)}
 
 
-def _ordered(issues: list[dict]) -> list[dict]:
-    return sorted(issues, key=lambda item: _SEVERITY.get(item["code"], 9))
+def _audio(header: Header) -> dict:
+    return {
+        "kind": header.kind,
+        "sampleRate": header.sample_rate,
+        "bitDepth": header.bit_depth,
+        "channels": header.channels,
+        "bitrate": header.bitrate,
+        "encoding": header.encoding,
+    }
 
 
-def _type_issue(issues: list[dict], stored: str | None, ext: str | None, kind: str | None) -> None:
-    if stored and kind and stored != kind:
-        detail = f"Rekordbox says {stored}, the file is {kind}"
-    elif stored and ext and stored != ext:
-        detail = f"Rekordbox says {stored}, the file is {ext}"
-    elif ext and kind and ext != kind:
-        detail = f"Extension is {ext}, the file is {kind}"
-    else:
-        return
-    issues.append({"code": "type", "detail": detail})
-
-
-def _khz(rate: int) -> str:
-    if rate % 1000 == 0:
-        text = str(rate // 1000)
-    elif rate % 100 == 0:
-        text = f"{rate / 1000:.1f}"
-    else:
-        text = f"{rate / 1000:.2f}"
-    return f"{text} kHz"
-
-
-def _playback_detail(kind: str, reasons: list[str]) -> str | None:
-    if not reasons:
-        return None
-    head = reasons[0]
-    text = f"{kind} has {head}" if head.endswith("channels") else f"{kind} is {head}"
-    if len(reasons) > 1:
-        text += ", " + ", ".join(reasons[1:])
-    return text
-
-
-def _pcm_detail(kind: str, audio_format: int, bits: int, rate: int, channels: int) -> str | None:
-    reasons: list[str] = []
+def _pcm_encoding(audio_format: int) -> str:
     if audio_format == 3:
-        reasons.append(f"{bits}-bit float" if bits else "float")
-    elif audio_format == 2:
-        reasons.append("ADPCM")
-    elif audio_format != 1:
-        reasons.append("not integer PCM")
-    elif bits not in (16, 24):
-        reasons.append(f"{bits}-bit PCM")
-    if rate and rate not in CDJ_RATES:
-        reasons.append(_khz(rate))
-    if channels and channels not in (1, 2):
-        reasons.append(f"{channels} channels")
-    return _playback_detail(kind, reasons)
-
-
-def _rate_detail(kind: str, rate: int | None, channels: int | None) -> str | None:
-    reasons: list[str] = []
-    if rate and rate not in CDJ_RATES:
-        reasons.append(_khz(rate))
-    if channels and channels not in (1, 2):
-        reasons.append(f"{channels} channels")
-    return _playback_detail(kind, reasons)
+        return "float"
+    if audio_format == 1:
+        return "pcm"
+    return "other"
 
 
 def _read_header(path: Path, size: int) -> Header | None:
@@ -184,7 +109,6 @@ def _read_header(path: Path, size: int) -> Header | None:
 
 def _wav(handle, size: int) -> Header | None:
     fmt = None
-    data_size = None
     handle.seek(12)
     for _ in range(64):
         if handle.tell() + 8 > size:
@@ -202,7 +126,6 @@ def _wav(handle, size: int) -> Header | None:
                 audio_format = struct.unpack("<H", raw[24:26])[0]
             fmt = (audio_format, channels, rate, bits)
         elif ident == b"data":
-            data_size = chunk_size
             break
         nxt = pos + chunk_size + (chunk_size & 1)
         if chunk_size <= 0 or nxt <= pos:
@@ -211,11 +134,7 @@ def _wav(handle, size: int) -> Header | None:
     if fmt is None:
         return None
     audio_format, channels, rate, bits = fmt
-    length = None
-    frame = channels * (bits // 8)
-    if data_size is not None and frame and rate:
-        length = int(round(data_size / frame / rate))
-    return Header("WAV", length, _pcm_detail("WAV", audio_format, bits, rate, channels))
+    return Header("WAV", rate, bits, channels, _pcm_encoding(audio_format))
 
 
 def _extended(raw: bytes) -> float:
@@ -246,10 +165,10 @@ def _aiff(handle, size: int, compressed: bool) -> Header | None:
         pos = handle.tell()
         if ident == b"COMM" and chunk_size >= 18:
             raw = handle.read(min(chunk_size, 64))
-            channels, frames, bits = struct.unpack(">HIH", raw[:8])
+            channels, _frames, bits = struct.unpack(">HIH", raw[:8])
             rate = _extended(raw[8:18])
             compression = raw[18:22] if compressed and len(raw) >= 22 else b"NONE"
-            found = (channels, frames, bits, rate, compression)
+            found = (channels, bits, rate, compression)
             break
         nxt = pos + chunk_size + (chunk_size & 1)
         if chunk_size <= 0 or nxt <= pos:
@@ -257,7 +176,7 @@ def _aiff(handle, size: int, compressed: bool) -> Header | None:
         handle.seek(nxt)
     if found is None:
         return None
-    channels, frames, bits, rate, compression = found
+    channels, bits, rate, compression = found
     rate_i = int(round(rate)) if rate else 0
     comp = compression.upper()
     if comp in (b"NONE", b"TWOS", b"SOWT", b"RAW "):
@@ -266,8 +185,7 @@ def _aiff(handle, size: int, compressed: bool) -> Header | None:
         audio_format = 3
     else:
         audio_format = 0
-    length = int(round(frames / rate)) if rate else None
-    return Header("AIFF", length, _pcm_detail("AIFF", audio_format, bits, rate_i, channels))
+    return Header("AIFF", rate_i, bits, channels, _pcm_encoding(audio_format))
 
 
 def _flac(handle) -> Header | None:
@@ -285,20 +203,20 @@ def _flac(handle) -> Header | None:
     packed = int.from_bytes(info[10:18], "big")
     rate = packed >> 44
     channels = ((packed >> 41) & 0x7) + 1
-    samples = packed & 0xFFFFFFFFF
-    length = int(round(samples / rate)) if rate and samples else None
-    return Header("FLAC", length, _rate_detail("FLAC", rate, channels))
+    bits = ((packed >> 36) & 0x1F) + 1
+    return Header("FLAC", rate, bits, channels, "flac")
 
 
 def _mp4(handle, size: int) -> Header:
-    duration = None
-    rate = None
-    channels = None
+    rate = 0
+    channels = 0
+    bits = 0
+    codec = b""
     try:
         handle.seek(0)
 
         def walk(end: int, depth: int) -> None:
-            nonlocal duration, rate, channels
+            nonlocal rate, channels, bits, codec
             while handle.tell() + 8 <= end:
                 start = handle.tell()
                 raw_size = handle.read(4)
@@ -319,17 +237,6 @@ def _mp4(handle, size: int) -> Header:
                     return
                 if kind in (b"moov", b"trak", b"mdia", b"minf", b"stbl") and depth < 6:
                     walk(box_end, depth + 1)
-                elif kind == b"mvhd":
-                    version = handle.read(1)
-                    if version == b"\x00":
-                        handle.seek(start + header + 12)
-                        timescale, dur = struct.unpack(">II", handle.read(8))
-                    else:
-                        handle.seek(start + header + 20)
-                        timescale = struct.unpack(">I", handle.read(4))[0]
-                        dur = struct.unpack(">Q", handle.read(8))[0]
-                    if timescale:
-                        duration = int(round(dur / timescale))
                 elif kind == b"mdhd":
                     version = handle.read(1)
                     if version == b"\x00":
@@ -341,16 +248,20 @@ def _mp4(handle, size: int) -> Header:
                         rate = timescale
                 elif kind == b"stsd" and box_end - (start + header) >= 28:
                     handle.seek(start + header + 8)
-                    handle.read(8)
+                    entry = handle.read(8)
+                    if len(entry) >= 8:
+                        codec = entry[4:8]
                     handle.read(16)
-                    if handle.tell() + 2 <= box_end:
-                        (channels,) = struct.unpack(">H", handle.read(2))
+                    if handle.tell() + 4 <= box_end:
+                        channels, bits = struct.unpack(">HH", handle.read(4))
                 handle.seek(box_end)
 
         walk(size, 0)
     except (OSError, struct.error):
         pass
-    return Header("M4A", duration, _rate_detail("M4A", rate, channels))
+    if codec == b"alac":
+        return Header("ALAC", rate, bits, channels, "alac")
+    return Header("AAC", rate, bits, channels, "aac")
 
 
 def _mp3_frame(data: bytes) -> bool:
@@ -380,33 +291,14 @@ def _mp3(handle, size: int) -> Header | None:
         return None
     version = (frame[1] >> 3) & 0x03
     sample_index = (frame[2] >> 2) & 0x03
+    bitrate_index = (frame[2] >> 4) & 0x0F
     rates = {3: (44100, 48000, 32000), 2: (22050, 24000, 16000), 0: (11025, 12000, 8000)}
     rate = rates[version][sample_index]
-    samples = 1152 if version == 3 else 576
+    bitrates = {
+        3: (0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0),
+        2: (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0),
+        0: (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0),
+    }
     mode = (frame[3] >> 6) & 0x03
-    side = (17 if mode == 3 else 32) if version == 3 else (9 if mode == 3 else 17)
-    length = _mp3_length(handle, offset, side, samples, rate)
-    detail = None if version == 3 and rate in CDJ_RATES else f"MP3 is {_khz(rate)}"
-    return Header("MP3", length, detail)
-
-
-def _mp3_length(handle, offset: int, side: int, samples: int, rate: int) -> int | None:
-    handle.seek(offset + 4 + side)
-    tag = handle.read(4)
-    frames = None
-    if tag in (b"Xing", b"Info") and len(tag) == 4:
-        flags = handle.read(4)
-        if len(flags) == 4 and struct.unpack(">I", flags)[0] & 1:
-            raw = handle.read(4)
-            if len(raw) == 4:
-                frames = struct.unpack(">I", raw)[0]
-    if frames is None:
-        handle.seek(offset + 36)
-        if handle.read(4) == b"VBRI":
-            handle.read(6)
-            raw = handle.read(4)
-            if len(raw) == 4:
-                frames = struct.unpack(">I", raw)[0]
-    if not frames or not rate:
-        return None
-    return int(round(frames * samples / rate))
+    channels = 1 if mode == 3 else 2
+    return Header("MP3", rate, 0, channels, "mp3", bitrates[version][bitrate_index])

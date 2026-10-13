@@ -235,21 +235,14 @@ export interface DuplicateMatch {
 /** Whole seconds of duration tolerance. 0 means the durations must be equal. */
 export type DurationSlack = 0 | 1 | 2 | 5
 
-/** Something wrong with a collection file, severe ones first. */
-export type ProblemCode = 'missing' | 'unreadable' | 'type' | 'incompatible' | 'size' | 'duration'
-
-export interface ProblemChecks {
-  missing: boolean
-  unreadable: boolean
-  type: boolean
-  incompatible: boolean
-  size: boolean
-  duration: boolean
-}
-
-export interface TrackIssue {
-  code: ProblemCode
-  detail: string
+/** Measurements from a container header. Null fields are absent when the cached probe still applies. */
+export interface AudioProbe {
+  kind: string
+  sampleRate: number
+  bitDepth: number
+  channels: number
+  bitrate: number
+  encoding: 'pcm' | 'float' | 'mp3' | 'aac' | 'flac' | 'alac' | 'other'
 }
 
 /** One file the engine has compared with the rekordbox row. `same` means the cached probe still applies. */
@@ -259,7 +252,8 @@ export interface TrackInspection {
   /** Nanoseconds since the epoch, as text so it isn't rounded. Null when the file is missing. */
   mtime: string | null
   same: boolean
-  issues: TrackIssue[]
+  issues: { code: 'missing' | 'unreadable'; detail: string }[]
+  audio: AudioProbe | null
 }
 
 export interface TrackViewFilters {
@@ -283,7 +277,6 @@ export type View =
   | { id: string; name: string; type: 'tracks'; filters: TrackViewFilters }
   | { id: string; name: string; type: 'files'; directory: string; showInCollection: boolean }
   | { id: string; name: string; type: 'duplicates'; match: DuplicateMatch; durationSlack: DurationSlack }
-  | { id: string; name: string; type: 'problems'; checks: ProblemChecks }
 
 export type Source =
   | { type: 'collection' }

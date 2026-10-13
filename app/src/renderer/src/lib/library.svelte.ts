@@ -4,7 +4,8 @@ import { clearDetailCache } from './deck/session.svelte'
 import { cueStats, newestFirst, type SortKey, sortTracks, type TrackSort } from './library/sort'
 import { buildTree } from './library/tree'
 import { duplicateGroups, rankCopies } from './library/duplicates'
-import { problemRows } from './library/problems'
+import { assess, factsFromProbe, factsFromTrack } from './hardware/compatibility'
+import { DEFAULT_GREEN, playerById } from './hardware/players'
 import { loadViews, looseTrack, matchesTrack, pathKey, saveViews, type FileEntry } from './library/views'
 import { getSetting, setSetting } from './settings'
 import type {
@@ -13,9 +14,9 @@ import type {
   LibraryInfo,
   Source,
   SyncProgress,
+  AudioProbe,
   Track,
   TrackEdit,
-  TrackIssue,
   TreeItem,
   View,
   Volume
@@ -28,6 +29,19 @@ export type BrowserArtwork = 'fill' | 'whole'
 
 function storedArtwork(): BrowserArtwork {
   return getSetting('browserArtwork') === 'whole' ? 'whole' : 'fill'
+}
+
+function storedPlayer(key: string, fallback: string): string {
+  const id = getSetting(key)
+  return id && playerById(id) ? id : fallback
+}
+
+export interface ProbeRecord {
+  size: number
+  mtime: string | null
+  missing: boolean
+  unreadable: boolean
+  audio: AudioProbe | null
 }
 
 function dropCaches(): void {
@@ -77,6 +91,7 @@ export class Library {
   importArtwork = $state(getSetting('importArtwork') !== '0')
   hideStreaming = $state(getSetting('hideStreaming') !== '0')
   browserArtwork = $state<BrowserArtwork>(storedArtwork())
+  hardwareGreen = $state(storedPlayer('hardwareGreen', DEFAULT_GREEN))
   importing = $state(false)
   renamingId = $state<string | null>(null)
   dragging = $state.raw<string[] | null>(null)
@@ -87,11 +102,13 @@ export class Library {
 
   viewById = $derived(new Map(this.views.map((view) => [view.id, view])))
   sourceView = $derived(this.source.type === 'view' ? (this.viewById.get(this.source.id) ?? null) : null)
-  /** Header probes for the open damaged-tracks view, keyed by track id. */
-  private probedIssues = $state.raw<Record<string, TrackIssue[]>>({})
+  /** Bumped when a header probe lands, so visible compatibility lights can update. */
+  probeRevision = $state(0)
   /** Session cache of header probes, keyed by path. Size and mtime decide when to read again. */
-  private problemCache = new Map<string, { size: number; mtime: string | null; issues: TrackIssue[] }>()
-  problemScan = $state<{ done: number; total: number } | null>(null)
+  private probeCache = new Map<string, ProbeRecord>()
+  private probeInflight = new Set<string>()
+  private probeQueue: string[] = []
+  private probeTimer: ReturnType<typeof setTimeout> | undefined
 
   /** Open duplicates view, keeper first inside each group. */
   private listedDuplicates = $derived.by(() => {
@@ -107,14 +124,6 @@ export class Library {
     })
     return { tracks, groups }
   })
-  /** Open damaged-tracks view, severe problems first. */
-  private listedProblems = $derived.by(() => {
-    const view = this.sourceView
-    if (view?.type !== 'problems') return null
-    const rows = problemRows(this.tracks, view.checks, this.probedIssues)
-    return { tracks: rows.map((row) => row.track), text: new Map(rows.map((row) => [row.track.id, row.text])) }
-  })
-  problemText = $derived(this.listedProblems?.text ?? new Map<string, string>())
   private looseTracks = $derived(this.fileEntries.flatMap((entry) => (entry.loose ? [entry.loose] : [])))
   byId = $derived(new Map([...this.tracks, ...this.deviceTracks, ...this.looseTracks].map((t) => [t.id, t])))
   playlistById = $derived(new Map(this.playlists.map((p) => [p.id, p])))
@@ -184,7 +193,10 @@ export class Library {
         return terms.every((term) => h.includes(term))
       })
     }
-    if (this.sort) return sortTracks(list, this.sort, this.positions)
+    if (this.sort) {
+      const ranks = this.sort.key === 'compat' ? this.compatRanks(list) : undefined
+      return sortTracks(list, this.sort, this.positions, ranks)
+    }
     if (this.source.type === 'collection' || this.source.type === 'tag') return newestFirst(list)
     if (this.source.type === 'view' && this.viewById.get(this.source.id)?.type === 'tracks') return newestFirst(list)
     return list
@@ -349,6 +361,54 @@ export class Library {
   setBrowserArtwork(style: BrowserArtwork): void {
     this.browserArtwork = style
     setSetting('browserArtwork', style)
+  }
+
+  setHardwareGreen(id: string): void {
+    if (!playerById(id)) return
+    this.hardwareGreen = id
+    setSetting('hardwareGreen', id)
+  }
+
+  /** Red, then yellow, then green. Reads the probe cache so a finished header check can re-sort. */
+  private compatRanks(list: readonly Track[]): Map<string, number> {
+    const greenId = this.hardwareGreen
+    const ranks = new Map<string, number>()
+    for (const track of list) {
+      const probe = this.probeOf(track)
+      const facts = probe?.audio ? factsFromProbe(probe.audio, track) : factsFromTrack(track)
+      const verdict = assess(facts, {
+        missing: track.missing || !!probe?.missing,
+        unreadable: !!probe?.unreadable,
+        streaming: track.streaming,
+        greenId
+      })
+      ranks.set(track.id, verdict.color === 'red' ? 0 : verdict.color === 'yellow' ? 1 : 2)
+    }
+    return ranks
+  }
+
+  /** Header probe for a track, once a visible row has been read. */
+  probeOf(track: Track): ProbeRecord | undefined {
+    void this.probeRevision
+    if (!track.path) return undefined
+    return this.probeCache.get(pathKey(track.path))
+  }
+
+  /** Queue header probes for the rows on screen. Collection files only. */
+  probeVisible(ids: readonly string[]): void {
+    const known = new Set(this.tracks.map((track) => track.id))
+    const next: string[] = []
+    for (const id of ids) {
+      if (!known.has(id) || this.probeInflight.has(id)) continue
+      const track = this.byId.get(id)
+      if (!track?.path || track.streaming) continue
+      if (this.probeCache.has(pathKey(track.path))) continue
+      next.push(id)
+    }
+    this.probeQueue = next
+    clearTimeout(this.probeTimer)
+    if (!next.length) return
+    this.probeTimer = setTimeout(() => void this.flushProbes(), 40)
   }
 
   onTracksUpdated(listener: (tracks: Track[]) => void): () => void {
@@ -763,8 +823,6 @@ export class Library {
       this.selection = this.selectedId ? new Set([this.selectedId]) : new Set()
     }
     this.source = source
-    const problems = source.type === 'view' && this.viewById.get(source.id)?.type === 'problems'
-    if (!problems) this.problemScan = null
     if (source.type === 'collection' || source.type === 'tag') {
       this.sourceIds = null
       this.deviceTracks = []
@@ -776,12 +834,6 @@ export class Library {
       this.sourceIds = null
       this.deviceTracks = []
       const view = this.viewById.get(source.id)
-      if (view?.type === 'problems') {
-        this.fileEntries = []
-        this.sourceLoading = false
-        void this.scanProblems(token)
-        return
-      }
       if (!view || view.type !== 'files') {
         this.fileEntries = []
         this.sourceLoading = false
@@ -840,7 +892,6 @@ export class Library {
       return this.tracks.filter((track) => matchesTrack(track, view.filters, this.playlistMembers.has(track.id)))
     }
     if (view.type === 'duplicates') return this.listedDuplicates?.tracks ?? []
-    if (view.type === 'problems') return this.listedProblems?.tracks ?? []
     const byPath = this.tracksByPath()
     const out: Track[] = []
     for (const entry of this.fileEntries) {
@@ -878,55 +929,40 @@ export class Library {
     this.selection = new Set([...this.selection].map((id) => remap.get(id) ?? id))
   }
 
-  private async scanProblems(token: number): Promise<void> {
-    const tracks = this.tracks.filter((track) => !track.streaming)
-    const seeded: Record<string, TrackIssue[]> = {}
-    for (const track of tracks) {
-      if (!track.path) continue
-      const cached = this.problemCache.get(pathKey(track.path))
-      if (cached) seeded[track.id] = cached.issues
-    }
-    this.probedIssues = seeded
-    if (!tracks.length) {
-      this.problemScan = null
-      return
-    }
-    this.problemScan = { done: 0, total: tracks.length }
-    const batch = 40
+  private async flushProbes(): Promise<void> {
+    const ids = this.probeQueue.splice(0, 40)
+    const tracks = ids.flatMap((id) => {
+      const track = this.byId.get(id)
+      return track?.path ? [track] : []
+    })
+    if (!tracks.length) return
+    for (const track of tracks) this.probeInflight.add(track.id)
     try {
-      for (let index = 0; index < tracks.length; index += batch) {
-        if (token !== this.sourceToken) return
-        const chunk = tracks.slice(index, index + batch)
-        let rows
-        try {
-          rows = await api.inspectTracks(
-            chunk.map((track) => {
-              const cached = track.path ? this.problemCache.get(pathKey(track.path)) : undefined
-              return cached ? { id: track.id, size: cached.size, mtime: cached.mtime } : { id: track.id }
-            })
-          )
-        } catch (error) {
-          if (token === this.sourceToken) this.notify((error as Error).message)
-          break
-        }
-        if (token !== this.sourceToken) return
-        const next = { ...this.probedIssues }
-        for (const row of rows) {
-          const track = this.byId.get(row.id)
-          const key = track?.path ? pathKey(track.path) : ''
-          if (row.same && key) {
-            next[row.id] = this.problemCache.get(key)?.issues ?? []
-          } else {
-            if (key) this.problemCache.set(key, { size: row.size, mtime: row.mtime, issues: row.issues })
-            next[row.id] = row.issues
-          }
-        }
-        this.probedIssues = next
-        this.problemScan = { done: Math.min(index + chunk.length, tracks.length), total: tracks.length }
+      const rows = await api.inspectTracks(
+        tracks.map((track) => {
+          const cached = this.probeCache.get(pathKey(track.path))
+          return cached ? { id: track.id, size: cached.size, mtime: cached.mtime } : { id: track.id }
+        })
+      )
+      for (const row of rows) {
+        const track = this.byId.get(row.id)
+        const key = track?.path ? pathKey(track.path) : ''
+        if (!key || row.same) continue
+        this.probeCache.set(key, {
+          size: row.size,
+          mtime: row.mtime,
+          missing: row.issues.some((issue) => issue.code === 'missing'),
+          unreadable: row.issues.some((issue) => issue.code === 'unreadable'),
+          audio: row.audio
+        })
       }
+      this.probeRevision += 1
+    } catch (error) {
+      this.notify((error as Error).message)
     } finally {
-      if (token === this.sourceToken) this.problemScan = null
+      for (const track of tracks) this.probeInflight.delete(track.id)
     }
+    if (this.probeQueue.length) void this.flushProbes()
   }
 
   private async loadFileView(directory: string, showInCollection: boolean, token: number): Promise<void> {

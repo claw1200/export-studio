@@ -1,4 +1,4 @@
-"""Header checks for files that no longer match the rekordbox row."""
+"""Header measurements for local audio files."""
 
 import struct
 import tempfile
@@ -30,74 +30,51 @@ def _codes(result: dict) -> set[str]:
     return {issue["code"] for issue in result["issues"]}
 
 
-def _detail(result: dict, code: str) -> str:
-    return next(issue["detail"] for issue in result["issues"] if issue["code"] == code)
-
-
 class InspectFileTest(unittest.TestCase):
-    def test_wav_stored_as_mp3(self) -> None:
+    def test_wav_header_is_measured(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "tune.wav"
             _wav(path)
-            result = inspect_file(path, "MP3", path.stat().st_size, 1)
+            result = inspect_file(path)
 
-        self.assertEqual(_codes(result), {"type"})
-        self.assertEqual(_detail(result, "type"), "Rekordbox says MP3, the file is WAV")
+        self.assertEqual(result["issues"], [])
+        self.assertEqual(
+            result["audio"],
+            {"kind": "WAV", "sampleRate": 44100, "bitDepth": 16, "channels": 1, "bitrate": 0, "encoding": "pcm"},
+        )
 
     def test_missing_file(self) -> None:
         path = Path(tempfile.gettempdir()) / "exportstudio-missing-tune.wav"
-        result = inspect_file(path, "WAV", 100, 1)
+        result = inspect_file(path)
         self.assertEqual(_codes(result), {"missing"})
         self.assertEqual(result["mtime"], None)
-
-    def test_missing_wav_still_flagged_when_rekordbox_says_mp3(self) -> None:
-        path = Path(tempfile.gettempdir()) / "exportstudio-missing-tune.wav"
-        result = inspect_file(path, "MP3", 0, 0)
-        self.assertEqual(_codes(result), {"missing", "type"})
+        self.assertIsNone(result["audio"])
 
     def test_empty_file_is_unreadable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "empty.wav"
             path.write_bytes(b"")
-            result = inspect_file(path, "WAV", 0, 0)
+            result = inspect_file(path)
 
         self.assertEqual(_codes(result), {"unreadable"})
+        self.assertIsNone(result["audio"])
 
-    def test_float_wav_is_not_cdj_safe(self) -> None:
+    def test_float_wav_is_measured_as_float(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "float.wav"
             _float_wav(path)
-            result = inspect_file(path, "WAV", path.stat().st_size, 0)
+            result = inspect_file(path)
 
-        self.assertEqual(_codes(result), {"incompatible"})
-        self.assertEqual(_detail(result, "incompatible"), "WAV is 32-bit float")
-
-    def test_size_mismatch(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "tune.wav"
-            _wav(path)
-            result = inspect_file(path, "WAV", path.stat().st_size + 10, 1)
-
-        self.assertEqual(_codes(result), {"size"})
-        self.assertEqual(_detail(result, "size"), "File size doesn't match the library")
-
-    def test_length_slack(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "tune.wav"
-            _wav(path)
-            size = path.stat().st_size
-            inside = inspect_file(path, "WAV", size, 3)
-            outside = inspect_file(path, "WAV", size, 4)
-
-        self.assertNotIn("duration", _codes(inside))
-        self.assertEqual(_codes(outside), {"duration"})
-        self.assertEqual(_detail(outside, "duration"), "Length doesn't match the library")
+        self.assertEqual(result["issues"], [])
+        self.assertEqual(result["audio"]["encoding"], "float")
+        self.assertEqual(result["audio"]["bitDepth"], 32)
+        self.assertEqual(result["audio"]["kind"], "WAV")
 
     def test_matching_wav_has_no_issues(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "tune.wav"
             _wav(path)
-            result = inspect_file(path, "WAV", path.stat().st_size, 1)
+            result = inspect_file(path)
 
         self.assertEqual(result["issues"], [])
         self.assertRegex(result["mtime"], r"^\d+$")

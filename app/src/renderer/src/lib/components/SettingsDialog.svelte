@@ -23,6 +23,7 @@
   import { BPM_RANGES, MAX_CONCURRENCY } from '$lib/analysis.svelte'
   import { backupDate, KEEP_CHOICES } from '$lib/backups.svelte'
   import { getApp } from '$lib/context'
+  import { PLAYERS } from '$lib/hardware/players'
   import { formatSize } from '$lib/format'
   import { ACTION_IDS, ACTIONS, chordFromEvent, chordLabel, type ActionGroup, type ActionId } from '$lib/keymap'
   import type { BrowserArtwork } from '$lib/library.svelte'
@@ -249,6 +250,16 @@
               'Leave tracks from streaming services out of the collection, playlists, histories and tags. They stay in rekordbox.',
               library.hideStreaming,
               () => library.setHideStreaming(!library.hideStreaming)
+            )}
+          </section>
+
+          <section class="mb-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Hardware</h3>
+            {@render playerMenu(
+              'Target',
+              'A track is green when it plays on this player and every newer one.',
+              library.hardwareGreen,
+              (id) => library.setHardwareGreen(id)
             )}
           </section>
 
@@ -580,6 +591,25 @@
       ></span>
     </span>
   </button>
+{/snippet}
+
+{#snippet playerMenu(label: string, description: string, current: string, pick: (id: string) => void)}
+  <label class="flex items-start gap-3 rounded-md px-2 py-2">
+    <span class="min-w-0 flex-1">
+      <span class="block text-[12.5px] font-medium">{label}</span>
+      <span class="mt-0.5 block text-[11px] leading-snug text-faint">{description}</span>
+    </span>
+    <select
+      class="h-7 max-w-44 shrink-0 rounded-md border border-line bg-bg px-2 text-[12px] text-fg"
+      aria-label={label}
+      value={current}
+      onchange={(e) => pick(e.currentTarget.value)}
+    >
+      {#each PLAYERS as player (player.id)}
+        <option value={player.id}>{player.name}</option>
+      {/each}
+    </select>
+  </label>
 {/snippet}
 
 {#snippet choice(label: string, description: string, options: Choice[], current: string, pick: (id: string) => void)}
