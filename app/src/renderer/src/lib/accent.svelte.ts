@@ -1,7 +1,10 @@
 import { getSetting, setSetting } from './settings'
 
-/** Closest sRGB hex to the light blue in app.css (`oklch(0.8 0.14 205)`). */
-export const DEFAULT_ACCENT = '#00d7e8'
+/** The highlight used until a custom color is saved. */
+export const DEFAULT_ACCENT = '#00aaff'
+
+/** Previous default. A saved copy of it is treated as unset so the new default applies. */
+const RETIRED_ACCENT = '#00d7e8'
 
 const KEY = 'accentColor'
 const HEX = /^#[0-9a-f]{6}$/
@@ -10,7 +13,8 @@ function stored(): string {
   const value = getSetting(KEY)
   if (!value) return DEFAULT_ACCENT
   const hex = value.toLowerCase()
-  return HEX.test(hex) ? hex : DEFAULT_ACCENT
+  if (!HEX.test(hex) || hex === RETIRED_ACCENT) return DEFAULT_ACCENT
+  return hex
 }
 
 /** Paints the highlight. The default leaves the stylesheet color in place. */

@@ -218,7 +218,7 @@
             <span class="min-w-0 flex-1">
               <span class="block text-[12.5px] font-medium">Accent color</span>
               <span class="mt-0.5 block text-[11px] leading-snug text-faint">
-                Buttons, highlights, and progress. The default is light blue.
+                Buttons, highlights, and progress.
               </span>
             </span>
             <input
