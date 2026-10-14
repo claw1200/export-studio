@@ -92,7 +92,7 @@ function collect(players: readonly Player[], facts: AudioFacts): { problems: str
   return { problems, incompatible }
 }
 
-export function factsFromTrack(track: Pick<Track, 'fileType' | 'sampleRate' | 'bitDepth' | 'bitrate'>): AudioFacts {
+function factsFromTrack(track: Pick<Track, 'fileType' | 'sampleRate' | 'bitDepth' | 'bitrate'>): AudioFacts {
   return {
     kind: track.fileType || null,
     sampleRate: track.sampleRate,
@@ -103,7 +103,7 @@ export function factsFromTrack(track: Pick<Track, 'fileType' | 'sampleRate' | 'b
   }
 }
 
-export function factsFromProbe(probe: AudioProbe, track: Pick<Track, 'bitrate'>): AudioFacts {
+function factsFromProbe(probe: AudioProbe, track: Pick<Track, 'bitrate'>): AudioFacts {
   return {
     kind: probe.kind,
     sampleRate: probe.sampleRate,
@@ -112,6 +112,20 @@ export function factsFromProbe(probe: AudioProbe, track: Pick<Track, 'bitrate'>)
     bitrate: probe.bitrate > 0 ? probe.bitrate : track.bitrate,
     encoding: probe.encoding
   }
+}
+
+export function verdictForTrack(
+  track: Pick<Track, 'fileType' | 'sampleRate' | 'bitDepth' | 'bitrate' | 'missing' | 'streaming'>,
+  probe: { missing: boolean; unreadable: boolean; audio: AudioProbe | null } | undefined,
+  greenId: string
+): Verdict {
+  const facts = probe?.audio ? factsFromProbe(probe.audio, track) : factsFromTrack(track)
+  return assess(facts, {
+    missing: track.missing || !!probe?.missing,
+    unreadable: !!probe?.unreadable,
+    streaming: track.streaming,
+    greenId
+  })
 }
 
 export function assess(

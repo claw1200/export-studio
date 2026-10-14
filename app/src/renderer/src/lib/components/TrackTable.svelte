@@ -4,7 +4,7 @@
   import { browserPreviews } from '$lib/browserPreview.svelte'
   import { getApp } from '$lib/context'
   import { artworkUrl } from '$lib/api'
-  import { assess, factsFromProbe, factsFromTrack, type Verdict } from '$lib/hardware/compatibility'
+  import { verdictForTrack, type Verdict } from '$lib/hardware/compatibility'
   import { formatBpm, formatDuration, keyColor, TRACK_COLORS } from '$lib/format'
   import { chordLabel } from '$lib/keymap'
   import { TRACK_DRAG_TYPE } from '$lib/library.svelte'
@@ -356,14 +356,7 @@
   })
 
   function compatibilityOf(track: Track): Verdict {
-    const probe = library.probeOf(track)
-    const facts = probe?.audio ? factsFromProbe(probe.audio, track) : factsFromTrack(track)
-    return assess(facts, {
-      missing: track.missing || !!probe?.missing,
-      unreadable: !!probe?.unreadable,
-      streaming: track.streaming,
-      greenId: library.hardwareGreen
-    })
+    return verdictForTrack(track, library.probeOf(track), library.hardwareGreen)
   }
 
   function showCompat(node: HTMLElement, id: string): void {

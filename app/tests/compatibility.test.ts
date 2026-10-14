@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 
 register(new URL('./resolve-ts.mjs', import.meta.url).href)
 
-const { assess } = await import('../src/renderer/src/lib/hardware/compatibility.ts')
+const { assess, verdictForTrack } = await import('../src/renderer/src/lib/hardware/compatibility.ts')
 const { DEFAULT_GREEN, PLAYERS } = await import('../src/renderer/src/lib/hardware/players.ts')
 const { introduceViews } = await import('../src/renderer/src/lib/library/defaults.ts')
 const { keepViews } = await import('../src/renderer/src/lib/library/views.ts')
@@ -24,6 +24,39 @@ function facts(row: Partial<AudioFacts> = {}): AudioFacts {
     ...row
   }
 }
+
+describe('verdictForTrack', () => {
+  const track = {
+    fileType: 'WAV',
+    sampleRate: 44100,
+    bitDepth: 16,
+    bitrate: 0,
+    missing: false,
+    streaming: false
+  }
+
+  it('uses the library row when no header has been read', () => {
+    assert.equal(verdictForTrack(track, undefined, DEFAULT_GREEN).color, 'green')
+  })
+
+  it('prefers a header probe over the library row', () => {
+    const verdict = verdictForTrack(
+      track,
+      {
+        missing: false,
+        unreadable: false,
+        audio: { kind: 'FLAC', sampleRate: 48000, bitDepth: 24, channels: 2, bitrate: 0, encoding: 'flac' }
+      },
+      DEFAULT_GREEN
+    )
+    assert.equal(verdict.color, 'yellow')
+  })
+
+  it('treats a missing file as red even when the row looks playable', () => {
+    const verdict = verdictForTrack({ ...track, missing: true }, undefined, DEFAULT_GREEN)
+    assert.equal(verdict.summary, 'File missing')
+  })
+})
 
 describe('assess', () => {
   it('marks a 44.1 kHz 16-bit wav green on the defaults', () => {

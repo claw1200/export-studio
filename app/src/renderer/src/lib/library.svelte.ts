@@ -4,7 +4,7 @@ import { clearDetailCache } from './deck/session.svelte'
 import { cueStats, newestFirst, type SortKey, sortTracks, type TrackSort } from './library/sort'
 import { buildTree } from './library/tree'
 import { duplicateGroups, rankCopies } from './library/duplicates'
-import { assess, factsFromProbe, factsFromTrack } from './hardware/compatibility'
+import { verdictForTrack } from './hardware/compatibility'
 import { DEFAULT_GREEN, playerById } from './hardware/players'
 import { isDefaultRekordboxTrack } from './library/factory'
 import { loadViews, looseTrack, matchesTrack, pathKey, saveViews, type FileEntry } from './library/views'
@@ -394,14 +394,7 @@ export class Library {
     const greenId = this.hardwareGreen
     const ranks = new Map<string, number>()
     for (const track of list) {
-      const probe = this.probeOf(track)
-      const facts = probe?.audio ? factsFromProbe(probe.audio, track) : factsFromTrack(track)
-      const verdict = assess(facts, {
-        missing: track.missing || !!probe?.missing,
-        unreadable: !!probe?.unreadable,
-        streaming: track.streaming,
-        greenId
-      })
+      const verdict = verdictForTrack(track, this.probeOf(track), greenId)
       ranks.set(track.id, verdict.color === 'red' ? 0 : verdict.color === 'yellow' ? 1 : 2)
     }
     return ranks
