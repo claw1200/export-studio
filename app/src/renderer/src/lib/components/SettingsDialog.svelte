@@ -24,6 +24,7 @@
   import { BPM_RANGES, MAX_CONCURRENCY } from '$lib/analysis.svelte'
   import { backupDate, KEEP_CHOICES } from '$lib/backups.svelte'
   import { getApp } from '$lib/context'
+  import { suspendModal } from '$lib/modal'
   import { PLAYERS } from '$lib/hardware/players'
   import { formatSize } from '$lib/format'
   import { ACTION_IDS, ACTIONS, chordFromEvent, chordLabel, type ActionGroup, type ActionId } from '$lib/keymap'
@@ -107,12 +108,6 @@
     })).filter((g) => g.ids.length)
   })
 
-  function modal(dialog: HTMLDialogElement): () => void {
-    const resume = keybinds.suspend()
-    dialog.showModal()
-    return resume
-  }
-
   function startRecording(id: ActionId): void {
     notice = null
     recording = recording === id ? null : id
@@ -149,7 +144,7 @@
 </script>
 
 <dialog
-  {@attach modal}
+  {@attach suspendModal(keybinds)}
   class="no-drag m-auto h-[600px] max-h-[calc(100vh-48px)] w-[780px] max-w-[calc(100vw-48px)] overflow-hidden rounded-xl border border-line bg-surface p-0 text-fg shadow-2xl shadow-black/60 backdrop:bg-black/60"
   aria-label="Settings"
   {onkeydown}
@@ -217,9 +212,7 @@
           <div class="flex items-center gap-3 rounded-md px-2 py-2">
             <span class="min-w-0 flex-1">
               <span class="block text-[12.5px] font-medium">Accent color</span>
-              <span class="mt-0.5 block text-[11px] leading-snug text-faint">
-                Buttons, highlights, and progress.
-              </span>
+              <span class="mt-0.5 block text-[11px] leading-snug text-faint"> Buttons, highlights, and progress. </span>
             </span>
             <input
               class="h-7 w-10 shrink-0 cursor-pointer overflow-hidden rounded-md border border-line bg-transparent p-0 [&::-webkit-color-swatch]:border-none [&::-webkit-color-swatch-wrapper]:p-0"

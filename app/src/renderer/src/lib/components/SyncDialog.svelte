@@ -1,6 +1,7 @@
 <script lang="ts">
   import { SvelteSet } from 'svelte/reactivity'
   import { getApp } from '$lib/context'
+  import { suspendModal } from '$lib/modal'
   import { buildTree, type TreeNode } from '$lib/library/tree'
 
   let { playlistId, onclose }: { playlistId: string; onclose: () => void } = $props()
@@ -72,12 +73,6 @@
     chosen = next
   }
 
-  function modal(dialog: HTMLDialogElement): () => void {
-    const resume = keybinds.suspend()
-    dialog.showModal()
-    return resume
-  }
-
   async function submit(dialog: HTMLDialogElement): Promise<void> {
     if (library.syncing || !volumeId || checked.size === 0) return
     error = null
@@ -88,7 +83,7 @@
 </script>
 
 <dialog
-  {@attach modal}
+  {@attach suspendModal(keybinds)}
   class="no-drag m-auto w-[420px] max-w-[calc(100vw-48px)] rounded-xl border border-line bg-surface p-0 text-fg shadow-2xl shadow-black/60 backdrop:bg-black/60"
   aria-label="Sync to a volume"
   onclose={() => onclose()}
@@ -108,9 +103,7 @@
     }}
   >
     <h2 class="text-[13.5px] font-semibold">Sync to a volume</h2>
-    <p class="mt-1.5 text-[12.5px] leading-relaxed text-muted">
-      Copy the selected playlists onto a rekordbox volume.
-    </p>
+    <p class="mt-1.5 text-[12.5px] leading-relaxed text-muted">Copy the selected playlists onto a rekordbox volume.</p>
 
     <label class="mt-4 block text-[11px] font-semibold tracking-wider text-faint uppercase" for="sync-volume">
       Volume

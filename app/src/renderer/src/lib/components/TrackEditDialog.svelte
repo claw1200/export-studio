@@ -3,6 +3,7 @@
   import { SvelteSet } from 'svelte/reactivity'
   import { Music, Star, X } from '@lucide/svelte'
   import { getApp } from '$lib/context'
+  import { suspendModal } from '$lib/modal'
   import { artworkUrl } from '$lib/api'
   import { TRACK_COLORS } from '$lib/format'
   import type { EditableField, Track, TrackEdit } from '$lib/types'
@@ -151,18 +152,12 @@
     else error = library.editError ?? 'Couldn’t save the changes'
   }
 
-  function modal(dialog: HTMLDialogElement): () => void {
-    const resume = keybinds.suspend()
-    dialog.showModal()
-    return resume
-  }
-
   const inputClass =
     'h-7 w-full rounded-md border border-line bg-bg px-2 text-[12.5px] text-fg placeholder:text-faint select-text focus:border-accent/60 disabled:opacity-50'
 </script>
 
 <dialog
-  {@attach modal}
+  {@attach suspendModal(keybinds)}
   class="no-drag m-auto max-h-[calc(100vh-48px)] w-[560px] max-w-[calc(100vw-48px)] overflow-hidden rounded-xl border border-line bg-surface p-0 text-fg shadow-2xl shadow-black/60 backdrop:bg-black/60"
   aria-label="Edit track info"
   onclose={() => onclose()}

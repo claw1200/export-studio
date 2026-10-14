@@ -3,6 +3,7 @@
   import { FolderOpen, LoaderCircle } from '@lucide/svelte'
   import { api } from '$lib/api'
   import { getApp } from '$lib/context'
+  import { suspendModal } from '$lib/modal'
   import type { MissingScan, Track } from '$lib/types'
 
   let { tracks, onclose }: { tracks: Track[]; onclose: () => void } = $props()
@@ -23,12 +24,6 @@
   const found = $derived(scan?.matches.filter((m) => m.path) ?? [])
   const chosen = $derived(found.filter((m) => !skipped.has(m.id)))
   const busy = $derived(scanning || applying)
-
-  function modal(dialog: HTMLDialogElement): () => void {
-    const resume = keybinds.suspend()
-    dialog.showModal()
-    return resume
-  }
 
   async function run(): Promise<void> {
     if (!folder) return
@@ -83,7 +78,7 @@
 </script>
 
 <dialog
-  {@attach modal}
+  {@attach suspendModal(keybinds)}
   class="no-drag m-auto w-[520px] max-w-[calc(100vw-48px)] rounded-xl border border-line bg-surface p-0 text-fg shadow-2xl shadow-black/60 backdrop:bg-black/60"
   aria-label="Auto-relocate missing tracks"
   onclose={() => onclose()}

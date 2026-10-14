@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { getApp } from '$lib/context'
+  import { suspendModal } from '$lib/modal'
   import { api } from '$lib/api'
   import { emptyDuplicateMatch } from '$lib/library/duplicates'
   import { emptyFilters, formatDurationInput, parseDurationInput } from '$lib/library/views'
@@ -60,12 +61,6 @@
 
   const inputClass =
     'h-7 w-full rounded-md border border-line bg-bg px-2 text-[12.5px] text-fg placeholder:text-faint focus:border-accent/60'
-
-  function modal(dialog: HTMLDialogElement): () => void {
-    const resume = keybinds.suspend()
-    dialog.showModal()
-    return resume
-  }
 
   async function browse(): Promise<void> {
     const picked = await api.choosePath('folder', directory || undefined)
@@ -165,7 +160,7 @@
 </script>
 
 <dialog
-  {@attach modal}
+  {@attach suspendModal(keybinds)}
   class="no-drag m-auto max-h-[calc(100vh-48px)] w-[520px] max-w-[calc(100vw-48px)] overflow-hidden rounded-xl border border-line bg-surface p-0 text-fg shadow-2xl shadow-black/60 backdrop:bg-black/60"
   aria-label={creating ? 'New view' : 'Edit view'}
   onclose={() => onclose()}

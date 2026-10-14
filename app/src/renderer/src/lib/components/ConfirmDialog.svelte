@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
   import { getApp } from '$lib/context'
+  import { suspendModal } from '$lib/modal'
 
   let {
     title,
@@ -21,16 +22,10 @@
   } = $props()
 
   const { keybinds } = getApp()
-
-  function modal(dialog: HTMLDialogElement): () => void {
-    const resume = keybinds.suspend()
-    dialog.showModal()
-    return resume
-  }
 </script>
 
 <dialog
-  {@attach modal}
+  {@attach suspendModal(keybinds)}
   class="no-drag m-auto w-[380px] max-w-[calc(100vw-48px)] rounded-xl border border-line bg-surface p-0 text-fg shadow-2xl shadow-black/60 backdrop:bg-black/60"
   aria-label={title}
   onclose={() => onclose()}
