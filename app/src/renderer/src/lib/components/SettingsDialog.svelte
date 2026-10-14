@@ -38,9 +38,8 @@
 
   const { library, player, keybinds, analysis, backups } = getApp()
 
-  type Section = SettingsSection
   type Choice = { id: string; label: string }
-  const SECTIONS: { id: Section; label: string; icon: typeof Keyboard }[] = [
+  const SECTIONS: { id: SettingsSection; label: string; icon: typeof Keyboard }[] = [
     { id: 'general', label: 'General', icon: SlidersHorizontal },
     { id: 'display', label: 'Display', icon: Monitor },
     { id: 'analysis', label: 'Import & analysis', icon: AudioWaveform },
@@ -75,7 +74,7 @@
   }))
 
   // svelte-ignore state_referenced_locally
-  let section = $state<Section>(initialSection)
+  let section = $state<SettingsSection>(initialSection)
   let recording = $state<ActionId | null>(null)
   let confirming = $state.raw<{ kind: 'restore' | 'delete'; backup: Backup } | null>(null)
 

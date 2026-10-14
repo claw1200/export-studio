@@ -2,7 +2,7 @@ import { emptyDuplicateMatch } from './duplicates'
 import type { TrackViewFilters, View } from '../types'
 
 /** Built-in views. A deleted copy of one of these stays deleted. */
-export const LEGACY_VIEW_IDS = ['default:not-in-playlist', 'default:music', 'default:duplicates']
+const LEGACY_VIEW_IDS = ['default:not-in-playlist', 'default:music', 'default:duplicates']
 
 export function emptyFilters(): TrackViewFilters {
   return {
@@ -22,7 +22,7 @@ export function emptyFilters(): TrackViewFilters {
 }
 
 /** Built-in views. Stable ids so seeding does not add a second copy. */
-export function defaultViews(musicDirectory: string): View[] {
+function defaultViews(musicDirectory: string): View[] {
   const views: View[] = [
     {
       id: 'default:not-in-playlist',
@@ -52,7 +52,7 @@ export function defaultViews(musicDirectory: string): View[] {
 }
 
 /** Adds the built-in views the first time. Deleting one afterwards leaves it gone. */
-export function seedStoredViews(stored: View[], musicDirectory: string, alreadySeeded: boolean): View[] {
+function seedStoredViews(stored: View[], musicDirectory: string, alreadySeeded: boolean): View[] {
   if (alreadySeeded) return stored
   const ids = new Set(stored.map((view) => view.id))
   const added = defaultViews(musicDirectory).filter((view) => !ids.has(view.id))

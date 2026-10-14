@@ -1,6 +1,6 @@
-export const LOW = 0
-export const MID = 1
-export const HIGH = 2
+const LOW = 0
+const MID = 1
+const HIGH = 2
 
 export const BANDS_LOW_TO_HIGH: { band: number; color: string }[] = [
   { band: LOW, color: 'rgb(0,92,224)' },

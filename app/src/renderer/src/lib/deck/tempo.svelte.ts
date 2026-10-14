@@ -3,11 +3,11 @@ import type { Deck } from './deck.svelte'
 import { storedFlag, storeFlag } from './stored'
 
 /** How far the fader reaches either side of the file's speed, in percent, as on a CDJ. */
-export const TEMPO_RANGES = [6, 10, 16, 50] as const
-export type TempoRange = (typeof TEMPO_RANGES)[number]
+const TEMPO_RANGES = [6, 10, 16, 50] as const
+type TempoRange = (typeof TEMPO_RANGES)[number]
 
 /** Smallest tempo change, in percent. */
-export const TEMPO_STEP = 0.01
+const TEMPO_STEP = 0.01
 
 function storedRange(): TempoRange {
   const n = Number(getSetting('tempoRange'))
