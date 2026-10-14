@@ -178,7 +178,7 @@ fn emit(value: &serde_json::Value) -> io::Result<()> {
 fn phase(stage: &str) -> &'static str {
     match stage {
         "checking" => "reading",
-        "copying" => "copy",
+        "copying" | "converting" => "copy",
         "database" => "writing",
         "verifying" => "verifying",
         "publishing" => "publishing",
@@ -294,6 +294,7 @@ fn prepare(job: &Job) -> Result<(Vec<SourceTrack>, Vec<SourcePlaylist>, Vec<Sour
             analysis: analysis_bytes(&track.analysis)?,
             artwork: track.artwork.clone(),
             my_tags: track.my_tags.clone(),
+            ..Default::default()
         });
     }
 
@@ -352,11 +353,11 @@ fn run(job_path: &Path) -> Result<(), JobError> {
         JobError::Message(format!("Export job is not valid JSON: {err}"))
     })?;
     let (tracks, playlists, tags, sync) = prepare(&job)?;
+    rbl_export::recover(&job.destination)?;
     let options = ExportOptions {
-        defaults: None,
         sync: Some(&sync),
-        compatibility: None,
-        root: None,
+        keep_unlisted: false,
+        ..Default::default()
     };
     let report = export_cancellable(
         &job.destination,
@@ -365,11 +366,16 @@ fn run(job_path: &Path) -> Result<(), JobError> {
         &tags,
         &options,
         &mut |progress: &ExportProgress| {
+            let (done, total) = if progress.tracks_total > 0 && progress.total == 0 {
+                (progress.tracks_done, progress.tracks_total)
+            } else {
+                (progress.done, progress.total)
+            };
             let _ = emit(&serde_json::json!({
                 "event": "progress",
                 "phase": phase(progress.stage),
-                "done": progress.done,
-                "total": progress.total,
+                "done": done,
+                "total": total,
                 "name": progress.title,
             }));
         },

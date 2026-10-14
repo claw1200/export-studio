@@ -1,13 +1,13 @@
 //! What a previous export left on the stick.
 //!
-//! Rekordbox re-copies everything on every export. We keep a small record of
+//! We keep a versioned record of
 //! what was written so a second export to the same stick copies only what
 //! actually changed — on a 200-track playlist that is the difference between
 //! minutes and seconds over USB 2.0.
 //!
 //! It lives outside `PIONEER/rekordbox/`, in a directory of our own, so no
 //! player and no version of rekordbox has to know about it. Losing it is
-//! harmless: the export falls back to writing everything.
+//! harmless: the export re-reads the device baseline and checks uncertain copies.
 
 use std::path::{Path, PathBuf};
 
@@ -16,13 +16,15 @@ use serde::{Deserialize, Serialize};
 /// Where the record sits, relative to the root of the stick.
 pub const MANIFEST_PATH: &str = "PIONEER/exportstudio/manifest.json";
 
-/// Bumped when a field changes meaning. An older or newer manifest is ignored
-/// rather than guessed at, which costs one full export and never a wrong one.
-pub const MANIFEST_VERSION: u32 = 1;
+/// Version 1 retains ownership and IDs but must establish new receipts. Unknown
+/// future versions are ignored rather than treated as a trusted baseline.
+pub const MANIFEST_VERSION: u32 = 2;
 
 /// The state of one export.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
+    #[serde(default)]
+    pub generation: Option<crate::incremental::Generation>,
     #[serde(default)]
     pub db_id: u64,
     #[serde(default)]
@@ -94,6 +96,27 @@ pub struct ManifestTrack {
     pub conversion: String,
     #[serde(default)]
     pub conversion_source_hash: u64,
+    /// The audio was already on the stick, where the library keeps it, and
+    /// the export only pointed the databases at it. It is the library's file,
+    /// not a copy of ours, so a later sync never deletes or replaces it.
+    /// Absent in older records, which only ever name copies.
+    #[serde(default)]
+    pub in_place: bool,
+    /// `Some(true)`: kept as the stick had it rather than exported. A later
+    /// sync keeps it while a playlist or play history still names it, and
+    /// takes it off once nothing does. `Some(false)`: the export's own, even
+    /// when only a device playlist or history kept it this time. `None`: an
+    /// older record, which did not say; see [`crate::carried_entry`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preserved: Option<bool>,
+    /// Size and modification time of the copy on the stick, as this export
+    /// left it. While the copy still reads the same, a sync trusts
+    /// `audio_hash` rather than reading every byte back off the stick.
+    /// Anything that rewrites the copy (rekordbox exporting over it, a
+    /// file manager) moves its time, and the copy is hashed again. Absent
+    /// in older records and for files the export did not write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy_stamp: Option<(u64, i64)>,
 }
 
 impl ManifestTrack {
@@ -125,8 +148,12 @@ impl Manifest {
     /// record", because the only cost of that is copying more than we had to.
     pub fn load(destination: &Path) -> Option<Self> {
         let bytes = std::fs::read(Self::path(destination)).ok()?;
-        let manifest: Self = serde_json::from_slice(&bytes).ok()?;
-        (manifest.version == MANIFEST_VERSION).then_some(manifest)
+        let mut manifest: Self = serde_json::from_slice(&bytes).ok()?;
+        if manifest.version == 1 || manifest.tracks.iter().any(|t| !t.in_place && t.preserved != Some(true) && t.copy_stamp.is_none())
+            || manifest.generation.as_ref().is_some_and(|g| !crate::incremental::manifest_structure(&manifest).is_ok_and(|hash| hash == g.structure)) {
+            manifest.generation = None;
+        }
+        (matches!(manifest.version, 1 | MANIFEST_VERSION)).then_some(manifest)
     }
 
     /// Writes the record, replacing any previous one.
@@ -193,6 +220,7 @@ mod tests {
     fn a_saved_record_reads_back() {
         let dir = tempfile::tempdir().unwrap();
         let manifest = Manifest {
+            generation: None,
             db_id: 0, baseline: None,
             version: MANIFEST_VERSION,
             written: "2026-09-08 00:00:00.000 +00:00".to_owned(),
@@ -211,6 +239,9 @@ mod tests {
                 artwork: String::new(),
                 conversion: String::new(),
                 conversion_source_hash: 0,
+                in_place: false,
+                preserved: Some(false),
+                copy_stamp: Some((1234, 1_789_000_000_000_000_000)),
             }],
             playlists: vec![ManifestPlaylist { device_only: false, export_id: 1, folder: false, library_id: 9, name: "Set".to_owned() }],
             loose: vec![42],
@@ -222,6 +253,7 @@ mod tests {
         assert_eq!(read.tracks[0].key(), "#42");
         assert_eq!(read.playlists[0].library_id, 9);
         assert_eq!(read.loose, vec![42]);
+        assert_eq!(read.tracks[0].copy_stamp, Some((1234, 1_789_000_000_000_000_000)));
         // The temporary must not survive the rename.
         assert!(!Manifest::path(dir.path()).with_extension("json.part").exists());
     }

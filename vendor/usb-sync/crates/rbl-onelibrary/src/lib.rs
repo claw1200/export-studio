@@ -8,6 +8,7 @@
 
 pub mod build;
 pub mod key;
+pub mod playlists;
 pub mod settings;
 
 use std::path::Path;
@@ -34,10 +35,40 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// needs them: the cipher and the legacy mode before the key, or the key is
 /// interpreted under the wrong parameters and the first read fails.
 pub(crate) fn unlock(conn: &Connection, passphrase: &str) -> Result<()> {
+    sqlcipher_ready()?;
     conn.pragma_update(None, "cipher", "sqlcipher")?;
     conn.pragma_update(None, "legacy", 4)?;
     conn.pragma_update(None, "key", passphrase)?;
     Ok(())
+}
+
+/// Returns once `SQLCipher`'s process-wide setup has finished.
+///
+/// `sqlite3_initialize` marks SQLite initialized before it runs `SQLCipher`'s
+/// own setup, so a connection keyed on another thread in that window fails
+/// with "An error occurred with PRAGMA key or rekey" (bundled `SQLCipher`
+/// 4.14.0). Keying a throwaway in-memory database until it succeeds waits
+/// that setup out; after the first success it is one atomic load.
+fn sqlcipher_ready() -> Result<()> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    static READY: AtomicBool = AtomicBool::new(false);
+    if READY.load(Ordering::Acquire) {
+        return Ok(());
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let probe = Connection::open_in_memory()?;
+        match probe.pragma_update(None, "key", "ready") {
+            Ok(()) => {
+                READY.store(true, Ordering::Release);
+                return Ok(());
+            }
+            Err(error) if Instant::now() >= deadline => return Err(error.into()),
+            Err(_) => std::thread::sleep(Duration::from_millis(1)),
+        }
+    }
 }
 
 /// An open `exportLibrary.db`.

@@ -2,7 +2,10 @@
 //! Settings and encryption/page counters deliberately do not participate.
 use crate::{ExportError, Manifest, Result};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Track {
@@ -61,9 +64,27 @@ pub struct Snapshot {
     pub my_tags: Vec<crate::SourceMyTag>,
     #[serde(default)]
     pub tag_memberships: BTreeMap<u32, Vec<u64>>,
+    /// "Background Color : Device Library": byte 9 of `export.pdb`'s
+    /// `property` row, 0 when the stick has no such row.
+    #[serde(default)]
+    pub legacy_background: u8,
 }
 fn sql(e: impl std::fmt::Display) -> ExportError {
     ExportError::OneLibrary(e.to_string())
+}
+
+/// Stars, 0 to 5, from a `OneLibrary` `content.rating`.
+///
+/// rekordbox writes the stars themselves [OBS: a rekordbox 7 stick, ratings
+/// 1 to 5 in `exportLibrary.db` equal to the same tracks' `export.pdb`
+/// ratings]. rbxport has written them as multiples of 51, the scale of the
+/// collection XML. No rekordbox value is above 5 and no rbxport value is a
+/// non-zero one at or below it, so both read back to the same stars. Read
+/// on rbxport's scale alone, every rekordbox rating was 0, the stick's two
+/// databases disagreed, and its first sync from here was refused (#284).
+pub(crate) fn onelibrary_stars(raw: i64) -> u8 {
+    let stars = if raw > 5 { raw / 51 } else { raw };
+    u8::try_from(stars.clamp(0, 5)).unwrap_or(0)
 }
 impl Snapshot {
     pub fn read(root: &Path) -> Result<Self> {
@@ -100,16 +121,36 @@ impl Snapshot {
         Ok(out)
     }
     pub fn merged_library(&self) -> Option<Library> {
+        self.merged_library_above(0)
+    }
+
+    /// [`Self::merged_library`], where a playlist only `export.pdb` holds
+    /// whose id `exportLibrary.db` gives another playlist is carried under
+    /// an id above `floor` as well as above every id either library uses
+    /// (see [`legacy_playlist_ids`]). `floor` keeps it clear of ids an
+    /// earlier export recorded for playlists the stick no longer holds.
+    pub fn merged_library_above(&self, floor: u32) -> Option<Library> {
         let mut library = self.one.as_ref().or(self.legacy.as_ref())?.clone();
         if let Some(legacy) = &self.legacy {
+            let mut tracks: BTreeSet<_> = library.tracks.iter().map(|t| t.id).collect();
+            let mut playlists: BTreeSet<_> = library.playlists.iter().map(|p| p.id).collect();
             for track in &legacy.tracks {
-                if !library.tracks.iter().any(|t| t.id == track.id) {
+                if tracks.insert(track.id) {
                     library.tracks.push(track.clone());
                 }
             }
-            for playlist in &legacy.playlists {
-                if !library.playlists.iter().any(|p| p.id == playlist.id) {
-                    library.playlists.push(playlist.clone());
+            if let Some(one) = &self.one {
+                let ids = legacy_playlist_ids(legacy, one, floor);
+                let id = |legacy_id: u32| ids.get(&legacy_id).copied().unwrap_or(legacy_id);
+                for playlist in &legacy.playlists {
+                    let merged = id(playlist.id);
+                    if playlists.insert(merged) {
+                        library.playlists.push(Playlist {
+                            id: merged,
+                            parent: if playlist.parent == 0 { 0 } else { id(playlist.parent) },
+                            ..playlist.clone()
+                        });
+                    }
                 }
             }
         }
@@ -118,22 +159,26 @@ impl Snapshot {
     }
 
     pub fn check_baseline(&self, previous: Option<&Manifest>, db_id: u64) -> Result<()> {
+        self.check_baseline_except(previous, db_id, &Rewritten::default())
+    }
+
+    /// [`Self::check_baseline`], leaving out the stick's rows this sync
+    /// writes afresh from the library.
+    ///
+    /// On a stick never synced from here there is no record of which of its
+    /// two databases is right, so a track or playlist they describe
+    /// differently stops the sync: carrying one version would silently drop
+    /// the other. A row the selection rewrites is the exception. It ends up
+    /// in both databases as the library has it, whatever either said before,
+    /// as rekordbox's export overwrites a device track it already holds
+    /// (`DatabaseMediator::overwrite_export`, #331).
+    pub fn check_baseline_except(&self, previous: Option<&Manifest>, db_id: u64, rewritten: &Rewritten) -> Result<()> {
         if previous.and_then(|m| m.baseline.as_ref()).is_none() {
             if let (Some(a), Some(b)) = (&self.legacy, &self.one) {
-                if a.tracks
-                    .iter()
-                    .any(|t| b.tracks.iter().any(|other| other.id == t.id && other != t))
-                    || a.playlists.iter().any(|p| {
-                        b.playlists.iter().any(|other| {
-                            other.id == p.id
-                                && (other.name != p.name
-                                    || other.parent != p.parent
-                                    || other.folder != p.folder
-                                    || other.tracks != p.tracks)
-                        })
-                    })
-                {
-                    return Err(ExportError::Conflict("The two existing device libraries disagree. Reconcile them in rekordbox before their first sync here.".into()));
+                match first_difference(a, b, rewritten) {
+                    Some(Difference::Track(detail)) => return Err(ExportError::Conflict(format!("The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Include that track in this sync if it is in your library, or delete it from the USB in rekordbox, then sync again."))),
+                    Some(Difference::Playlist(detail)) => return Err(ExportError::Conflict(format!("The USB's two libraries, export.pdb and exportLibrary.db, differ on {detail}, so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again."))),
+                    None => {}
                 }
             }
         }
@@ -229,12 +274,167 @@ impl Snapshot {
         Ok(())
     }
 }
+/// The stick's rows a sync writes afresh from the library: the device ids of
+/// the tracks and playlists its selection names.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Rewritten {
+    pub tracks: BTreeSet<u32>,
+    pub playlists: BTreeSet<u32>,
+}
+
+/// The fields two readings of one track differ on, by name.
+pub(crate) fn track_differences(a: &Track, b: &Track) -> Vec<&'static str> {
+    [
+        ("title", a.title != b.title),
+        ("artist", a.artist != b.artist),
+        ("album", a.album != b.album),
+        ("genre", a.genre != b.genre),
+        ("label", a.label != b.label),
+        ("key", a.key != b.key),
+        ("comment", a.comment != b.comment),
+        ("file path", a.path != b.path),
+        ("analysis path", a.analysis != b.analysis),
+        ("BPM", a.bpm != b.bpm),
+        ("rating", a.rating != b.rating),
+        ("colour", a.color != b.color),
+    ]
+    .into_iter()
+    .filter_map(|(name, differs)| differs.then_some(name))
+    .collect()
+}
+
+/// What [`first_difference`] found, described for a message.
+#[derive(Debug, PartialEq, Eq)]
+enum Difference {
+    /// "the artist of track 'X'"
+    Track(String),
+    /// "playlist 'Y'"
+    Playlist(String),
+}
+
+/// The first track or playlist both databases hold but describe differently,
+/// leaving out what `rewritten` names.
+fn first_difference(legacy: &Library, one: &Library, rewritten: &Rewritten) -> Option<Difference> {
+    let tracks: BTreeMap<u32, &Track> = one.tracks.iter().map(|t| (t.id, t)).collect();
+    for track in legacy.tracks.iter().filter(|t| !rewritten.tracks.contains(&t.id)) {
+        let Some(other) = tracks.get(&track.id) else { continue };
+        let differ = track_differences(track, other);
+        if !differ.is_empty() {
+            return Some(Difference::Track(format!("the {} of track '{}'", differ.join(", "), track.title)));
+        }
+    }
+    let ids = legacy_playlist_ids(legacy, one, 0);
+    let id = |legacy_id: u32| ids.get(&legacy_id).copied().unwrap_or(legacy_id);
+    let playlists: BTreeMap<u32, &Playlist> = one.playlists.iter().map(|p| (p.id, p)).collect();
+    legacy
+        .playlists
+        .iter()
+        .filter(|p| !rewritten.playlists.contains(&p.id) && !rewritten.playlists.contains(&id(p.id)))
+        .find(|p| {
+            let parent = if p.parent == 0 { 0 } else { id(p.parent) };
+            playlists.get(&id(p.id)).is_some_and(|other| {
+                other.name != p.name || other.parent != parent || other.folder != p.folder || other.tracks != p.tracks
+            })
+        })
+        .map(|p| Difference::Playlist(format!("playlist '{}'", p.name)))
+}
+
+/// Which of `one`'s playlists each of `legacy`'s is, by id: the id it is
+/// carried under once the stick's two libraries are merged.
+///
+/// rekordbox keeps a stick's two libraries apart. An edit made under one of
+/// them changes that one alone [DOC: rekordbox FAQ "Device Library Plus"],
+/// and a playlist made on a player is saved in the library that player
+/// reads, and only there [DOC: the `AlphaTheta` USB export guide 251007,
+/// p.4: "The two types of libraries are managed separately."]. Each numbers its
+/// own playlists, as `device_library` does here (the highest id plus one). Where its export adds a playlist to both, it finds
+/// the place in the other library by name, never by id [OBS static,
+/// rekordbox 7.2.19: `DatabaseMediator::createListWithSameDevDbList`
+/// @0x1010e2ce4 → `SearchPlaylistPositionForSameDevDB::search`
+/// @0x1010dd828, which calls `getListWithName` and `existsListName`]. So
+/// one id can name two different playlists, one in each library: a Tag List
+/// a player saved to one of them, say, and another playlist made under the
+/// other (#353).
+///
+/// A legacy playlist is the `OneLibrary` playlist with its id when both
+/// give it the same name and kind. A legacy playlist whose id `OneLibrary`
+/// does not use keeps it, whatever `OneLibrary` holds under other ids, as
+/// before #353: two same-named playlists are both kept. Only one whose id
+/// `OneLibrary` gives to another playlist is looked for by name: the one
+/// with its name, kind and tracks in the same folder that no other legacy
+/// playlist has claimed. A same-named one with other tracks is another
+/// playlist, not a disagreement: pairing it would drop one of the two. One
+/// not found that way takes a new id above `floor` and every id either
+/// library uses.
+pub(crate) fn legacy_playlist_ids(legacy: &Library, one: &Library, floor: u32) -> BTreeMap<u32, u32> {
+    let same = |a: &Playlist, b: &Playlist| a.name == b.name && a.folder == b.folder;
+    let by_id: BTreeMap<u32, &Playlist> = one.playlists.iter().map(|p| (p.id, p)).collect();
+    let mut ids = BTreeMap::new();
+    let mut claimed = BTreeSet::new();
+    for p in &legacy.playlists {
+        if by_id.get(&p.id).is_some_and(|other| same(p, other)) {
+            ids.insert(p.id, p.id);
+            claimed.insert(p.id);
+        }
+    }
+    // By name, a folder's playlists once the folder itself is placed. Each
+    // pass places at least one playlist or ends the search.
+    loop {
+        let mut placed = false;
+        for p in &legacy.playlists {
+            // Only where `OneLibrary` gives its id to another playlist. One
+            // whose id is free keeps it, as before: each database is checked
+            // by id before the sync writes it (`check_database_changes`), so
+            // a playlist moved off its own id would read as lost.
+            if ids.contains_key(&p.id) || !by_id.contains_key(&p.id) {
+                continue;
+            }
+            let parent = if p.parent == 0 {
+                0
+            } else if let Some(parent) = ids.get(&p.parent) {
+                *parent
+            } else {
+                continue;
+            };
+            // Only the same playlist: one each library fills differently
+            // is two playlists that share a name, and each is kept.
+            if let Some(other) = one
+                .playlists
+                .iter()
+                .find(|o| !claimed.contains(&o.id) && o.parent == parent && same(p, o) && o.tracks == p.tracks)
+            {
+                ids.insert(p.id, other.id);
+                claimed.insert(other.id);
+                placed = true;
+            }
+        }
+        if !placed {
+            break;
+        }
+    }
+    let mut next = legacy.playlists.iter().chain(&one.playlists).map(|p| p.id).fold(floor, u32::max);
+    for p in &legacy.playlists {
+        if ids.contains_key(&p.id) {
+            continue;
+        }
+        let id = if by_id.contains_key(&p.id) {
+            next = next.saturating_add(1);
+            next
+        } else {
+            p.id
+        };
+        ids.insert(p.id, id);
+    }
+    ids
+}
+
 /// The legacy `export.pdb` side of [`Snapshot::read_at`].
 fn read_legacy_into(out: &mut Snapshot, pdb: &Path) -> Result<()> {
     use rbl_pdb::PageType;
     let bytes = std::fs::read(pdb)?;
     let parsed = rbl_pdb::Pdb::parse(&bytes)
         .map_err(|e| ExportError::Conflict(format!("Cannot read Device Library: {e}")))?;
+    out.legacy_background = parsed.property().map_or(0, |p| p.background_color);
     let tracks = parsed
         .table(PageType::Tracks)
         .map(|t| parsed.track_rows(t))
@@ -361,7 +561,7 @@ fn read_one_library(db: &rbl_onelibrary::ExportLibrary, out: &mut Snapshot) -> R
                     path: r.get(2)?,
                     analysis: r.get(3)?,
                     bpm: r.get(4)?,
-                    rating: r.get::<_, u32>(5)? / 51,
+                    rating: u32::from(onelibrary_stars(r.get(5)?)),
                     color: r.get(6)?,
                     comment: r.get(7)?,
                 },
@@ -491,10 +691,23 @@ fn check_database_changes(
     target: &Library,
     baseline: Option<&Library>,
 ) -> Result<()> {
+    let originals: BTreeMap<_, _> = baseline.into_iter().flat_map(|b| &b.tracks).map(|t| (t.id, t)).collect();
+    let targets: BTreeMap<_, _> = target.tracks.iter().map(|t| (t.id, t)).collect();
+    let current_ids: BTreeSet<_> = current.tracks.iter().map(|t| t.id).collect();
+    let original_playlists: BTreeMap<_, _> = baseline.into_iter().flat_map(|b| &b.playlists).map(|p| (p.id, p)).collect();
+    let target_playlists: BTreeMap<_, _> = target.playlists.iter().map(|p| (p.id, p)).collect();
+    let current_playlist_ids: BTreeSet<_> = current.playlists.iter().map(|p| p.id).collect();
     for track in &current.tracks {
-        let original = baseline.and_then(|b| b.tracks.iter().find(|t| t.id == track.id));
-        let next = target.tracks.iter().find(|t| t.id == track.id);
-        if original.is_some_and(|b| b != track) && next != Some(track) {
+        let original = originals.get(&track.id).copied();
+        let next = targets.get(&track.id).copied();
+        let unchanged = original.is_some_and(|old| {
+            if label == "OneLibrary" && track.rating > 5 && old.rating <= 5 && track.rating == old.rating * 51 {
+                let mut corrected = track.clone();
+                corrected.rating = old.rating;
+                &corrected == old
+            } else { old == track }
+        });
+        if original.is_some() && !unchanged && next != Some(track) {
             return Err(ExportError::Conflict(format!(
                 "{label}: '{}' changed on the USB. Import its changes before syncing.",
                 track.title
@@ -508,8 +721,8 @@ fn check_database_changes(
         }
     }
     for playlist in &current.playlists {
-        let original = baseline.and_then(|b| b.playlists.iter().find(|p| p.id == playlist.id));
-        let next = target.playlists.iter().find(|p| p.id == playlist.id);
+        let original = original_playlists.get(&playlist.id).copied();
+        let next = target_playlists.get(&playlist.id).copied();
         // Position changes caused only by inserting/removing siblings are harmless.
         let same = |a: &Playlist, b: &Playlist| {
             a.id == b.id
@@ -531,9 +744,9 @@ fn check_database_changes(
     // A deletion on the device is also an edit; don't silently resurrect it.
     if let Some(baseline) = baseline {
         if baseline.tracks.iter().any(|t| {
-            !current.tracks.iter().any(|c| c.id == t.id) && target.tracks.iter().any(|n| n.id == t.id)
+            !current_ids.contains(&t.id) && targets.contains_key(&t.id)
         }) || baseline.playlists.iter().any(|p| {
-            !current.playlists.iter().any(|c| c.id == p.id) && target.playlists.iter().any(|n| n.id == p.id)
+            !current_playlist_ids.contains(&p.id) && target_playlists.contains_key(&p.id)
         }) {
             return Err(ExportError::Conflict(format!("{label} contains device-side deletions. Reconcile them before syncing.")));
         }
@@ -601,7 +814,7 @@ pub fn analysis_hash(files: &[(String, Vec<u8>)]) -> u64 {
 
 /// Capture mutable player-side analysis before staging, then check it again
 /// before publication so a late cue edit cannot be overwritten unnoticed.
-pub fn analysis_stamp(root: &Path, snapshot: &Snapshot) -> Result<BTreeMap<String, Option<u64>>> {
+pub fn analysis_stamp(root: &Path, snapshot: &Snapshot) -> Result<BTreeMap<String, Option<crate::incremental::FileRevision>>> {
     let mut files = BTreeMap::new();
     for t in snapshot
         .merged_library()
@@ -618,11 +831,7 @@ pub fn analysis_stamp(root: &Path, snapshot: &Snapshot) -> Result<BTreeMap<Strin
                 .to_string_lossy()
                 .into_owned();
             let path = crate::checked_under(root, &relative)?;
-            let stamp = match std::fs::read(path) {
-                Ok(b) => Some(crate::manifest::hash(&b)),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-                Err(e) => return Err(e.into()),
-            };
+            let stamp = crate::incremental::revision(&path)?;
             files.insert(relative, stamp);
         }
     }

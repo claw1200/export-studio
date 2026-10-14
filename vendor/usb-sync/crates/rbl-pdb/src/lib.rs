@@ -44,7 +44,9 @@ pub enum PageType {
     Columns,
     HistoryPlaylists,
     HistoryEntries,
-    History,
+    /// Type 19: the device name, track count, date and Device Library
+    /// background colour. See [`rows::PdbProperty`].
+    Property,
     Other(u32),
 }
 
@@ -64,7 +66,7 @@ impl PageType {
             16 => Self::Columns,
             17 => Self::HistoryPlaylists,
             18 => Self::HistoryEntries,
-            19 => Self::History,
+            19 => Self::Property,
             other => Self::Other(other),
         }
     }
@@ -84,7 +86,7 @@ impl PageType {
             Self::Columns => "columns".into(),
             Self::HistoryPlaylists => "history_playlists".into(),
             Self::HistoryEntries => "history_entries".into(),
-            Self::History => "history".into(),
+            Self::Property => "property".into(),
             Self::Other(v) => format!("unknown_{v}"),
         }
     }
@@ -123,6 +125,34 @@ fn u2(b: &[u8], at: usize) -> u16 {
 }
 pub(crate) fn u4(b: &[u8], at: usize) -> u32 {
     u32::from_le_bytes([u1(b, at), u1(b, at + 1), u1(b, at + 2), u1(b, at + 3)])
+}
+
+/// How many entries a data page's row index holds, deleted rows included.
+///
+/// rekordbox packs the index length into the low 13 bits of the three
+/// bytes at `0x18` and the present-row count into the top 11 [OBS: a
+/// rekordbox 7 stick, playlist-entry pages of 284 rows read `1c 81 23`;
+/// track pages with deletions read 9 entries, 8 rows]. Neither `0x20` nor
+/// `0x22` is a row count: on those 284-row pages they hold 1 and 283.
+/// Reading `0x22` as the count dropped each full page's last row, so the
+/// stick's two databases looked as if they disagreed (#284).
+///
+/// rbxport's writer ([`build`]) before #349 held `0x18` at `0xff` on a page
+/// of more than 255 rows and put the true count at `0x22`; that count,
+/// larger than the packed one, is kept for such pages so sticks it wrote
+/// still read whole. It now writes them as rekordbox does. On rekordbox's pages `0x22`
+/// is a row's index, so it is never above the packed length.
+fn row_index_len(page: &[u8]) -> u32 {
+    let packed = u32::from(u1(page, 0x18))
+        | u32::from(u1(page, 0x19)) << 8
+        | u32::from(u1(page, 0x1a)) << 16;
+    let offsets = packed & 0x1fff;
+    let legacy = u32::from(u2(page, 0x22));
+    if offsets == 0xff && legacy > offsets && legacy != 0x1fff {
+        legacy
+    } else {
+        offsets
+    }
 }
 
 impl<'a> Pdb<'a> {
@@ -179,13 +209,7 @@ impl<'a> Pdb<'a> {
 
             let page_flags = u1(p, 0x1b);
             let is_data_page = page_flags & 0x40 == 0;
-            let num_rows_small = u32::from(u1(p, 0x18));
-            let num_rows_large = u32::from(u2(p, 0x22));
-            let num_rows = if num_rows_large > num_rows_small && num_rows_large != 0x1fff {
-                num_rows_large
-            } else {
-                num_rows_small
-            };
+            let num_rows = row_index_len(p);
 
             if is_data_page && num_rows > 0 {
                 let groups = (num_rows - 1) / 16 + 1;
@@ -237,7 +261,9 @@ impl<'a> Pdb<'a> {
             }
             0x90 => {
                 let len = u2(b, offset + 1) as usize;
-                // Length counts the header and two trailing NULs.
+                // Length counts the header and the text. rekordbox writes no
+                // terminator; files from older rbxport builds end in a NUL
+                // pair the length also counts, which the NUL check drops.
                 let start = offset + 4;
                 let take = len.saturating_sub(4);
                 let raw = b.get(start..start + take).unwrap_or(&[]);
@@ -259,6 +285,16 @@ impl<'a> Pdb<'a> {
             }
             _ => String::new(),
         }
+    }
+
+    /// A `playlist_tree` row exactly as the file holds it: the five words and
+    /// the name, unknown bytes and all, so a row that is kept can be written
+    /// back without being re-encoded. `None` when the name is not a string
+    /// the reader knows.
+    pub fn playlist_row_bytes(&self, row: RowRef) -> Option<Vec<u8>> {
+        let name_at = row.offset + rows::PLAYLIST_NAME_AT;
+        let end = name_at + self.string_len_at(name_at)?;
+        self.bytes.get(row.offset..end).map(<[u8]>::to_vec)
     }
 
     /// A string located by a two-byte offset stored in the row.
@@ -324,6 +360,13 @@ pub struct TrackRow {
     pub bitrate: u32,
     pub sample_rate: u32,
     pub file_size: u32,
+    /// `MASTERCONTENTID` (0x14) and `MASTERDBID` (0x18): the desktop
+    /// library's id of the track and that library's `DBID`, the same values
+    /// as `exportLibrary.db`'s `masterContentId` and `masterDbId` [OBS #342:
+    /// equal on 1563/1563 tracks of a rekordbox 7 stick]. 0 when the writer
+    /// left them blank.
+    pub master_content_id: u32,
+    pub master_db_id: u32,
     pub track_number: u32,
     pub play_count: u16,
     pub title: String,
@@ -447,6 +490,8 @@ impl Pdb<'_> {
                     disc_number: self.u2_at(row, 0x4c),
                     sample_rate: self.u4_at(row, 0x08),
                     file_size: self.u4_at(row, 0x10),
+                    master_content_id: self.u4_at(row, 0x14),
+                    master_db_id: self.u4_at(row, 0x18),
                     artwork_id: self.u4_at(row, 0x1c),
                     key_id: self.u4_at(row, 0x20),
                     label_id: self.u4_at(row, 0x28),
@@ -505,5 +550,44 @@ impl Pdb<'_> {
     /// Finds a table by kind.
     pub fn table(&self, kind: PageType) -> Option<&TableRef> {
         self.tables.iter().find(|t| t.page_type == kind)
+    }
+
+    /// The live `property` row (type 19). `None` when the table or its row
+    /// is missing, or the row does not have the known layout. When more
+    /// than one row is live, the last one is used: rekordbox adds a row for
+    /// each change.
+    #[must_use]
+    pub fn property(&self) -> Option<rows::PdbProperty> {
+        let row = *self.rows(self.table(PageType::Property)?).last()?;
+        if self.u2_at(row, 0) != 0x0280 {
+            return None;
+        }
+        let date_at = row.offset + rows::PROPERTY_DATE_AT;
+        let gap_at = date_at + self.string_len_at(date_at)?;
+        if self.bytes.get(gap_at..gap_at + 2)? != rows::PROPERTY_GAP {
+            return None;
+        }
+        let version_at = gap_at + 2;
+        let name_at = version_at + self.string_len_at(version_at)?;
+        self.string_len_at(name_at)?;
+        Some(rows::PdbProperty {
+            device_name: self.string_at(name_at),
+            db_version: self.string_at(version_at),
+            contents: self.u4_at(row, 4),
+            created_date: self.string_at(date_at),
+            background_color: self.u1_at(row, rows::PROPERTY_COLOR_AT),
+        })
+    }
+
+    /// The encoded length of the `DeviceSQL` string at `offset`, header
+    /// included. `None` when the header is not a string header or the
+    /// string runs past the end of the file.
+    fn string_len_at(&self, offset: usize) -> Option<usize> {
+        let len = match *self.bytes.get(offset)? {
+            0x40 | 0x90 => usize::from(u2(self.bytes, offset + 1)),
+            mangled if mangled % 2 == 1 => usize::from(mangled.saturating_sub(1) / 2),
+            _ => return None,
+        };
+        (len > 0 && offset + len <= self.bytes.len()).then_some(len)
     }
 }

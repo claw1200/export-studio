@@ -1,4 +1,4 @@
-use crate::{snapshot::Snapshot, Result};
+use crate::{snapshot::{Library, Snapshot}, Result};
 use std::{collections::BTreeSet, path::Path};
 #[derive(Debug, Clone, Default)]
 pub struct VerifyReport {
@@ -23,14 +23,34 @@ impl VerifyReport {
 }
 pub fn verify(root: &Path) -> Result<VerifyReport> {
     let snapshot = Snapshot::read(root)?;
-    let mut report = verify_staged(root, root, &snapshot)?;
+    let mut report = verify_staged(root, root, &snapshot, &BTreeSet::new())?;
     if let Some(manifest) = crate::Manifest::load(root) {
         for track in manifest.tracks {
             for extension in track.analysis_extensions {
                 let path = format!("{}/ANLZ0000.{extension}", track.anlz_dir);
-                if !crate::checked_under(root, &path)?.is_file() {
+                let file = crate::checked_under(root, &path)?;
+                if !file.is_file() {
                     report.errors.push(format!("Missing exported analysis companion: {path}"));
                 }
+            }
+        }
+    }
+    Ok(report)
+}
+
+/// Explicit slow integrity check. Normal sync verifies changed assets only.
+pub fn verify_content(root: &Path) -> Result<VerifyReport> {
+    let mut report = verify(root)?;
+    if let Some(manifest) = crate::Manifest::load(root) {
+        for track in manifest.tracks {
+            let audio = crate::checked_under(root, &track.audio)?;
+            if !track.in_place && track.audio_hash != 0 && audio.is_file() && crate::file_hash(&audio)? != track.audio_hash {
+                report.errors.push(format!("Exported audio content changed: {}", track.audio));
+            }
+            for (extension, expected) in track.analysis_hashes {
+                let path = format!("{}/ANLZ0000.{extension}", track.anlz_dir);
+                let file = crate::checked_under(root, &path)?;
+                if file.is_file() && crate::file_hash(&file)? != expected { report.errors.push(format!("Exported analysis content changed: {path}")); }
             }
         }
     }
@@ -51,23 +71,46 @@ pub fn verify_databases(root: &Path) -> Result<VerifyReport> {
     };
     report.parsed = true;
     verify_track_records(root, &mut report.errors)?;
-    if legacy != one { report.errors.push("Device Library and OneLibrary disagree".into()); }
+    if legacy != one { report.errors.push(disagreement(legacy, one)); }
     report.tracks = legacy.tracks.len();
     report.playlists = legacy.playlists.len();
     report.playlist_entries = legacy.playlists.iter().map(|playlist| playlist.tracks.len()).sum();
     Ok(report)
 }
+/// `absent` names, by [`crate::path_key`], audio the stick was already
+/// missing before the export and that the export carried without copying:
+/// another writer's track, kept as the stick had it (#317). Its absence is not
+/// a fault of the staged generation, so it is not reported as missing.
 pub(crate) fn verify_staged(
     root: &Path,
     existing: &Path,
     snapshot: &Snapshot,
+    absent: &BTreeSet<String>,
+) -> Result<VerifyReport> {
+    verify_staged_incremental(root, existing, snapshot, absent, &BTreeSet::new())
+}
+
+pub(crate) fn verify_staged_incremental(
+    root: &Path,
+    existing: &Path,
+    snapshot: &Snapshot,
+    absent: &BTreeSet<String>,
+    trusted: &BTreeSet<String>,
 ) -> Result<VerifyReport> {
     let mut report = VerifyReport::default();
+    let moves: std::collections::BTreeMap<std::path::PathBuf, std::path::PathBuf> = match std::fs::read(root.join(".moves.json")) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(std::io::Error::other)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::collections::BTreeMap::default(),
+        Err(e) => return Err(e.into()),
+    };
     let resolve = |relative: &str| -> Result<std::path::PathBuf> {
         let path = crate::checked_under(root, relative)?;
         if path.is_file() {
             Ok(path)
         } else {
+            if let Some(from) = moves.get(Path::new(relative.trim_start_matches('/'))) {
+                return crate::checked_under(existing, &from.to_string_lossy());
+            }
             crate::checked_under(existing, relative)
         }
     };
@@ -80,9 +123,7 @@ pub(crate) fn verify_staged(
     report.parsed = true;
     verify_track_records(root, &mut report.errors)?;
     if legacy != one {
-        report
-            .errors
-            .push("Device Library and OneLibrary disagree".into());
+        report.errors.push(disagreement(legacy, one));
     }
     report.tracks = legacy.tracks.len();
     report.playlists = legacy.playlists.len();
@@ -90,7 +131,7 @@ pub(crate) fn verify_staged(
     if ids.len() != legacy.tracks.len() {
         report.errors.push("Duplicate track IDs".into());
     }
-    verify_assets(root, legacy, &resolve, &mut report)?;
+    verify_assets(root, legacy, &resolve, absent, trusted, &mut report)?;
     let playlists: BTreeSet<_> = legacy.playlists.iter().map(|p| p.id).collect();
     for p in &legacy.playlists {
         if p.parent != 0
@@ -133,6 +174,38 @@ pub(crate) fn verify_staged(
     }
     snapshot.check_retained_history(snapshot)?;
     Ok(report)
+}
+
+/// What differs between the two databases, first difference only: which
+/// track or playlist, and which of its fields, so a failed sync names
+/// something a user can look at rather than only that they disagree.
+fn disagreement(legacy: &Library, one: &Library) -> String {
+    const PREFIX: &str = "Device Library and OneLibrary disagree";
+    for track in &legacy.tracks {
+        let Some(other) = one.tracks.iter().find(|t| t.id == track.id) else {
+            return format!("{PREFIX}: track '{}' is only in export.pdb", track.title);
+        };
+        let differ = crate::snapshot::track_differences(track, other);
+        if !differ.is_empty() {
+            return format!("{PREFIX} on the {} of track '{}'", differ.join(", "), track.title);
+        }
+    }
+    if let Some(track) = one.tracks.iter().find(|t| !legacy.tracks.iter().any(|l| l.id == t.id)) {
+        return format!("{PREFIX}: track '{}' is only in exportLibrary.db", track.title);
+    }
+    for playlist in &legacy.playlists {
+        match one.playlists.iter().find(|p| p.id == playlist.id) {
+            None => return format!("{PREFIX}: playlist '{}' is only in export.pdb", playlist.name),
+            Some(other) if other != playlist => {
+                return format!("{PREFIX} on playlist '{}'", playlist.name);
+            }
+            Some(_) => {}
+        }
+    }
+    if let Some(playlist) = one.playlists.iter().find(|p| !legacy.playlists.iter().any(|l| l.id == p.id)) {
+        return format!("{PREFIX}: playlist '{}' is only in exportLibrary.db", playlist.name);
+    }
+    PREFIX.to_owned()
 }
 
 fn verify_track_records(root: &Path, errors: &mut Vec<String>) -> Result<()> {
@@ -178,6 +251,8 @@ fn verify_assets(
     root: &Path,
     legacy: &crate::snapshot::Library,
     resolve: &impl Fn(&str) -> Result<std::path::PathBuf>,
+    absent: &BTreeSet<String>,
+    trusted: &BTreeSet<String>,
     report: &mut VerifyReport,
 ) -> Result<()> {
     let mut paths = BTreeSet::new();
@@ -190,7 +265,7 @@ fn verify_assets(
         let path = resolve(&track.path)?;
         if path.is_file() {
             report.audio_present += 1;
-        } else {
+        } else if !absent.contains(&crate::path_key(&track.path)) {
             report.missing_audio.push(track.path.clone());
         }
         if !track.analysis.is_empty() {
@@ -198,9 +273,18 @@ fn verify_assets(
             if track.analysis != expected {
                 report.errors.push(format!("Analysis path is not discoverable by the CDJ: {} (expected {expected})", track.analysis));
             }
-            let path = resolve(&track.analysis)?;
-            if path.is_file() && rbl_anlz::Anlz::read(&path).is_ok() {
+            let base = Path::new(&track.analysis);
+            let companions_trusted = ["DAT", "EXT", "2EX"].iter().all(|ext| {
+                let relative = base.with_extension(ext).to_string_lossy().trim_start_matches('/').to_owned();
+                trusted.contains(&relative) || resolve(&relative).is_ok_and(|p| !p.exists())
+            });
+            if companions_trusted && trusted.contains(track.analysis.trim_start_matches('/')) {
                 report.analysis_present += 1;
+                continue;
+            }
+            let path = resolve(&track.analysis)?;
+            if path.is_file() {
+                let mut dat_valid = false;
                 let mut overview = false;
                 let mut detail = false;
                 let mut grid = false;
@@ -208,8 +292,13 @@ fn verify_assets(
                     let relative = Path::new(&track.analysis).with_extension(extension).to_string_lossy().into_owned();
                     let companion = resolve(&relative)?;
                     if !companion.is_file() { continue; }
-                    match rbl_anlz::Anlz::read(&companion) {
+                    let parsed = std::fs::read(&companion).map_err(std::io::Error::other).and_then(|bytes| {
+                        crate::incremental::read_bytes(&companion, bytes.len() as u64);
+                        rbl_anlz::parse(&bytes).map_err(std::io::Error::other)
+                    });
+                    match parsed {
                         Ok(file) => {
+                            dat_valid |= extension == "DAT";
                             if file.path().is_some_and(|p| p != track.path) {
                                 report.errors.push(format!("Analysis audio path mismatch: {relative}"));
                             }
@@ -233,6 +322,7 @@ fn verify_assets(
                         Err(e) => report.errors.push(format!("Invalid analysis {relative}: {e}")),
                     }
                 }
+                report.analysis_present += usize::from(dat_valid);
                 report.overview_waveforms += usize::from(overview);
                 report.detail_waveforms += usize::from(detail);
                 report.beat_grids += usize::from(grid);
@@ -244,4 +334,27 @@ fn verify_assets(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::snapshot::{Playlist, Track};
+
+    /// A failed sync said only that the two databases disagree
+    /// (#161); it has to say where.
+    #[test]
+    fn a_disagreement_names_the_track_and_the_field() {
+        let track = Track { id: 1, title: "Kesä".into(), comment: "é".into(), ..Track::default() };
+        let legacy = Library { tracks: vec![track.clone()], playlists: vec![] };
+        let one = Library { tracks: vec![Track { comment: "é\0x".into(), ..track }], playlists: vec![] };
+        assert_eq!(disagreement(&legacy, &one), "Device Library and OneLibrary disagree on the comment of track 'Kesä'");
+
+        let playlist = Playlist { id: 4, name: "Warm up".into(), ..Playlist::default() };
+        let legacy = Library { tracks: vec![], playlists: vec![playlist.clone()] };
+        let one = Library { tracks: vec![], playlists: vec![Playlist { tracks: vec![1], ..playlist }] };
+        assert_eq!(disagreement(&legacy, &one), "Device Library and OneLibrary disagree on playlist 'Warm up'");
+        assert_eq!(disagreement(&legacy, &Library::default()), "Device Library and OneLibrary disagree: playlist 'Warm up' is only in export.pdb");
+    }
 }

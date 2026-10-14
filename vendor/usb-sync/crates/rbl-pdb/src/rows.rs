@@ -5,7 +5,7 @@
 //! the same layout, and the layout itself was validated against a real
 //! rekordbox-authored export.
 
-use crate::build::device_sql_string;
+use crate::build::{device_sql_string, push_device_sql_string};
 
 /// Fixed portion of a track row, before the 21 string offsets.
 const TRACK_FIXED_LEN: usize = 0x5e;
@@ -50,6 +50,12 @@ pub struct TrackInput {
     pub play_count: u16,
     pub disc_number: u16,
     pub sample_depth: u16,
+    /// `exportLibrary.db`'s `content.masterDbId`: the library the track was
+    /// exported from. Written at `0x18`; see [`track_row`].
+    pub master_db_id: u32,
+    /// `exportLibrary.db`'s `content.masterContentId`: the track's id in that
+    /// library. Written at `0x14`; see [`track_row`].
+    pub master_content_id: u32,
     pub title: String,
     pub filename: String,
     /// Media-relative, e.g. `/Contents/Artist/Album/Track.mp3`.
@@ -72,6 +78,21 @@ fn put_u4(row: &mut [u8], at: usize, v: u32) {
     if let Some(slice) = row.get_mut(at..at + 4) {
         slice.copy_from_slice(&v.to_le_bytes());
     }
+}
+
+/// Writes a row's slot on its page into bytes 2 and 3, as the slot times 32.
+///
+/// Rows that open with a u16 subtype carry this "index shift": tracks
+/// (`0x24`), artists (`0x60`), albums (`0x80`), `property` (`0x0280`) and
+/// `exportExt.pdb`'s tags (`0x0680`). rekordbox numbers every one of them
+/// from 0 on each page [OBS: all 222 live track, artist, album and property
+/// rows on the 17 data pages of a stick rekordbox 7 wrote]. The `DeviceSQL`
+/// engine of NXS-era players reads the slot back from here: `rbp` 2.21 on
+/// the XDJ-RX takes `*(u16 *)(row + 2) >> 5` as the row's slot in
+/// `FUN_0032ceb0` and `FUN_0032db38` and keeps it as the cursor position.
+/// Encoders write 0; the page builder numbers the row when it places it.
+pub fn set_index_shift(row: &mut [u8], slot: u16) {
+    put_u2(row, 2, slot.saturating_mul(32));
 }
 
 /// Encodes a track row.
@@ -107,13 +128,22 @@ pub fn track_row(input: &TrackInput) -> Vec<u8> {
     // These are part of the record layout, not optional metadata. A zero
     // subtype makes the CDJ-3000 ignore the tracks; zero trailer words leave
     // its string columns misread. Pinned against rekordbox's MP3 export and
-    // CDJ-3000 firmware browse/load tests.
+    // CDJ-3000 firmware browse/load tests (../rbxport-private/docs/audits/usb-track-records.md).
     put_u2(&mut row, 0x00, 0x24); // track record with 16-bit string offsets
-    put_u2(&mut row, 0x02, 0); // index_shift
+    put_u2(&mut row, 0x02, 0); // index_shift: the row's slot, see `set_index_shift`
     put_u4(&mut row, 0x04, 0); // bitmask
     put_u4(&mut row, 0x08, input.sample_rate);
     put_u4(&mut row, 0x0c, 0); // composer_id
     put_u4(&mut row, 0x10, input.file_size);
+    // The row is rekordbox's DJDBCONTENT row, and these two words are its
+    // MASTERCONTENTID and MASTERDBID columns: the same two numbers rekordbox
+    // puts in `exportLibrary.db`'s `content.masterContentId` and
+    // `masterDbId` [OBS: on a stick rekordbox 7 wrote, all 1563 tracks in
+    // both databases agree, e.g. track 1 `e4 ed d8 0c` = 215543268 and
+    // `8d 56 4c 1a` = 441210509]. The XDJ-700 1.15 firmware names both
+    // columns in its own DJDBCONTENT schema.
+    put_u4(&mut row, 0x14, input.master_content_id);
+    put_u4(&mut row, 0x18, input.master_db_id);
     put_u4(&mut row, 0x1c, input.artwork_id);
     put_u4(&mut row, 0x20, input.key_id);
     put_u4(&mut row, 0x24, 0); // original_artist_id
@@ -141,14 +171,14 @@ pub fn track_row(input: &TrackInput) -> Vec<u8> {
     put_u2(&mut row, 0x5a, audio_file_type(&input.filename));
     put_u2(&mut row, 0x5c, 3);
 
-    // Append each string, recording where it landed.
+    // Append each string, recording where it landed. Long strings start
+    // on a four-byte boundary of the row, as rekordbox writes them.
     let mut offsets = [0_u16; TRACK_STRINGS];
     for (slot, text) in strings.iter().enumerate() {
-        let at = u16::try_from(row.len()).unwrap_or(0);
+        let at = u16::try_from(push_device_sql_string(&mut row, text)).unwrap_or(0);
         if let Some(entry) = offsets.get_mut(slot) {
             *entry = at;
         }
-        row.extend_from_slice(&device_sql_string(text));
     }
     for (slot, offset) in offsets.iter().enumerate() {
         put_u2(&mut row, TRACK_FIXED_LEN + slot * 2, *offset);
@@ -206,14 +236,101 @@ pub fn color_row(id: u16, name: &str) -> Vec<u8> {
     row
 }
 
+/// The `dbVersion` rekordbox writes in both `property` tables [OBS 7.2.11,
+/// 7.2.14].
+pub const PROPERTY_DB_VERSION: &str = "1000";
+
+/// The one live row of `property`, page type 19: the Device Library's copy
+/// of `exportLibrary.db`'s `property` row, plus the Device Library's own
+/// background colour.
+///
+/// The layout was read from rekordbox 7.2.14's rows on a 1317-track stick
+/// [OBS 2026-10-08]. The count, date, version and name matched that stick's
+/// `exportLibrary.db` `property` row. Changing only "Background Color :
+/// Device Library" from Yellow to Blue changed only byte 9, from 4 to 7:
+///
+/// ```text
+/// 0x00  80 02        constant
+/// 0x02  u16          index shift, row index << 5
+/// 0x04  u32          numberOfContents
+/// 0x08  00           constant
+/// 0x09  u8           background colour, 0 Default, 1..8 Pink..Purple
+/// 0x0a  00 00        constant
+/// 0x0c  string       createdDate, YYYY-MM-DD
+///       19 1e        constant [UNKNOWN]
+///       string       dbVersion
+///       string       deviceName
+///       8 zero bytes, then padding to a multiple of four
+/// ```
+///
+/// rekordbox does not change the row in place. It adds a new row and clears
+/// the old row's presence bit, so the page holds one live row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PdbProperty {
+    pub device_name: String,
+    pub db_version: String,
+    pub contents: u32,
+    pub created_date: String,
+    pub background_color: u8,
+}
+
+impl Default for PdbProperty {
+    fn default() -> Self {
+        Self {
+            device_name: String::new(),
+            db_version: PROPERTY_DB_VERSION.to_owned(),
+            contents: 0,
+            created_date: String::new(),
+            background_color: 0,
+        }
+    }
+}
+
+/// The bytes between the date and the version string [OBS, UNKNOWN].
+pub(crate) const PROPERTY_GAP: [u8; 2] = [0x19, 0x1e];
+/// Offset of the date string in a `property` row.
+pub(crate) const PROPERTY_DATE_AT: usize = 0x0c;
+/// Offset of the background colour in a `property` row.
+pub(crate) const PROPERTY_COLOR_AT: usize = 0x09;
+
+/// Encodes the `property` row as row 0 of its page. Returns `None` when the
+/// date is not ten ASCII bytes or the version is not ASCII. A row with a
+/// wrong date length is refused, not written.
+#[must_use]
+pub fn property_row(property: &PdbProperty) -> Option<Vec<u8>> {
+    let date = &property.created_date;
+    if date.len() != 10 || !date.is_ascii() || !property.db_version.is_ascii() {
+        return None;
+    }
+    let mut row = vec![0x80, 0x02, 0x00, 0x00];
+    row.extend_from_slice(&property.contents.to_le_bytes());
+    row.extend_from_slice(&[0x00, property.background_color, 0x00, 0x00]);
+    row.extend_from_slice(&crate::build::short_ascii(date));
+    row.extend_from_slice(&PROPERTY_GAP);
+    row.extend_from_slice(&crate::build::short_ascii(&property.db_version));
+    // Where rekordbox puts a long or UTF-16 device name here is not
+    // observed [UNKNOWN]; the readers parse this row in sequence.
+    row.extend_from_slice(&device_sql_string(&property.device_name));
+    row.extend_from_slice(&[0; 8]);
+    while !row.len().is_multiple_of(4) {
+        row.push(0);
+    }
+    Some(row)
+}
+
 /// `artists`: the name is located by a one-byte offset from the row start.
+///
+/// A short name follows at `0x0a`; a long or UTF-16 name starts at `0x0c`
+/// after two zero bytes [OBS: rekordbox's `60 00 e0 03 76 00 00 00 03 0c 00 00`
+/// before `90 0e 00 00 "LÜRUM"`, and `0x0a` for all 666 short names on the
+/// same stick].
 pub fn artist_row(id: u32, name: &str) -> Vec<u8> {
     let mut row = vec![0_u8; 10];
     put_u2(&mut row, 0x00, 0x60); // subtype: near offset
     put_u4(&mut row, 0x04, id);
     row[0x08] = 0x03; // constant rekordbox writes
-    row[0x09] = 0x0a; // the name follows immediately
-    row.extend_from_slice(&device_sql_string(name));
+    let at = push_device_sql_string(&mut row, name);
+    row[0x09] = u8::try_from(at).unwrap_or(0x0a);
     row
 }
 
@@ -230,14 +347,18 @@ pub fn artist_row(id: u32, name: &str) -> Vec<u8> {
 /// The id is the fourth word and the artist the third; an earlier version
 /// of this writer had them the other way round, which a player reads as
 /// every album having id 0.
+///
+/// A long or UTF-16 name starts at `0x18` after two zero bytes instead
+/// [OBS: rekordbox's `03 18 00 00` before `90 3a 00 00 "Café Del Mar
+/// (Extended Mix)"`].
 pub fn album_row(id: u32, artist_id: u32, name: &str) -> Vec<u8> {
     let mut row = vec![0_u8; ALBUM_NAME_AT];
     put_u2(&mut row, 0x00, 0x80);
     put_u4(&mut row, 0x08, artist_id);
     put_u4(&mut row, 0x0c, id);
     row[0x14] = 0x03; // constant rekordbox writes
-    row[0x15] = u8::try_from(ALBUM_NAME_AT).unwrap_or(0x16); // the name follows immediately
-    row.extend_from_slice(&device_sql_string(name));
+    let at = push_device_sql_string(&mut row, name);
+    row[0x15] = u8::try_from(at).unwrap_or(0x16);
     row
 }
 

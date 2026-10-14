@@ -66,6 +66,7 @@ export const api = {
   usbList: () => call<Volume[]>('usb.list'),
   usbEject: (volumeId: string) => call<void>('usb.eject', { volumeId }),
   usbPlaylists: (volumeId: string) => call<TreeItem[]>('usb.playlists', { volumeId }),
+  usbSelection: (volumeId: string) => call<{ playlistIds: string[] }>('usb.selection', { volumeId }),
   usbTracks: (volumeId: string, playlistId: string | null) => call<Track[]>('usb.tracks', { volumeId, playlistId }),
   usbSync: (volumeId: string, playlistIds: string[]) =>
     call<{ volumeId: string; tracks: number; playlists: number }>('usb.sync', { volumeId, playlistIds }),

@@ -10,6 +10,8 @@ description = "Writes rekordbox-compatible USB exports."
 workspace = true
 
 [dependencies]
+blake3 = "1"
+fs2 = "0.4"
 unicode-normalization = "0.1"
 rbl-audio = { path = "../rbl-audio" }
 tempfile = "3"
@@ -26,3 +28,9 @@ tracing = { workspace = true }
 rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
 tempfile = "3"
 rbl-anlz = { path = "../rbl-anlz" }
+rbl-audio = { path = "../rbl-audio" }
+rbl-onelibrary = { path = "../rbl-onelibrary" }
+
+# `statfs`, for the type of a mounted test volume (`tests/removable_media.rs`).
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+rustix = { version = "1", features = ["fs"] }

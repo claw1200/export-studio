@@ -1,9 +1,10 @@
-//! Primitives shared across the USB export crates.
+//! Primitives shared across every rbxport crate.
 //!
 //! Shared types and durable filesystem publication; no network or Tauri.
 
 pub mod durable;
 pub mod ids;
+pub mod mpeg;
 pub mod musickey;
 pub mod time;
 pub mod xml;
@@ -55,7 +56,7 @@ impl core::fmt::Display for FourCc {
 
 
 /// Library metadata needed by both USB database formats beyond the browse index.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExportMetadata {
     pub track_number: u32,
     pub disc_number: u16,

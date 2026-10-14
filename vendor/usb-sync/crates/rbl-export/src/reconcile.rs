@@ -21,18 +21,92 @@ pub fn prepare(
     tracks: &[SourceTrack],
     playlists: &[SourcePlaylist],
     db_id: u64,
+    keep_unlisted: bool,
 ) -> Result<(Vec<SourceTrack>, Vec<SourcePlaylist>)> {
     let mut tracks = tracks.to_vec();
     let mut playlists = playlists.to_vec();
-    let Some(current) = before.merged_library() else {
+    let record = crate::sync_record::read(root).filter(|r| r.db_id == db_id && db_id != 0);
+    // A playlist carried under a new id must not take one an earlier export
+    // recorded: that would read as the library's playlist, and be taken off.
+    // Nor one the stick held at that export and has since deleted: that
+    // would read as a deletion undone (`check_database_changes`).
+    let baseline = previous.and_then(|m| m.baseline.as_ref());
+    let recorded = previous
+        .into_iter()
+        .flat_map(|m| m.playlists.iter().map(|p| p.export_id))
+        .chain(record.iter().flat_map(|r| r.device_ids.values().copied()))
+        .chain(
+            baseline
+                .into_iter()
+                .flat_map(|b| b.legacy.iter().chain(&b.one))
+                .flat_map(|l| l.playlists.iter().map(|p| p.id)),
+        )
+        .max()
+        .unwrap_or(0);
+    let Some(current) = before.merged_library_above(recorded) else {
         return Ok((tracks, playlists));
     };
     let existing_sources = sources(root, before)?;
     identify_tracks(&mut tracks, before, previous, db_id, &existing_sources);
-    let record = crate::sync_record::read(root).filter(|r| r.db_id == db_id && db_id != 0);
     identify_playlists(&mut playlists, previous, record.as_ref());
-    retain_device_only(&current, &mut tracks, &mut playlists, before, previous, &existing_sources, record.as_ref())?;
+    retain_device_only(root, &current, &mut tracks, &mut playlists, before, previous, &existing_sources, record.as_ref(), keep_unlisted)?;
+    if keep_unlisted {
+        keep_stick_order(&mut playlists, previous);
+    }
     Ok((tracks, playlists))
+}
+
+/// The stick's rows [`prepare`] will tie to the selection, and so write afresh
+/// from the library: the device tracks `identify_tracks` names by their
+/// master ids, and the device playlists `identify_playlists` names. Worked
+/// out from the snapshot alone, before any analysis file is read.
+pub fn rewritten(
+    root: &Path,
+    before: &Snapshot,
+    previous: Option<&Manifest>,
+    tracks: &[SourceTrack],
+    playlists: &[SourcePlaylist],
+    db_id: u64,
+) -> crate::snapshot::Rewritten {
+    let selected: BTreeSet<u64> = tracks.iter().filter(|t| t.id != 0).map(|t| t.id).collect();
+    let mut out = crate::snapshot::Rewritten::default();
+    // The first device row per library track, as `identify_tracks` takes it.
+    let mut taken = BTreeSet::new();
+    for (device, (db, content)) in &before.identity {
+        if *db == db_id && selected.contains(content) && taken.insert(*content) {
+            out.tracks.insert(*device);
+        }
+    }
+    // A selected track with no such row, that an earlier export recorded.
+    if let Some(m) = previous.filter(|m| m.db_id == db_id) {
+        let recorded: BTreeMap<String, u32> = m.tracks.iter().map(|t| (t.key(), t.export_id)).collect();
+        for track in tracks.iter().filter(|t| t.id == 0 || !taken.contains(&t.id)) {
+            if let Some(id) = recorded.get(&crate::track_key(track.id, &track.source_path.to_string_lossy())) {
+                out.tracks.insert(*id);
+            }
+        }
+    }
+    let record = crate::sync_record::read(root).filter(|r| r.db_id == db_id && db_id != 0);
+    let mut playlists = playlists.to_vec();
+    identify_playlists(&mut playlists, previous, record.as_ref());
+    out.playlists = playlists.iter().map(|p| p.device_id).filter(|id| *id != 0).collect();
+    out
+}
+
+/// Puts the playlists the previous export listed back in the order it listed
+/// them, with the ones new to the stick after them in the selection's order:
+/// an export that adds to a stick does not move what it already holds.
+fn keep_stick_order(playlists: &mut [SourcePlaylist], previous: Option<&Manifest>) {
+    let Some(previous) = previous else { return };
+    let place: BTreeMap<u32, usize> = previous
+        .playlists
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, old)| old.export_id != 0)
+        .map(|(i, old)| (old.export_id, i))
+        .collect();
+    playlists.sort_by_key(|p| place.get(&p.device_id).copied().unwrap_or(usize::MAX));
 }
 
 /// Ties a track already in the selection to the device row it came from, so
@@ -44,28 +118,38 @@ fn identify_tracks(
     db_id: u64,
     existing_sources: &BTreeMap<u32, SourceTrack>,
 ) {
+    let mut identities = BTreeMap::new();
+    for (id, (db, content)) in &before.identity {
+        if *db == db_id && *content != 0 { identities.entry(*content).or_insert(*id); }
+    }
+    let recorded: BTreeMap<_, _> = previous.filter(|m| m.db_id == db_id).into_iter().flat_map(|m| &m.tracks)
+        .map(|t| (t.key(), t.export_id)).collect();
+    let exported: BTreeSet<_> = previous.into_iter().flat_map(|m| &m.tracks).filter(|t| t.preserved != Some(true)).map(|t| t.export_id).collect();
     for track in tracks {
         if track.device.is_some() {
             continue;
         }
-        let identity = before
-            .identity
-            .iter()
-            .find(|(_, (db, content))| *db == db_id && *content == track.id && track.id != 0)
-            .map(|(id, _)| *id)
-            .or_else(|| {
-                previous
-                    .filter(|m| m.db_id == db_id)
-                    .and_then(|m| {
-                        m.tracks.iter().find(|t| {
-                            t.key()
-                                == crate::track_key(track.id, &track.source_path.to_string_lossy())
-                        })
-                    })
-                    .map(|t| t.export_id)
-            });
+        let identity = identities.get(&track.id).copied().or_else(|| recorded.get(&crate::track_key(track.id, &track.source_path.to_string_lossy())).copied());
         if let Some(id) = identity {
             if let Some(source) = existing_sources.get(&id) {
+                track.fallback = Some(Box::new(source.clone()));
+                let source_changed = previous.and_then(|m| m.generation.as_ref())
+                    .and_then(|g| g.inputs.get(&track.source_path.to_string_lossy().into_owned()))
+                    .is_some_and(|old| crate::incremental::revision(&track.source_path).is_ok_and(|now| now != *old));
+                let unavailable = !track.source_path.is_file() || (source_changed && std::fs::File::open(&track.source_path).is_err());
+                if unavailable && source.source_path.is_file() {
+                    let master_id = track.id;
+                    *track = source.clone();
+                    track.id = master_id;
+                    track.source_unavailable = true;
+                    if let Some(device) = &mut track.device {
+                        device.master_db_id = db_id;
+                        device.master_content_id = master_id;
+                        device.preserve = true;
+                        device.exported = exported.contains(&id);
+                    }
+                    continue;
+                }
                 let mut device = source.device.clone().unwrap_or_default();
                 device.preserve = false;
                 device.master_db_id = db_id;
@@ -101,8 +185,13 @@ fn identify_playlists(
 /// Keeps whatever the device holds that this sync's selection does not name:
 /// playlists nobody chose (and their ancestor folders), and the tracks those
 /// playlists or the play history still reference.
+///
+/// A playlist an earlier export put there (`owned`) is taken off unless
+/// `keep_unlisted`, in which case it stays as the stick has it and is still
+/// recorded as the library's, under the library id it was exported from.
 #[allow(clippy::too_many_arguments, reason = "everything reconciliation already gathered, passed through")]
 fn retain_device_only(
+    root: &Path,
     current: &Library,
     tracks: &mut Vec<SourceTrack>,
     playlists: &mut Vec<SourcePlaylist>,
@@ -110,39 +199,68 @@ fn retain_device_only(
     previous: Option<&Manifest>,
     existing_sources: &BTreeMap<u32, SourceTrack>,
     record: Option<&SyncRecord>,
+    keep_unlisted: bool,
 ) -> Result<()> {
-    let owned: BTreeSet<u32> = previous.map_or_else(
-        || record.map(|r| r.device_ids.values().copied().collect()).unwrap_or_default(),
+    // Device playlist id -> the library id it was exported from.
+    let owned: BTreeMap<u32, u64> = previous.map_or_else(
+        || {
+            record
+                .map(|r| r.device_ids.iter().map(|(library, device)| (*device, *library)).collect())
+                .unwrap_or_default()
+        },
         |m| {
             m.playlists
                 .iter()
-                .filter(|p| !p.device_only)
-                .map(|p| p.export_id)
-                .filter(|id| *id != 0)
+                .filter(|p| !p.device_only && p.export_id != 0)
+                .map(|p| (p.export_id, p.library_id))
                 .collect()
         },
     );
+    // Kept as the library's: owned, with a library id the selection does not
+    // already use for another playlist.
+    let kept_owned: BTreeMap<u32, u64> = if keep_unlisted {
+        owned
+            .iter()
+            .filter(|(_, library)| **library != 0 && !playlists.iter().any(|n| n.id == **library))
+            .map(|(device, library)| (*device, *library))
+            .collect()
+    } else {
+        BTreeMap::new()
+    };
     let retained: Vec<_> = current
         .playlists
         .iter()
-        .filter(|p| !owned.contains(&p.id) && !playlists.iter().any(|n| n.device_id == p.id))
+        .filter(|p| (!owned.contains_key(&p.id) || kept_owned.contains_key(&p.id)) && !playlists.iter().any(|n| n.device_id == p.id))
         .collect();
+    let retained_id = |device: u32| kept_owned.get(&device).copied().unwrap_or(DEVICE_PLAYLIST_ID_BASE + u64::from(device));
     let mut needed: BTreeSet<u32> = retained
         .iter()
         .flat_map(|p| &p.tracks)
         .copied()
         .chain(before.history.iter().flat_map(|h| &h.tracks).copied())
         .collect();
+    // What an earlier export put there itself. A track it only carried
+    // (`preserved`) is still another writer's: counting it as ours would keep
+    // it for one sync and drop it, unannounced, at the next (#317). An older
+    // record has no such flag; `carried_entry` infers it.
     let previously_owned: BTreeSet<u32> = previous
-        .map(|m| m.tracks.iter().map(|t| t.export_id).collect())
+        .map(|m| m.tracks.iter().filter(|t| !crate::carried_entry(root, t)).map(|t| t.export_id).collect())
         .unwrap_or_default();
-    // Tracks that arrived through another writer belong to the USB, not to our
-    // previous selection. Retain them even when no playlist references them.
+    // A track no remaining playlist and no play history names is not part of
+    // this sync. One an earlier sync already snapshotted can be taken off:
+    // that baseline is what makes the loss visible. A track with no baseline
+    // stays, so a first sync does not drop a stick it has never recorded.
+    let snapshotted: BTreeSet<u32> = previous
+        .and_then(|m| m.baseline.as_ref())
+        .into_iter()
+        .flat_map(|b| b.legacy.iter().chain(b.one.iter()))
+        .flat_map(|lib| lib.tracks.iter().map(|t| t.id))
+        .collect();
     needed.extend(
         current
             .tracks
             .iter()
-            .filter(|t| !previously_owned.contains(&t.id))
+            .filter(|t| !previously_owned.contains(&t.id) && !snapshotted.contains(&t.id))
             .map(|t| t.id),
     );
     let mut positions: BTreeMap<u32, usize> = tracks
@@ -154,7 +272,7 @@ fn retain_device_only(
         if positions.contains_key(&id) {
             continue;
         }
-        let track = existing_sources
+        let mut track = existing_sources
             .get(&id)
             .ok_or_else(|| {
                 ExportError::Conflict(format!(
@@ -162,6 +280,12 @@ fn retain_device_only(
                 ))
             })?
             .clone();
+        // A track an earlier export put there that a device playlist or the
+        // history still names: carried for now, but still ours to take off
+        // once nothing names it.
+        if let Some(device) = track.device.as_mut() {
+            device.exported = previously_owned.contains(&id);
+        }
         positions.insert(id, tracks.len());
         tracks.push(track);
     }
@@ -191,12 +315,12 @@ fn retain_device_only(
             playlists
                 .iter()
                 .find(|n| n.device_id == p.parent)
-                .map_or(DEVICE_PLAYLIST_ID_BASE + u64::from(p.parent), |n| n.id)
+                .map_or_else(|| retained_id(p.parent), |n| n.id)
         };
         playlists.push(SourcePlaylist {
-            id: DEVICE_PLAYLIST_ID_BASE + u64::from(p.id),
+            id: retained_id(p.id),
             device_id: p.id,
-            device_only: true,
+            device_only: !kept_owned.contains_key(&p.id),
             name: p.name.clone(),
             parent_id,
             folder: p.folder,
@@ -217,6 +341,33 @@ fn retain_device_only(
 /// Read complete track metadata from whichever database exists. Both formats
 /// share the audio and analysis files; only the explicit identity map is trusted.
 fn sources(root: &Path, before: &Snapshot) -> Result<BTreeMap<u32, SourceTrack>> {
+    let manifest = Manifest::load(root);
+    if let Some(generation) = manifest.as_ref().and_then(|m| m.generation.as_ref())
+        .filter(|g| !g.device_sources.is_empty() && crate::incremental::databases(root).is_ok_and(|signatures| signatures == g.databases)) {
+        let mut sources = generation.device_sources.clone();
+        for source in sources.values_mut() {
+            source.source_path = crate::checked_under(root, &source.source_path.to_string_lossy())?;
+            if let Some(path) = &source.analysis_source { source.analysis_source = Some(crate::checked_under(root, &path.to_string_lossy())?); }
+            if let Some(path) = &source.artwork { source.artwork = Some(crate::checked_under(root, &path.to_string_lossy())?); }
+        }
+        return Ok(sources);
+    }
+    read_sources(root, before)
+}
+
+/// Normalized metadata from the independently parsed staged generation.
+/// Persist relative paths so a volume rename cannot strand its cached rows.
+pub(crate) fn capture_sources(root: &Path, before: &Snapshot) -> Result<BTreeMap<u32, SourceTrack>> {
+    let mut sources = read_sources(root, before)?;
+    for source in sources.values_mut() {
+        source.source_path = source.source_path.strip_prefix(root).map_err(std::io::Error::other)?.to_owned();
+        if let Some(path) = &source.analysis_source { source.analysis_source = Some(path.strip_prefix(root).map_err(std::io::Error::other)?.to_owned()); }
+        if let Some(path) = &source.artwork { source.artwork = Some(path.strip_prefix(root).map_err(std::io::Error::other)?.to_owned()); }
+    }
+    Ok(sources)
+}
+
+fn read_sources(root: &Path, before: &Snapshot) -> Result<BTreeMap<u32, SourceTrack>> {
     let mut out = BTreeMap::new();
     let manifest = Manifest::load(root);
     let dir = crate::export_root(root).join("rekordbox");
@@ -256,7 +407,7 @@ fn sources_from_one(root: &Path, dir: &Path, out: &mut BTreeMap<u32, SourceTrack
                     release_date: r.get(9)?,
                     bpm_x100: r.get(10)?,
                     duration_sec: r.get(11)?,
-                    rating: r.get::<_, u8>(12)? / 51,
+                    rating: crate::snapshot::onelibrary_stars(r.get(12)?),
                     color_id: r.get(13)?,
                     year: r.get(14)?,
                     bitrate: r.get(15)?,
@@ -344,7 +495,10 @@ fn fill_source_details(
     manifest: Option<&Manifest>,
     out: &mut BTreeMap<u32, SourceTrack>,
 ) -> Result<()> {
+    // Tracks only. Its playlist ids use no recorded floor, unlike
+    // `prepare`'s `merged_library_above`: do not rely on them here.
     let current = before.merged_library();
+    let recorded: BTreeMap<_, _> = manifest.into_iter().flat_map(|m| m.tracks.iter().map(|t| (t.export_id, (m.db_id, t.library_id)))).collect();
     for t in current.as_ref().into_iter().flat_map(|l| &l.tracks) {
         let track = out
             .get_mut(&t.id)
@@ -360,26 +514,14 @@ fn fill_source_details(
             .map_or(String::new(), |p| p.to_string_lossy().into_owned());
         if !t.analysis.is_empty() {
             let base = crate::checked_under(root, &t.analysis)?;
-            for extension in ["DAT", "EXT", "2EX"] {
-                let path = base.with_extension(extension);
-                match std::fs::read(&path) {
-                    Ok(bytes) => track.analysis.push((extension.into(), bytes)),
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(e) => return Err(e.into()),
-                }
-            }
+            track.analysis_source = Some(base);
         }
         let (master_db_id, master_content_id) = before
             .identity
             .get(&t.id)
             .copied()
             .or_else(|| {
-                manifest.and_then(|m| {
-                    m.tracks
-                        .iter()
-                        .find(|old| old.export_id == t.id)
-                        .map(|old| (m.db_id, old.library_id))
-                })
+                recorded.get(&t.id).copied()
             })
             .unwrap_or_default();
         track.device = Some(DeviceTrack {
@@ -389,6 +531,7 @@ fn fill_source_details(
             audio: t.path.clone(),
             analysis_dir,
             preserve: true,
+            exported: false,
         });
     }
     Ok(())
@@ -400,6 +543,8 @@ pub fn all(
     before: &Snapshot,
     manifest: Option<&Manifest>,
 ) -> Result<(Vec<SourceTrack>, Vec<SourcePlaylist>)> {
+    // Runs only when one database is missing, so no playlist is re-id'd and
+    // the floor `prepare` passes to `merged_library_above` cannot matter.
     let current = before.merged_library();
     let sources = sources(root, before)?;
     let positions: BTreeMap<u32, usize> =

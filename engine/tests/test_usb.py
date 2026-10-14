@@ -1,5 +1,6 @@
 """USB browse and sync. These tests use temporary directories only."""
 
+import json
 import struct
 import tempfile
 import unittest
@@ -20,6 +21,7 @@ from exportstudio_engine.usb.pdb import (
     read_pdb,
     table_page,
 )
+from exportstudio_engine.usb.selection import recorded_playlist_ids
 from exportstudio_engine.usb.sync import (
     CueSource,
     ExportBundle,
@@ -264,6 +266,53 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(len(again.tracks), 1)
             self.assertEqual(again.tracks[0].export_id, first)
             self.assertEqual(again.tracks[0].title, "Song")
+
+
+class SelectionTests(unittest.TestCase):
+    def test_manifest_and_matching_sync_record_become_library_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            volume = Path(raw)
+            root = volume / "PIONEER"
+            (root / "exportstudio").mkdir(parents=True)
+            (root / "rekordbox").mkdir()
+            (root / "exportstudio" / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "playlists": [
+                            {"device_only": False, "library_id": 16, "name": "Kept"},
+                            {"device_only": True, "library_id": 32, "name": "jungle"},
+                            {"library_id": 0, "name": "Loose"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "rekordbox" / "playlists3.sync").write_text(
+                """<?xml version="1.0" encoding="UTF-8"?>\r\n\r\n"""
+                """<Sync DBID="9" AutomaticSync="0" AllPlaylists="0" IncludeCue="1" ForcedSync="0" Timestamp="0">\r\n"""
+                """  <Playlists>\r\n"""
+                """    <NODE Id="0" ParentId="0" Attribute="1" Lib_Type="0" Dev_ID="0" Timestamp="0" CheckType="2"/>\r\n"""
+                """    <NODE Id="14" ParentId="0" Attribute="0" Lib_Type="0" Dev_ID="1" Timestamp="5" CheckType="1"/>\r\n"""
+                """  </Playlists>\r\n"""
+                """</Sync>\r\n""",
+                encoding="utf-8",
+            )
+            self.assertEqual(recorded_playlist_ids(volume, ["16", "20", "32", "99"], 9), ["16", "20"])
+
+    def test_another_library_and_a_missing_record_add_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            volume = Path(raw)
+            root = volume / "PIONEER" / "rekordbox"
+            root.mkdir(parents=True)
+            (root / "playlists3.sync").write_text(
+                '<Sync DBID="9"><Playlists>'
+                '<NODE Id="14" Attribute="0" CheckType="1"/>'
+                "</Playlists></Sync>",
+                encoding="utf-8",
+            )
+            self.assertEqual(recorded_playlist_ids(volume, ["20"], 8), [])
+            self.assertEqual(recorded_playlist_ids(volume / "empty", ["20"], 9), [])
 
 
 if __name__ == "__main__":

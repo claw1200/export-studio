@@ -187,7 +187,7 @@ pub struct Track {
     pub file_size: i64,
     /// Stick-relative path of the analysis file.
     pub analysis_path: String,
-    /// 0 to 255, in the multiples of 51 rekordbox uses for stars.
+    /// Star count, 0 to 5.
     pub rating: i64,
     pub comment: String,
     pub date_added: String,
@@ -490,8 +490,15 @@ impl Builder {
         // does not replay it would read a database missing everything written.
         self.conn.execute_batch("COMMIT")?;
         drop(self.conn);
-        std::fs::OpenOptions::new().write(true).open(&self.staged)?.sync_all()?;
-        self.staged.persist_noclobber(&self.target).map_err(|e| e.error)?;
+        // Each step says what it was doing: "Operation not supported" alone
+        // does not tell a flush from a rename (#122, #283).
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&self.staged)
+            .and_then(|file| rbl_core::durable::flush(&file))
+            .map_err(|e| std::io::Error::new(e.kind(), format!("could not flush the new database: {e}")))?;
+        rbl_core::durable::persist_new(self.staged, &self.target)
+            .map_err(|e| std::io::Error::new(e.kind(), format!("could not move the new database into place: {e}")))?;
         rbl_core::durable::sync_dir(self.target.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")))?;
         Ok(())
     }

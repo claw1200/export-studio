@@ -8,9 +8,10 @@
 //! - `PWAV`, `PWV2`, `PWV3`: one byte a column, five bits of height and
 //!   three of "whiteness" — how much of the column is treble.
 //! - `PWV4`: six bytes a column, the first the raw peak out of 127 and the
-//!   last three the red, green and blue, which track the mid, high and low
+//!   last three the red, green and blue, which track the low, mid and high
 //!   bands [OBS]. Bytes 1 and 2 are `[UNKNOWN]` and written as zero.
-//! - `PWV5`: a big-endian `u16` a column, `rrrgggbbbhhhhh00`.
+//! - `PWV5`: a big-endian `u16` a column, `rrrgggbbbhhhhh00`, red, green
+//!   and blue again the low, mid and high bands [OBS].
 //! - `PWV6`, `PWV7`: three bytes a column, low, mid and high out of 127.
 //!
 //! `PWAV` is 400 columns and `PWV2` 100; `PWV4` and `PWV6` are 1,200; the
@@ -18,13 +19,14 @@
 //! peak preview uses the loudest column of each bucket. `PWV6` uses an
 //! independent energy envelope when supplied to [`author_with_overview`].
 //!
-//! Every height drawn comes from the three bands, never from the column's
-//! raw sample peak — that is `PWV4`'s first byte and nothing else. The
-//! bands are not all written at one scale: `PWV6` takes [`band`],
-//! while `PWV7` keeps the full seven-bit detail range;
-//! `PWV4`'s colour channels the plain seven-bit narrowing, `PWV5`'s the
-//! top three bits. Each of those is what rekordbox's own files hold; see
-//! the functions for the measurements.
+//! The preview heights (`PWAV`, `PWV2`) come from the three bands; the
+//! scrolling details' (`PWV3`, `PWV5`) from the column's sample peak, on
+//! rekordbox's squared curve — see [`detail_height`]. The bands are not all
+//! written at one scale: `PWV6` takes [`band`], while `PWV7` keeps the full
+//! seven-bit detail range; `PWV4`'s colour channels a weighted seven-bit
+//! narrowing, `PWV5`'s a colour normalised to its strongest band. Each of
+//! those is what rekordbox's own files hold; see the functions for the
+//! measurements.
 
 use rbl_core::FourCc;
 
@@ -109,48 +111,145 @@ const PWAV_CEILING: u32 = 25;
 const PWV2_CEILING: u32 = 15;
 const DETAIL_CEILING: u32 = 31;
 
-/// A column's drawn height, up to `ceiling`.
+/// A preview column's drawn height, up to `ceiling`.
 ///
-/// The loudest of the three bands, not the column's raw sample peak. They
-/// are not the same thing and rekordbox draws the first: on a loud master
-/// its raw peak, the byte it writes as `PWV4`'s height and the one ours
-/// already matches, is pinned at full scale for most of the track, while
-/// the heights it draws keep their dynamics - `PWAV` sits at 10-21 of its
-/// 25 and `PWV3` at 5-19 of its 31 [OBS 7.2.11]. Taking the peak put every
-/// column at the top: a solid block.
+/// The loudest of the three bands, not the column's raw sample peak taken
+/// linearly: on a loud master the peak over a whole preview bucket, the
+/// byte rekordbox writes as `PWV4`'s height and the one ours already
+/// matches, is pinned at full scale for most of the track, while the
+/// `PWAV` heights it draws keep their dynamics, sitting at 10-21 of its 25
+/// [OBS 7.2.11]. Taking that peak put every column at the top: a solid
+/// block. The scrolling details, whose 1/150 s columns are short enough to
+/// keep the peak's dynamics, use [`detail_height`] instead.
 fn band_height(column: BandColumn, ceiling: u32) -> u32 {
     let loudest = u32::from(band(column.low).max(band(column.mid)).max(band(column.high)));
     (loudest * ceiling / BAND_FULL_SCALE).min(ceiling)
 }
 
-/// The one-byte encoding: height in the low five bits, whiteness above.
-fn mono_byte(column: BandColumn, ceiling: u32) -> u8 {
+/// A scrolling detail column's height, 0..=31: the column's sample peak
+/// squared, rounded into the five bits.
+///
+/// rekordbox's `PWV3` height is `round(31 * (peak / 255)^2)` of the same
+/// 1/150 s sample peak this analysis takes: against it over eleven
+/// rekordbox-analysed tracks (three of them not used to find the curve)
+/// the mean error is 0.14 to 0.42 of a step, where the band-derived
+/// height it replaces was 2.6 to 4.8 out, its 95th percentile 16-28 of 31
+/// where rekordbox's is 21-31 [OBS 7.2.11, issue #158].
+/// rekordbox's `PWV5` height is the same as its `PWV3` on 63-93% of
+/// columns, differing either way on the rest, so the one curve serves both.
+fn detail_height(column: BandColumn) -> u32 {
+    const FULL: u32 = 255 * 255;
+    let peak = u32::from(column.peak);
+    ((DETAIL_CEILING * peak * peak + FULL / 2) / FULL).min(DETAIL_CEILING)
+}
+
+/// The one-byte encoding: `height` in the low five bits, whiteness above.
+fn mono_byte(column: BandColumn, height: u32) -> u8 {
     let total = u32::from(column.low) + u32::from(column.mid) + u32::from(column.high);
     let whiteness = (u32::from(column.high) * 7 + total / 2).checked_div(total).unwrap_or(0);
-    u8::try_from((whiteness.min(7) << 5) | band_height(column, ceiling)).unwrap_or(0)
+    u8::try_from((whiteness.min(7) << 5) | height.min(DETAIL_CEILING)).unwrap_or(0)
 }
 
-/// `PWAV`: 400 columns, one byte each.
+/// The lowest height rekordbox writes in each preview tag. A silent column
+/// is not 0: over 1,558 rekordbox 7 `.DAT` files of a USB export, the
+/// smallest `PWAV` height is 2 in 1,552 of them and never lower, and the
+/// smallest `PWV2` byte is 1 in 1,143 and never 0 [OBS, issue #278].
+///
+/// Players read 0 as "not analysed yet": the Nexus firmware's preview check
+/// (`TotalWaveWacher_CheckWaveDataComplete`, below) reports a preview with a
+/// zero column as incomplete, and the player then builds its own from the
+/// audio and saves it over the stick's [static].
+const PWAV_FLOOR: u8 = 2;
+const PWV2_FLOOR: u8 = 1;
+
+/// `PWAV`: 400 columns, one byte each, the height at least [`PWAV_FLOOR`].
 #[must_use]
 pub fn pwav(columns: &[BandColumn]) -> Vec<u8> {
-    resample(columns, PREVIEW_COLUMNS).into_iter().map(|c| mono_byte(c, PWAV_CEILING)).collect()
+    resample(columns, PREVIEW_COLUMNS).into_iter().map(|c| device_preview_byte(mono_byte(c, band_height(c, PWAV_CEILING)))).collect()
 }
 
-/// `PWV2`: 100 columns, one byte each.
+/// `PWV2`: 100 columns, one byte each: the height alone, 1..=15.
+///
+/// Unlike `PWAV`, rekordbox puts no whiteness above the height here: no
+/// `PWV2` byte in 1,590 rekordbox-written `.DAT` files (a rekordbox 7 USB
+/// export and a rekordbox 7 share tree) is above 15 [OBS, issue #278]. Players
+/// depend on that. The Nexus player firmware checks the 900-byte preview it
+/// loads and throws all of it away, `PWAV` with it, when any `PWV2` byte is
+/// above 15 (`TotalWaveWacher_CheckWaveDataComplete` at `0x000d7c18`, XDJ-RX2
+/// 1.43, which shares the XDJ-1000MK2's code base) [static]. See
+/// [`with_device_preview`] for files already written with whiteness.
 #[must_use]
 pub fn pwv2(columns: &[BandColumn]) -> Vec<u8> {
-    resample(columns, TINY_COLUMNS).into_iter().map(|c| mono_byte(c, PWV2_CEILING)).collect()
+    resample(columns, TINY_COLUMNS).into_iter().map(tiny_preview_byte).collect()
 }
 
-/// `PWV3`: every column, one byte each.
+/// One `PWV2` column: its height and nothing else.
+fn tiny_preview_byte(column: BandColumn) -> u8 {
+    device_tiny_preview_byte(u8::try_from(band_height(column, PWV2_CEILING)).unwrap_or(0))
+}
+
+/// The tallest byte a player accepts in `PWV2`: see [`pwv2`].
+pub const PWV2_MAX_BYTE: u8 = 15;
+
+/// One `PWAV` byte as rekordbox writes it: the whiteness kept, the height
+/// at least [`PWAV_FLOOR`]. A byte rekordbox wrote comes back unchanged.
+#[must_use]
+pub fn device_preview_byte(byte: u8) -> u8 {
+    (byte & 0xe0) | (byte & 0x1f).max(PWAV_FLOOR)
+}
+
+/// One `PWV2` byte as rekordbox writes it and players accept it: the
+/// five-bit height without the whiteness bits earlier versions of this
+/// encoder put above it, within [`PWV2_FLOOR`]..=[`PWV2_MAX_BYTE`]. A byte
+/// rekordbox wrote comes back unchanged.
+#[must_use]
+pub fn device_tiny_preview_byte(byte: u8) -> u8 {
+    (byte & 0x1f).clamp(PWV2_FLOOR, PWV2_MAX_BYTE)
+}
+
+/// A section with its `PWAV` or `PWV2` bytes brought to what rekordbox
+/// writes and players accept; every other section unchanged. Analysis
+/// written before issue #278 carried whiteness in `PWV2`, which makes a
+/// Nexus player (XDJ-1000MK2, XDJ-RX2) reject the track's whole preview, and
+/// zero-height columns, which it reads as unfinished; an export repairs both
+/// rather than asking for every track to be analysed again.
+#[must_use]
+pub fn with_device_preview(section: &Section) -> Section {
+    let repair: fn(u8) -> u8 = if section.tag == FourCc::new(b"PWAV") {
+        device_preview_byte
+    } else if section.tag == FourCc::new(b"PWV2") {
+        device_tiny_preview_byte
+    } else {
+        return section.clone();
+    };
+    Section { tag: section.tag, header: section.header.clone(), payload: section.payload.iter().map(|&b| repair(b)).collect() }
+}
+
+/// `PWV3`: every column, one byte each, at [`detail_height`].
 #[must_use]
 pub fn pwv3(columns: &[BandColumn]) -> Vec<u8> {
-    columns.iter().copied().map(|c| mono_byte(c, DETAIL_CEILING)).collect()
+    columns.iter().copied().map(|c| mono_byte(c, detail_height(c))).collect()
 }
+
+/// `PWV4`'s mid and high channels as fractions of the plain seven-bit
+/// narrowing: `PWV4_MID_GAIN.0 / PWV4_MID_GAIN.1` and likewise for high;
+/// low keeps the plain narrowing.
+///
+/// The XDJ-AZ scales a column's three channels so the strongest is full
+/// before it draws them (firmware 1.30, the `PWV4` reader `FUN_017a8e1c`),
+/// so the colour drawn depends only on their ratios, which these gains
+/// set. Compared that way, scaled to 255, with rekordbox's own `PWV4` for
+/// the same audio, these gains leave a mean error of 26 to 34 a channel on
+/// eleven rekordbox-analysed tracks (three not used to choose them), where
+/// the unweighted channels were 20 to 68 out and the mid, high and low
+/// order this used to write 61 to 121 [OBS 7.2.11, issue #158].
+const PWV4_MID_GAIN: (u32, u32) = (4, 5);
+const PWV4_HIGH_GAIN: (u32, u32) = (13, 20);
 
 /// `PWV4`: 1,200 columns of six bytes.
 #[must_use]
 pub fn pwv4(columns: &[BandColumn]) -> Vec<u8> {
+    let weigh = |value: u8, (num, den): (u32, u32)| u8::try_from(u32::from(value >> 1) * num / den).unwrap_or(127);
     let mut out = Vec::with_capacity(OVERVIEW_COLUMNS * 6);
     for column in resample(columns, OVERVIEW_COLUMNS) {
         // The three colour channels are seven-bit like the height beside
@@ -161,39 +260,74 @@ pub fn pwv4(columns: &[BandColumn]) -> Vec<u8> {
         // straight from the 0..=255 band these ran to 255, which put half
         // of them outside the field.
         //
-        // Ours still sit about 1.8x rekordbox's at the median here, where
-        // `PWV6` now matches it: the two sections disagree about how hot a
-        // band should be and only `PWV6`'s scale has been pinned down.
+        // The channels are low, mid and high in that order: rekordbox's
+        // byte 3 runs with its own `PWV6` low band at r = 0.83 to 0.96 on
+        // every one of eleven tracks, and with ours at 0.93 to 0.99, where
+        // the mid this used to write there managed 0.43 to 0.84 [OBS 7.2.11,
+        // issue #158].
         out.extend_from_slice(&[
             column.peak >> 1,
             0,
             0,
-            column.mid >> 1,
-            column.high >> 1,
             column.low >> 1,
+            weigh(column.mid, PWV4_MID_GAIN),
+            weigh(column.high, PWV4_HIGH_GAIN),
         ]);
     }
     out
 }
 
-/// `PWV5`: every column as a big-endian word, `rrrgggbbbhhhhh00`.
+/// `PWV5`'s three colour channels for a column, `(red, green, blue)`: the
+/// low, mid and high bands as shares of the strongest of them, so the
+/// colour says which bands the column holds and the height alone how loud
+/// it is.
 ///
-/// The three-bit colour channels keep the band's own top bits rather than
-/// the scaled `band` the six-byte sections take: three bits is coarse
-/// enough that rekordbox uses most of the range here, its green and blue
-/// sitting at 5 and 6 of 7 where ours sit at 2 [OBS] - scaling them down
-/// would widen that, not close it. (That gap is a colour-mapping
-/// difference, not a scale one, and is left alone.) The height is the
-/// band-derived one into the whole five bits, as `PWV3`'s is: rekordbox's
-/// reaches 31 on every reference track, where its `PWAV` stops at 25.
+/// What rekordbox writes, over eight rekordbox-analysed tracks [OBS 7.2.11,
+/// issue #158]:
+///
+/// - red runs with the column's low band, green with its mid and blue with
+///   its high (r = 0.76 to 0.86, 0.46 to 0.80 and 0.59 to 0.82 against each band's share
+///   of the column). This used to write mid, high and low.
+/// - The colour is normalised: the strongest channel is 7 in 80% of columns
+///   and 5 or 6 in nearly all the rest. Green tops out at 5 — 51% of columns
+///   have it there, 2.6% at 6 and 0.2% at 7. The plain top three bits written here
+///   before left all three channels at 1 or 2 on most columns.
+/// - High weighs 1.5 times the other two in choosing the strongest; that
+///   weight and green's ceiling of 5 give the least error of the
+///   combinations tried, 0.66 to 0.91 of a step a channel on all eleven
+///   tracks (three not used to choose them), where this was 3.0 to 3.3.
+///
+/// The XDJ-AZ draws these bits as they are, each shifted up into a byte,
+/// without normalising (firmware 1.30,
+/// `DetailedWaveformDataProvider<DetailedWaveform_RGB>` slot 7 at
+/// `0x01b94d90`), so the plain bits drew dim, washed-out columns. The
+/// CDJ-3000 does the same (firmware 3.20, the same provider's slot 7 at
+/// `0x14a38d8`, `(c & 7) << 5` per channel) [static, issue #288]: on eight
+/// tracks of a rekordbox USB export, rekordbox's brightest channel averages
+/// 6.6-6.9 of 7 and the plain bits 3.0-3.6 [OBS].
+fn pwv5_colour(column: BandColumn) -> (u16, u16, u16) {
+    let low = 2 * u32::from(column.low);
+    let mid = 2 * u32::from(column.mid);
+    let high = 3 * u32::from(column.high);
+    let strongest = low.max(mid).max(high);
+    if strongest == 0 {
+        return (0, 0, 0);
+    }
+    let share = |value: u32, full: u32| u16::try_from((2 * full * value + strongest) / (2 * strongest)).unwrap_or(0);
+    (share(low, 7), share(mid, 5), share(high, 7))
+}
+
+/// `PWV5`: every column as a big-endian word, `rrrgggbbbhhhhh00` — the
+/// colour from [`pwv5_colour`], the height from [`detail_height`].
 #[must_use]
 pub fn pwv5(columns: &[BandColumn]) -> Vec<u8> {
     let mut out = Vec::with_capacity(columns.len() * 2);
-    for column in columns {
-        let word = (u16::from(column.mid >> 5) << 13)
-            | (u16::from(column.high >> 5) << 10)
-            | (u16::from(column.low >> 5) << 7)
-            | (u16::try_from(band_height(*column, DETAIL_CEILING)).unwrap_or(0) << 2);
+    for &column in columns {
+        let (red, green, blue) = pwv5_colour(column);
+        let word = (red << 13)
+            | (green << 10)
+            | (blue << 7)
+            | (u16::try_from(detail_height(column)).unwrap_or(0) << 2);
         out.extend_from_slice(&word.to_be_bytes());
     }
     out
@@ -246,23 +380,56 @@ pub struct Existing<'a> {
 const AUTHORED: [&[u8; 4]; 11] =
     [b"PPTH", b"PVBR", b"PQTZ", b"PWAV", b"PWV2", b"PWV3", b"PWV4", b"PWV5", b"PWV6", b"PWV7", b"PQT2"];
 
+/// The cue-list tags, which the authored shape places itself (see
+/// [`author_with_overview`]).
+const CUE_LISTS: [&[u8; 4]; 2] = [b"PCOB", b"PCO2"];
+
+/// What `PPTH` holds in a desktop library's share tree: `?/` and the audio
+/// file's name, not its path.
+///
+/// [OBS] 26 of 26 `.DAT`s sampled from a rekordbox 7.2.14 library's share
+/// tree (issue #323), all 32 rekordbox 7.2.19 wrote for its demo tracks, and
+/// 300 of 300 in the reference library (`crates/rbl-analysis/docs/validation/
+/// multitempo.md`). [static, rekordbox 7.2.19 macOS arm64]
+/// `CMusicAnalyzeFile::get_new_format_ppth` (`0x100656bac`) builds it for a
+/// local file as `s_new_ppth_prefix + "/" + File(path).getFileName()`, and
+/// `CAnalyzerIF::getMusicAnalyzeFileHandleFromAnalyzePath` (`0x101625fc8`)
+/// closes a file whose `PPTH` is not the one it derives for the track
+/// (`is_same_new_format_ppth`, `0x100656ec0`). A USB export is different:
+/// its `PPTH` is the full `/Contents/…` path, rewritten by the export.
+#[must_use]
+pub fn share_tree_ppth(audio_path: &str) -> String {
+    let name = audio_path.rsplit(['/', '\\']).next().unwrap_or(audio_path);
+    format!("?/{name}")
+}
+
 /// Authors the three analysis files for a track.
 ///
-/// `audio_path` is what `PPTH` names: the file's own path, as
-/// `djmdContent.FolderPath` holds it. The grid and the waveforms are written
-/// from the analysis; everything else in an existing file — the cue lists,
-/// `PSSI`, `PVDI`, tags nobody has named — is carried through in its own
-/// order, because rekordbox authored it and this cannot. `PQT2` is the one
-/// exception: it is an extended copy of the grid, and a stale one beside a
-/// new grid is worse than none, so it is dropped (nothing here can write
-/// one; see [`Anlz::has_extended_grid`]).
+/// `ppth` is what `PPTH` names: for a desktop library's share tree,
+/// [`share_tree_ppth`] of the audio file. The grid and the waveforms are
+/// written from the analysis; everything else in an existing file —
+/// `PSSI`, `PVDI`, `PWVC`, tags nobody has named, and any cue list with
+/// cues in it — is carried through in its own order, because rekordbox
+/// authored it and this cannot. `PQT2` is the one exception: it is an
+/// extended copy of the grid, and a stale one beside a new grid is worse
+/// than none, so it is dropped (nothing here can write one; see
+/// [`Anlz::has_extended_grid`]).
 ///
-/// A file with nothing to carry gets the empty cue lists the share tree
-/// holds: cues live in `djmdCue`, and every share-tree cue list in the
-/// reference library is empty [OBS].
+/// The sections are laid out as rekordbox 7.2.19 lays out its own share-tree
+/// files [OBS: its demo-track analysis, and 7.2.14's on the rig]:
+///
+/// - `.DAT`: `PPTH`, `PVBR`, `PQTZ`, `PWAV`, `PWV2`, `PCOB` (hot cues),
+///   `PCOB` (memory cues);
+/// - `.EXT`: `PPTH`, `PWV3`, `PCOB` ×2, `PCO2` ×2, `PWV5`, `PWV4`, then
+///   anything carried (`PSSI`);
+/// - `.2EX`: `PPTH`, `PWV7`, `PWV6`, then anything carried (`PWVC`, `PVDI`).
+///
+/// Empty cue lists get rekordbox's own empty headers: cues live in
+/// `djmdCue`, and every share-tree cue list in the reference library is
+/// empty [OBS].
 #[must_use]
-pub fn author(audio_path: &str, beats: &[Beat], columns: &[BandColumn], existing: Existing<'_>) -> AnalysisFiles {
-    author_with_overview(audio_path, beats, columns, None, existing)
+pub fn author(ppth: &str, beats: &[Beat], columns: &[BandColumn], existing: Existing<'_>) -> AnalysisFiles {
+    author_with_overview(ppth, beats, columns, None, existing)
 }
 
 /// Authors analysis with an independently measured PWV6 energy envelope.
@@ -270,12 +437,13 @@ pub fn author(audio_path: &str, beats: &[Beat], columns: &[BandColumn], existing
 /// Callers with only detail columns can pass `None` for the legacy approximation.
 #[must_use]
 pub fn author_with_overview(
-    audio_path: &str, beats: &[Beat], columns: &[BandColumn],
+    ppth: &str, beats: &[Beat], columns: &[BandColumn],
     overview: Option<&[[u8; 3]; OVERVIEW_COLUMNS]>, existing: Existing<'_>,
 ) -> AnalysisFiles {
     let dat = {
         let mut builder = AnlzBuilder::new();
-        builder.path(audio_path);
+        header_of(&mut builder, existing.dat);
+        builder.path(ppth);
         // `PVBR` sits between the path and the grid in every rekordbox `.DAT`
         // (1,558 of 1,558 reference files [OBS]); rekordbox 6/7 reject a `.DAT`
         // that lacks it. A real VBR seek table cannot be re-derived from the
@@ -289,52 +457,76 @@ pub fn author_with_overview(
         builder.beat_grid(beats);
         builder.waveform_preview(b"PWAV", &pwav(columns));
         builder.waveform_preview(b"PWV2", &pwv2(columns));
-        carry_or(&mut builder, existing.dat, |b| {
-            b.empty_cue_list_of(false, 0);
-            b.empty_cue_list_of(false, 1);
-        });
+        cue_lists_of(&mut builder, existing.dat, false);
+        carry(&mut builder, existing.dat);
         builder.finish()
     };
     let ext = {
         let mut builder = AnlzBuilder::new();
-        builder.path(audio_path);
+        header_of(&mut builder, existing.ext);
+        builder.path(ppth);
         builder.waveform_scroll(b"PWV3", 1, &pwv3(columns));
-        builder.waveform_scroll(b"PWV4", 6, &pwv4(columns));
+        cue_lists_of(&mut builder, existing.ext, true);
         builder.waveform_scroll(b"PWV5", 2, &pwv5(columns));
-        carry_or(&mut builder, existing.ext, |b| {
-            b.empty_cue_list_of(true, 0);
-            b.empty_cue_list_of(true, 1);
-        });
+        builder.waveform_scroll(b"PWV4", 6, &pwv4(columns));
+        carry(&mut builder, existing.ext);
         builder.finish()
     };
     let two_ex = {
         let mut builder = AnlzBuilder::new();
-        builder.path(audio_path);
+        header_of(&mut builder, existing.two_ex);
+        builder.path(ppth);
         let preview = overview.map_or_else(|| pwv6(columns), |bands| bands.iter().flatten().map(|v| (*v).min(127)).collect());
-        builder.waveform_scroll(b"PWV6", 3, &preview);
         builder.waveform_scroll(b"PWV7", 3, &pwv7(columns));
-        carry_or(&mut builder, existing.two_ex, |_| {});
+        builder.waveform_scroll(b"PWV6", 3, &preview);
+        carry(&mut builder, existing.two_ex);
         builder.finish()
     };
     AnalysisFiles { dat, ext, two_ex }
 }
 
-/// Copies an existing file's other sections, or writes the defaults for a
-/// file that has none.
-fn carry_or(builder: &mut AnlzBuilder, existing: Option<&Anlz>, defaults: impl FnOnce(&mut AnlzBuilder)) {
-    match existing {
-        Some(file) => {
-            builder.header_extra(&file.header_extra);
-            for section in file.sections.iter().filter(|s| !is_authored(s)) {
-                builder.copy_section(section);
-            }
+/// An existing file's header bytes, kept as they were.
+fn header_of(builder: &mut AnlzBuilder, existing: Option<&Anlz>) {
+    if let Some(file) = existing {
+        builder.header_extra(&file.header_extra);
+    }
+}
+
+/// The cue lists: an existing file's own when any of them holds a cue, as
+/// they were; otherwise rekordbox's empty pair (and, in an `.EXT`, the
+/// extended pair too) with its own headers — see [`AnlzBuilder::cue_lists`].
+/// Releases before issue #323 wrote empty lists in another shape (memory
+/// first, a zero last word, `PCO2` with a twelve-byte header and no `PCOB`
+/// in the `.EXT`); a re-analysis replaces those.
+fn cue_lists_of(builder: &mut AnlzBuilder, existing: Option<&Anlz>, extended: bool) {
+    let carried: Vec<&Section> = existing
+        .map(|file| file.sections.iter().filter(|s| is_cue_list(s)).collect())
+        .unwrap_or_default();
+    if carried.iter().any(|s| !s.payload.is_empty()) {
+        for section in carried {
+            builder.copy_section(section);
         }
-        None => defaults(builder),
+    } else {
+        builder.cue_lists(extended);
+    }
+}
+
+/// Copies an existing file's sections this analysis neither writes nor
+/// places, in their own order.
+fn carry(builder: &mut AnlzBuilder, existing: Option<&Anlz>) {
+    if let Some(file) = existing {
+        for section in file.sections.iter().filter(|s| !is_authored(s) && !is_cue_list(s)) {
+            builder.copy_section(section);
+        }
     }
 }
 
 fn is_authored(section: &Section) -> bool {
     AUTHORED.iter().any(|tag| section.tag == FourCc::new(tag))
+}
+
+fn is_cue_list(section: &Section) -> bool {
+    CUE_LISTS.iter().any(|tag| section.tag == FourCc::new(tag))
 }
 
 /// The grid as `Beat`s from the analyser's own beat list, which shares the
@@ -418,9 +610,10 @@ mod tests {
         // short of the top of it: the headroom rekordbox leaves, without
         // which a loud track draws as a block with its top cut off.
         assert!(pwv4(&columns).chunks(6).all(|c| c[0] <= 127));
-        // `PWV4`'s colours use the whole seven bits; `PWV6`'s stop at `band`.
+        // `PWV4`'s colours use the whole seven bits, mid and high weighted
+        // down; `PWV6`'s stop at `band`.
         assert!(pwv4(&columns).chunks(6).all(|c| c[3] <= 127 && c[4] <= 127 && c[5] <= 127));
-        assert_eq!(pwv4(&[BandColumn { low: 255, mid: 255, high: 255, peak: 255 }])[3..6], [127, 127, 127]);
+        assert_eq!(pwv4(&[BandColumn { low: 255, mid: 255, high: 255, peak: 255 }])[3..6], [127, 101, 82]);
         assert!(pwv6(&columns).iter().all(|&b| b <= 44));
         assert!(pwv7(&columns).iter().all(|&b| b <= 127));
         assert_eq!(pwv7(&[BandColumn { low: 255, mid: 128, high: 64, peak: 255 }]), [127, 64, 32]);
@@ -432,17 +625,165 @@ mod tests {
         assert_eq!(band_height(full, PWAV_CEILING), 25);
         assert_eq!(band_height(full, DETAIL_CEILING), 31);
         assert_eq!(pwav(&columns).iter().map(|b| b & 0x1f).max(), Some(25));
-        assert_eq!(pwv2(&columns).iter().map(|b| b & 0x1f).max(), Some(15));
+        assert_eq!(pwv2(&columns).iter().max(), Some(&15), "PWV2 is height alone, no whiteness");
         assert_eq!(pwv3(&columns).iter().map(|b| b & 0x1f).max(), Some(31));
-        assert_eq!(pwav(&[BandColumn::default()])[0] & 0x1f, 0);
+        assert_eq!(pwav(&[BandColumn::default()])[0] & 0x1f, 2, "a silent column at rekordbox's floor, not 0");
         // A treble-only column is white; a bass-only one is not.
         assert_eq!(mono_byte(BandColumn { low: 0, mid: 0, high: 255, peak: 255 }, PWAV_CEILING) >> 5, 7);
         assert_eq!(mono_byte(BandColumn { low: 255, mid: 0, high: 0, peak: 255 }, PWAV_CEILING) >> 5, 0);
-        // `PWV5` keeps the raw band's top three bits per channel; only its
-        // height is scaled.
+        // A full column: high, weighted 1.5x, is the strongest band, so blue
+        // is full and red and green take their shares; the height fills the
+        // five bits.
         let word = u16::from_be_bytes(pwv5(&[full])[..2].try_into().unwrap());
-        assert_eq!(word >> 7, 0b1_1111_1111, "three bits each of red, green and blue");
-        assert_eq!((word >> 2) & 0x1f, 31, "the band-derived height, into all five bits");
+        assert_eq!(word >> 7, 0b101_011_111, "red 5, green 3, blue 7");
+        assert_eq!((word >> 2) & 0x1f, 31, "the peak-derived height, into all five bits");
+    }
+
+    fn pwv5_word(column: BandColumn) -> u16 {
+        u16::from_be_bytes(pwv5(&[column])[..2].try_into().unwrap())
+    }
+
+    /// `(red, green, blue, height)` of a `PWV5` word.
+    fn pwv5_fields(word: u16) -> [u16; 4] {
+        [word >> 13, (word >> 10) & 7, (word >> 7) & 7, (word >> 2) & 0x1f]
+    }
+
+    #[test]
+    fn colour_channels_are_low_mid_and_high() {
+        // rekordbox's red is the low band, green the mid and blue the high,
+        // in `PWV5` and in `PWV4`'s last three bytes alike (issue #158).
+        let bass = BandColumn { low: 200, mid: 0, high: 0, peak: 200 };
+        let body = BandColumn { low: 0, mid: 200, high: 0, peak: 200 };
+        let hats = BandColumn { low: 0, mid: 0, high: 200, peak: 200 };
+        assert_eq!(pwv5_fields(pwv5_word(bass))[..3], [7, 0, 0], "a kick is red");
+        assert_eq!(pwv5_fields(pwv5_word(body))[..3], [0, 5, 0], "the mids are green, at most 5");
+        assert_eq!(pwv5_fields(pwv5_word(hats))[..3], [0, 0, 7], "the hats are blue");
+        assert_eq!(pwv4(&[bass])[3..6], [100, 0, 0]);
+        assert_eq!(pwv4(&[body])[3..6], [0, 80, 0]);
+        assert_eq!(pwv4(&[hats])[3..6], [0, 0, 65]);
+    }
+
+    #[test]
+    fn pwv5_colour_is_normalised_so_a_quiet_column_is_as_saturated_as_a_loud_one() {
+        // The XDJ-AZ draws the three bits as they are, so the strongest band
+        // must reach the top of its field however quiet the column is; only
+        // the height says how loud it is.
+        let loud = pwv5_fields(pwv5_word(BandColumn { low: 240, mid: 120, high: 40, peak: 250 }));
+        let quiet = pwv5_fields(pwv5_word(BandColumn { low: 60, mid: 30, high: 10, peak: 80 }));
+        assert_eq!(loud[0], 7);
+        assert_eq!(loud[..3], quiet[..3]);
+        assert!(quiet[3] < loud[3]);
+        assert_eq!(pwv5_word(BandColumn::default()), 0, "silence is black and flat");
+    }
+
+    #[test]
+    fn detail_height_is_rekordboxs_squared_peak() {
+        // rekordbox's median `PWV3`/`PWV5` height for a sample peak, read off
+        // eight rekordbox-analysed tracks (issue #158): 56 -> 1, 104 -> 5,
+        // 136 -> 9, 168 -> 13, 200 -> 19, 232 -> 26, 255 -> 31.
+        for (peak, height) in [(0, 0), (56, 1), (104, 5), (136, 9), (168, 13), (200, 19), (232, 26), (255, 31)] {
+            let column = BandColumn { low: peak / 2, mid: peak / 2, high: peak / 4, peak };
+            assert_eq!(u16::from(pwv3(&[column])[0] & 0x1f), height, "PWV3 at peak {peak}");
+            assert_eq!(pwv5_fields(pwv5_word(column))[3], height, "PWV5 at peak {peak}");
+        }
+    }
+
+    #[test]
+    fn pwv5_matches_rekordboxs_own_words_for_these_columns() {
+        // Columns of two tracks rekordbox 7.2.11 analysed and this crate's
+        // analysis did not see while its colour and height were chosen
+        // ("Language (Sam WOLFE Remix)" and "YES BITCH (Sam WOLFE Remix)"):
+        // the bands this analysis measures for the column, then the `PWV5`
+        // word and `PWV3` height in rekordbox's own `.EXT` for it. These are
+        // columns where the two agree exactly, picked to cover the colours;
+        // across all columns the mean error is 0.7-0.8 of a step a channel,
+        // not zero (issue #158).
+        let rekordbox = [
+            ((44, 102, 109, 186), 0x4fc0_u16, 16_u8),
+            ((217, 94, 55, 198), 0xe9cc, 19),
+            ((189, 45, 35, 222), 0xe55c, 23),
+            ((179, 112, 106, 252), 0xef78, 30),
+            ((233, 76, 21, 253), 0xe8fc, 31),
+            ((176, 173, 127, 239), 0xd7ec, 27),
+            ((162, 90, 57, 190), 0xee44, 17),
+            ((41, 68, 149, 182), 0x2bc0, 16),
+            ((173, 97, 41, 236), 0xed6c, 27),
+            ((133, 216, 145, 253), 0x97fc, 31),
+        ];
+        for ((low, mid, high, peak), word, height) in rekordbox {
+            let column = BandColumn { low, mid, high, peak };
+            assert_eq!(pwv5_word(column), word, "PWV5 for {column:?}");
+            assert_eq!(pwv3(&[column])[0] & 0x1f, height, "PWV3 height for {column:?}");
+        }
+    }
+
+    #[test]
+    fn pwv5_matches_a_rekordbox_usb_exports_words_for_these_columns() {
+        // A second, independent sample (issue #288, CDJ-3000): columns of
+        // four tracks on a rekordbox USB export ("esrr", "cotton eye joe",
+        // "castles 138-160", "Flight 643 (TRIODE Remix)"), none of them used
+        // to choose the colour or height model. The bands this analysis
+        // measures for the column, then the `PWV5` word and `PWV3` height
+        // in the stick's own `.EXT`. Columns where the two agree exactly,
+        // picked to cover the colours; across all columns of those tracks
+        // the mean error is 0.7-0.9 of a step a channel.
+        let rekordbox = [
+            ((205, 230, 93, 255), 0xd67c_u16, 31_u8),
+            ((115, 55, 77, 170), 0xebb8, 14),
+            ((90, 36, 45, 145), 0xeaa8, 10),
+            ((77, 111, 152, 231), 0x4be4, 25),
+            ((97, 173, 125, 245), 0x97f4, 29),
+            ((36, 72, 140, 190), 0x2bc4, 17),
+            ((95, 74, 120, 243), 0x8bf0, 28),
+            ((88, 81, 30, 139), 0xf624, 9),
+            ((112, 79, 111, 227), 0xabe4, 25),
+        ];
+        for ((low, mid, high, peak), word, height) in rekordbox {
+            let column = BandColumn { low, mid, high, peak };
+            assert_eq!(pwv5_word(column), word, "PWV5 for {column:?}");
+            assert_eq!(pwv3(&[column])[0] & 0x1f, height, "PWV3 height for {column:?}");
+            // What a CDJ-3000 or XDJ-AZ draws: the bits shifted up, so a
+            // column is only as bright as its strongest channel.
+            let strongest = (word >> 13 & 7).max(word >> 10 & 7).max(word >> 7 & 7);
+            assert!(strongest >= 5, "rekordbox's {word:#06x} is drawn bright");
+        }
+    }
+
+    #[test]
+    fn pwv2_carries_the_height_alone_as_rekordbox_does() {
+        // No PWV2 byte rekordbox writes is above 15 (1,590 of 1,590 files,
+        // issue #278), and a Nexus player drops the whole preview when one
+        // is. A treble-only column, which takes whiteness 7 in PWAV, is
+        // still just its height here.
+        let treble = BandColumn { low: 0, mid: 0, high: 255, peak: 255 };
+        assert_eq!(pwv2(&[treble]), vec![15; TINY_COLUMNS]);
+        assert_eq!(pwav(&[treble])[0], 0b111_11001, "PWAV keeps whiteness 7 over its height of 25");
+        let columns = ramp(3000);
+        assert!(pwv2(&columns).iter().all(|&b| b <= PWV2_MAX_BYTE));
+        assert_eq!(pwv2(&columns).iter().max(), Some(&15));
+        assert_eq!(pwv2(&[BandColumn::default()]), vec![1; TINY_COLUMNS], "a silent column at rekordbox's floor, not 0");
+    }
+
+    #[test]
+    fn an_export_repairs_old_previews_and_leaves_rekordboxs_alone() {
+        // Bytes this encoder wrote before issue #278: whiteness 2 over a
+        // height of 8, whiteness 7 over 15, a silent column, whiteness 1 over 15.
+        let ours = Section::new(b"PWV2", vec![0; 8], vec![0x48, 0xef, 0x00, 0x2f]);
+        assert_eq!(with_device_preview(&ours).payload, [8, 15, 1, 15]);
+        assert_eq!(with_device_preview(&ours).header, ours.header);
+        // PWAV keeps its whiteness; only a height under rekordbox's floor moves.
+        let pwav = Section::new(b"PWAV", vec![0; 8], vec![0xa0, 0x00, 0xe5, 0x21]);
+        assert_eq!(with_device_preview(&pwav).payload, [0xa2, 0x02, 0xe5, 0x22]);
+        // rekordbox's own previews (bytes from a rekordbox 7 USB export) are
+        // in range already and come back byte for byte.
+        let rekordbox_pwv2 = Section::new(b"PWV2", vec![0; 8], vec![0x08, 0x0a, 0x0a, 0x04, 0x0c, 0x0d, 0x0e, 0x01]);
+        assert_eq!(with_device_preview(&rekordbox_pwv2), rekordbox_pwv2);
+        let rekordbox_pwav = Section::new(b"PWAV", vec![0; 8], vec![0xa2, 0xa2, 0xa5, 0xa4, 0xa7]);
+        assert_eq!(with_device_preview(&rekordbox_pwav), rekordbox_pwav);
+        // Other sections are not touched.
+        let pwv3 = Section::new(b"PWV3", vec![0; 12], vec![0x00, 0xe0]);
+        assert_eq!(with_device_preview(&pwv3), pwv3);
+        assert_eq!(device_tiny_preview_byte(0xff), 15);
     }
 
     #[test]
@@ -507,5 +848,94 @@ mod tests {
         assert!(!reread.has_extended_grid());
         assert_eq!(reread.header_extra, vec![9; 16]);
         assert_eq!(reread.sections.iter().filter(|s| s.tag == FourCc::new(b"PWV3")).count(), 1);
+    }
+
+    /// The tags of a file, in order.
+    fn tags(bytes: &[u8]) -> Vec<String> {
+        crate::parse(bytes).unwrap().sections.iter().map(|s| s.tag.to_string()).collect()
+    }
+
+    /// A section's header bytes after its 12-byte frame, as hex.
+    fn header_hex(bytes: &[u8], tag: [u8; 4], nth: usize) -> String {
+        use std::fmt::Write as _;
+        let file = crate::parse(bytes).unwrap();
+        let section = file.sections.iter().filter(|s| s.tag == FourCc::new(&tag)).nth(nth).unwrap();
+        section.header.iter().fold(String::new(), |mut out, b| {
+            let _ = write!(out, "{b:02x}");
+            out
+        })
+    }
+
+    #[test]
+    fn the_share_tree_path_is_the_file_name_after_a_question_mark() {
+        // rekordbox's own share-tree `PPTH` (issue #323): 26 of 26 sampled
+        // on a rekordbox 7.2.14 library, e.g. `?/99 funkytown.mp3`.
+        assert_eq!(share_tree_ppth("/Users/dj/Music/99 funkytown.mp3"), "?/99 funkytown.mp3");
+        assert_eq!(share_tree_ppth("C:/Users/dj/Music/Breaks1.wav"), "?/Breaks1.wav");
+        assert_eq!(share_tree_ppth("C:\\Users\\dj\\Music\\House3.wav"), "?/House3.wav");
+        assert_eq!(share_tree_ppth("track.flac"), "?/track.flac");
+    }
+
+    #[test]
+    fn fresh_files_have_rekordboxs_share_tree_layout_and_headers() {
+        // Section order and headers of the files rekordbox 7.2.19 wrote for
+        // its demo track "MergeFX Sample Sound 209.wav" (issue #323):
+        //   .DAT  PPTH PVBR PQTZ PWAV PWV2 PCOB PCOB
+        //   .EXT  PPTH PWV3 PCOB PCOB PCO2 PCO2 PWV5 PWV4
+        //   .2EX  PPTH PWV7 PWV6 PWVC
+        // with each PCOB `0000000{1,0} 0000 0000 ffffffff` (hot cues first)
+        // and each PCO2 `0000000{1,0} 0000 0000`. The `PWVC` is not
+        // authored here: its values are [UNKNOWN].
+        let beats = beat_grid_of([(1, 12_800, 0), (2, 12_800, 469)]);
+        let fresh = author("?/track.wav", &beats, &ramp(600), Existing::default());
+        assert_eq!(tags(&fresh.dat), ["PPTH", "PVBR", "PQTZ", "PWAV", "PWV2", "PCOB", "PCOB"]);
+        assert_eq!(tags(&fresh.ext), ["PPTH", "PWV3", "PCOB", "PCOB", "PCO2", "PCO2", "PWV5", "PWV4"]);
+        assert_eq!(tags(&fresh.two_ex), ["PPTH", "PWV7", "PWV6"]);
+        for file in [&fresh.dat, &fresh.ext] {
+            assert_eq!(header_hex(file, *b"PCOB", 0), "0000000100000000ffffffff");
+            assert_eq!(header_hex(file, *b"PCOB", 1), "0000000000000000ffffffff");
+        }
+        assert_eq!(header_hex(&fresh.ext, *b"PCO2", 0), "0000000100000000");
+        assert_eq!(header_hex(&fresh.ext, *b"PCO2", 1), "0000000000000000");
+        assert_eq!(crate::parse(&fresh.ext).unwrap().path().as_deref(), Some("?/track.wav"));
+    }
+
+    #[test]
+    fn re_analysis_repairs_the_old_shape_and_keeps_rekordboxs_sections() {
+        let beats = beat_grid_of([(1, 12_800, 0)]);
+        let columns = ramp(600);
+        // What releases before issue #323 wrote: the full path, memory list
+        // first with a zero last word, and only twelve-byte-header `PCO2`s
+        // after the waveforms in the `.EXT`.
+        let mut old_ext = AnlzBuilder::new();
+        old_ext.path("/Music/track.wav").waveform_scroll(b"PWV3", 1, &[0; 4]).waveform_scroll(b"PWV4", 6, &[0; 6])
+            .waveform_scroll(b"PWV5", 2, &[0; 2]).empty_cue_list_of(true, 0).empty_cue_list_of(true, 1);
+        let old_ext = crate::parse(&old_ext.finish()).unwrap();
+        let mut old_dat = AnlzBuilder::new();
+        old_dat.path("/Music/track.wav").vbr_table_zero().beat_grid(&beats).empty_cue_list_of(false, 0).empty_cue_list_of(false, 1);
+        let old_dat = crate::parse(&old_dat.finish()).unwrap();
+        let again = author("?/track.wav", &beats, &columns, Existing { dat: Some(&old_dat), ext: Some(&old_ext), two_ex: None });
+        assert_eq!(again, author("?/track.wav", &beats, &columns, Existing::default()), "the same files as a fresh analysis");
+
+        // A rekordbox-analysed track keeps its phrases, vocals and `PWVC`,
+        // after the authored sections as rekordbox orders them.
+        let mut rb_ext = crate::parse(&again.ext).unwrap();
+        rb_ext.sections.push(Section::new(b"PSSI", vec![0; 20], vec![1, 2, 3]));
+        let mut rb_two = crate::parse(&again.two_ex).unwrap();
+        rb_two.sections.push(Section::new(b"PWVC", vec![0; 2], vec![0, 0x50, 0, 0xd7, 1, 0xf4]));
+        rb_two.sections.push(Section::new(b"PVDI", vec![0; 12], vec![7]));
+        let kept = author("?/track.wav", &beats, &columns, Existing { ext: Some(&rb_ext), two_ex: Some(&rb_two), ..Existing::default() });
+        assert_eq!(tags(&kept.ext), ["PPTH", "PWV3", "PCOB", "PCOB", "PCO2", "PCO2", "PWV5", "PWV4", "PSSI"]);
+        assert_eq!(tags(&kept.two_ex), ["PPTH", "PWV7", "PWV6", "PWVC", "PVDI"]);
+
+        // A cue list with cues in it is rekordbox's data and is carried as it is.
+        let mut cued = crate::parse(&again.dat).unwrap();
+        let hot = cued.sections.iter_mut().find(|s| s.tag == FourCc::new(b"PCOB")).unwrap();
+        hot.payload = vec![b'P', b'C', b'P', b'T', 0, 0, 0, 0x1c];
+        let carried = author("?/track.wav", &beats, &columns, Existing { dat: Some(&cued), ..Existing::default() });
+        let reread = crate::parse(&carried.dat).unwrap();
+        let lists: Vec<&Section> = reread.sections.iter().filter(|s| s.tag == FourCc::new(b"PCOB")).collect();
+        assert_eq!(lists.len(), 2);
+        assert_eq!(lists[0].payload, vec![b'P', b'C', b'P', b'T', 0, 0, 0, 0x1c]);
     }
 }

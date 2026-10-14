@@ -11,6 +11,7 @@ from . import tags as file_tags
 from .backup import Backups
 from .library import WRITE_BLOCKED, Library, _rekordbox_db_path
 from .usb import browse
+from .usb.selection import library_db_id, recorded_playlist_ids
 from .usb.sync import bundle_from_library, sync_volume
 from .usb.volumes import eject_volume, list_volumes
 
@@ -81,6 +82,7 @@ class Engine:
             "usb.list": lambda: list_volumes(),
             "usb.eject": lambda volumeId: self.eject(volumeId),
             "usb.playlists": lambda volumeId: browse.playlists(Path(volumeId)),
+            "usb.selection": lambda volumeId: self.selection(volumeId),
             "usb.tracks": lambda volumeId, playlistId=None: browse.tracks(Path(volumeId), playlistId),
             "usb.detail": lambda id: browse.detail(id),
             "usb.sync": lambda volumeId, playlistIds: self.sync(volumeId, playlistIds),
@@ -187,6 +189,10 @@ class Engine:
         if str(id).startswith("usb:"):
             return browse.resolve_media(kind, str(id))
         return self.lib.resolve_media(kind, id, size)
+
+    def selection(self, volumeId: str) -> dict:
+        ids = [row["id"] for row in self.lib.playlists()]
+        return {"playlistIds": recorded_playlist_ids(Path(volumeId), ids, library_db_id(self.lib))}
 
     def sync(self, volumeId: str, playlistIds: list[str]) -> dict:
         volume = Path(volumeId).resolve()

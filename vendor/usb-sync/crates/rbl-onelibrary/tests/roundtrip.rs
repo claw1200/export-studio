@@ -40,7 +40,7 @@ fn built() -> (tempfile::TempDir, std::path::PathBuf) {
                 file_name: format!("Track {i}.mp3"),
                 file_size: 9_000_000,
                 analysis_path: format!("/PIONEER/USBANLZ/P001/0000000{i}/ANLZ0000.DAT"),
-                rating: 153,
+                rating: 3,
                 comment: "5A - Am - 128".to_owned(),
                 date_added: "2026-09-07".to_owned(),
                 ..Track::default()
@@ -52,7 +52,7 @@ fn built() -> (tempfile::TempDir, std::path::PathBuf) {
     for i in 0..3 {
         builder.add_to_playlist(1, i64::from(i) + 1, i64::from(i) + 1).unwrap();
     }
-    builder.finish("EXPORTSTUDIO", "2026-09-07", 0).unwrap();
+    builder.finish("RBXPORT", "2026-09-07", 0).unwrap();
     (dir, path)
 }
 
@@ -109,7 +109,7 @@ fn tracks_read_back_exactly_as_written() {
     assert_eq!(title, "Track 1");
     assert_eq!(bpm, 12_801);
     assert_eq!(path_text, "/Contents/ARTBAT/Track 1.mp3");
-    assert_eq!(rating, 153, "three stars, as multiples of 51");
+    assert_eq!(rating, 3, "three stars, stored as a star count");
     assert_eq!(comment, "5A - Am - 128");
 
     // The search column is filled from the title, as the reference does.
@@ -174,7 +174,7 @@ fn the_property_row_reports_what_was_written() {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .unwrap();
-    assert_eq!(device, "EXPORTSTUDIO");
+    assert_eq!(device, "RBXPORT");
     assert_eq!(version, DB_VERSION);
     assert_eq!(count, 3, "the track count is written, not assumed");
     assert_eq!(created, "2026-09-07", "a date, not a timestamp");
@@ -262,7 +262,7 @@ fn the_stick_settings_read_back_as_the_reference_and_update_in_place() {
 
     let (dir, path) = built();
     let mut settings = StickSettings::read(&path).expect("read");
-    assert_eq!(settings.device_name, "EXPORTSTUDIO");
+    assert_eq!(settings.device_name, "RBXPORT");
     // Untouched, a fresh export carries exactly the reference rows.
     let reference = StickSettings::default();
     assert_eq!(settings.categories, reference.categories);

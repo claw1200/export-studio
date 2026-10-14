@@ -11,6 +11,15 @@ pub const PAGE_HEADER_LEN: usize = 0x28;
 /// Bytes each row group occupies at the end of a page.
 pub const ROW_GROUP_LEN: usize = 0x24;
 
+/// The longest row a page of `page_size` bytes holds: an empty page less
+/// its header, one row group, and the slack [`FileBuilder`] keeps before it
+/// starts a new page. A row cannot continue onto another page, so anything
+/// longer cannot be written.
+#[must_use]
+pub const fn max_row_len(page_size: usize) -> usize {
+    page_size.saturating_sub(PAGE_HEADER_LEN + ROW_GROUP_LEN + 8)
+}
+
 /// Encodes a string in the short-ASCII `DeviceSQL` form.
 ///
 /// The length byte is "incremented, doubled, and incremented again", which is
@@ -39,11 +48,20 @@ pub fn long_ascii(text: &str) -> Vec<u8> {
     out
 }
 
-/// Encodes a string in the long UTF-16LE form, for text ASCII cannot carry.
+/// Encodes a string in the long UTF-16LE form, for text ASCII cannot carry:
+/// `0x90`, a `u16` length that counts these four header bytes and the
+/// text, a pad byte, then the UTF-16LE text with no terminator.
+///
+/// rekordbox writes no trailing NUL in either `export.pdb` or
+/// `exportExt.pdb` [OBS: every one of the 252 UTF-16 strings in a
+/// rekordbox-written `export.pdb`, e.g. artist `LÜRUM` as
+/// `90 0e 00 00 4c 00 dc 00 52 00 55 00 4d 00` and title `¡Viva La Gloria!`
+/// with length `0x24` followed directly by the next string]. An earlier
+/// writer appended `00 00` and counted it, which is the shape a
+/// CDJ-2000NXS was reported to freeze on (#321).
 pub fn long_utf16le(text: &str) -> Vec<u8> {
     let units: Vec<u16> = text.encode_utf16().collect();
-    // The length counts the 4-byte header and the two trailing NUL bytes.
-    let len = 4 + units.len() * 2 + 2;
+    let len = 4 + units.len() * 2;
     let mut out = Vec::with_capacity(len);
     out.push(0x90);
     out.extend_from_slice(&u16::try_from(len).unwrap_or(u16::MAX).to_le_bytes());
@@ -51,7 +69,6 @@ pub fn long_utf16le(text: &str) -> Vec<u8> {
     for unit in units {
         out.extend_from_slice(&unit.to_le_bytes());
     }
-    out.extend_from_slice(&[0, 0]);
     out
 }
 
@@ -65,6 +82,51 @@ pub fn device_sql_string(text: &str) -> Vec<u8> {
     }
 }
 
+/// Appends `text` to a row the way rekordbox lays strings out, and returns
+/// the row offset the string starts at.
+///
+/// A short ASCII string goes straight after what is already there. A long
+/// one, ASCII (`0x40`) or UTF-16 (`0x90`), starts on a four-byte boundary
+/// of the row, with zero bytes filling the gap [OBS: in a rekordbox-written
+/// `export.pdb`, all 346 long strings in track rows sit at a row offset
+/// that is a multiple of four, artists with a long name have it at `0x0c`
+/// behind `03 0c 00 00` where short names sit at `0x0a`, and albums at
+/// `0x18` where short names sit at `0x16`]. Rows themselves start on a
+/// four-byte boundary of the page, so the text of a UTF-16 string is
+/// always aligned for a 16-bit read.
+pub fn push_device_sql_string(row: &mut Vec<u8>, text: &str) -> usize {
+    let encoded = device_sql_string(text);
+    if encoded.first().is_some_and(|&flag| flag == 0x40 || flag == 0x90) {
+        while !row.len().is_multiple_of(4) {
+            row.push(0);
+        }
+    }
+    let at = row.len();
+    row.extend_from_slice(&encoded);
+    at
+}
+
+/// How a table's data pages are filled and what their header says at
+/// `0x20` and `0x22`. Every other header field is the same either way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PageStyle {
+    /// `0x20` the row count and `0x22` 0, and a new page once less than
+    /// the next row plus eight bytes is free: rbxport's `export.pdb` pages
+    /// and `exportExt.pdb`'s tag and master pages, whose bytes this style
+    /// keeps as they always were. A page of more than 255 rows is headed
+    /// as in [`Self::LastRowIndex`] instead, as rekordbox heads one (#349).
+    #[default]
+    Counted,
+    /// `0x20` 1 and `0x22` the last row's index, each row group's last
+    /// word 0 except the last group's, which holds only the last row's
+    /// bit, and rows added for as long as they and their row index fit
+    /// the page to the last byte: rekordbox's `exportExt.pdb` type-4 pages
+    /// [OBS: a rekordbox 7 export, #316: 222 sixteen-byte rows a page, 4
+    /// bytes free, `01 00 dd 00`, the last group `ff 3f 00 20`; its last
+    /// page of 128 rows `01 00 7f 00`, `ff ff 00 80`].
+    LastRowIndex,
+}
+
 /// Builds one page of rows.
 pub struct PageBuilder {
     page_size: usize,
@@ -73,6 +135,7 @@ pub struct PageBuilder {
     next_page: u32,
     heap: Vec<u8>,
     row_offsets: Vec<u16>,
+    style: PageStyle,
 }
 
 impl PageBuilder {
@@ -84,6 +147,25 @@ impl PageBuilder {
             next_page,
             heap: Vec::new(),
             row_offsets: Vec::new(),
+            style: PageStyle::Counted,
+        }
+    }
+
+    /// The page with its header and fill in `style`.
+    #[must_use]
+    pub fn with_style(mut self, style: PageStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Whether a row of `len` bytes still goes on this page in its style.
+    pub fn fits(&self, len: usize) -> bool {
+        match self.style {
+            PageStyle::Counted => self.free_space() >= len + 8,
+            PageStyle::LastRowIndex => {
+                let heap = self.heap.len().div_ceil(4) * 4 + len;
+                PAGE_HEADER_LEN + heap + groups_for(self.row_offsets.len() + 1) * ROW_GROUP_LEN <= self.page_size
+            }
         }
     }
 
@@ -120,7 +202,8 @@ impl PageBuilder {
     /// `0x18` the row count, `0x19` and `0x1a` derived from it, `0x1b` the
     /// flags `0x24`, `0x1c` the free bytes, `0x1e` the used bytes rounded
     /// up to four, `0x20` the row count again. Each row group ends in the
-    /// present mask twice.
+    /// present mask twice. A page of more than 255 rows, or one in
+    /// [`PageStyle::LastRowIndex`], marks only its last row instead.
     pub fn finish(self) -> Vec<u8> {
         self.finish_with(0)
     }
@@ -130,6 +213,21 @@ impl PageBuilder {
     pub fn finish_with(self, sequence: u32) -> Vec<u8> {
         let mut page = vec![0_u8; self.page_size];
         let num_rows = self.row_offsets.len();
+        // Whether `0x20`, `0x22` and the row groups' second words name only
+        // the last row, as the last-row-index style does. A page of more
+        // than 255 rows always does, whatever its style, because that is how
+        // rekordbox heads one [OBS: rekordbox-written sticks from #284 and
+        // #321: playlist-entry pages of 284 rows hold `01 00 1b 01`, every
+        // row group's second word 0 but the last's `00 08`]. Those words
+        // are `DeviceSQL`'s record of the rows its last write touched:
+        // `0x20` how many, `0x22` the first one's index, and each group's
+        // second word which [static: rekordbox 7.2.19
+        // `_TE_PSmgrClearDirtyBits` @0x102f694d4 walks the groups from
+        // `0x22 / 16` until it has cleared `0x20` bits]. rbxport used to
+        // put the row count in both on such a page, so that walk
+        // started past the page's last group and never found its bits:
+        // rekordbox ran off the page and crashed (#349).
+        let last_row_marked = self.style == PageStyle::LastRowIndex || num_rows > 0xff;
 
         // Header.
         page[0x04..0x08].copy_from_slice(&self.page_index.to_le_bytes());
@@ -137,12 +235,14 @@ impl PageBuilder {
         page[0x0c..0x10].copy_from_slice(&self.next_page.to_le_bytes());
         page[0x10..0x14].copy_from_slice(&sequence.to_le_bytes());
         let rows_u16 = u16::try_from(num_rows).unwrap_or(u16::MAX);
-        page[0x18] = u8::try_from(num_rows.min(0xff)).unwrap_or(0xff);
-        // Two bytes rekordbox derives from the row count [OBS 7.2.11, twelve
-        // pages of 1 to 61 rows]: the count times 32 in its low byte, and
-        // the count over eight.
-        page[0x19] = u8::try_from((num_rows * 32) & 0xff).unwrap_or(0);
-        page[0x1a] = u8::try_from((num_rows / 8).min(0xff)).unwrap_or(0xff);
+        // The row index's length in the low 13 bits of `0x18..0x1b` and the
+        // present rows in the 11 above them [OBS 7.2.11, twelve pages of 1
+        // to 61 rows: the count, the count times 32 in its low byte, and
+        // the count over eight; OBS #284: `1c 81 23` on a page of 284 rows].
+        // Every row is present, so both are the row count.
+        let rows = u32::try_from(num_rows).unwrap_or(0);
+        let packed = (rows & 0x1fff) | (rows & 0x7ff) << 13;
+        page[0x18..0x1b].copy_from_slice(&packed.to_le_bytes()[..3]);
         page[0x1b] = 0x24; // ordinary data page
         let used = self.heap.len().div_ceil(4) * 4;
         // rekordbox's figure counts two bytes per row and four per group
@@ -155,9 +255,12 @@ impl PageBuilder {
             .saturating_sub(2 * num_rows + 4 * groups_for(num_rows));
         page[0x1c..0x1e].copy_from_slice(&u16::try_from(free).unwrap_or(0).to_le_bytes());
         page[0x1e..0x20].copy_from_slice(&u16::try_from(used).unwrap_or(u16::MAX).to_le_bytes());
-        page[0x20..0x22].copy_from_slice(&rows_u16.to_le_bytes());
-        if num_rows > 0xff {
-            page[0x22..0x24].copy_from_slice(&rows_u16.to_le_bytes());
+        if last_row_marked {
+            page[0x20..0x22].copy_from_slice(&1_u16.to_le_bytes());
+            page[0x22..0x24].copy_from_slice(&rows_u16.saturating_sub(1).to_le_bytes());
+        } else {
+            // Every row, from row 0.
+            page[0x20..0x22].copy_from_slice(&rows_u16.to_le_bytes());
         }
 
         // Heap.
@@ -178,10 +281,18 @@ impl PageBuilder {
                     page[at..at + 2].copy_from_slice(&offset.to_le_bytes());
                 }
             }
-            // The mask twice: rekordbox writes it in both trailing words.
-            for at in [base - 4, base - 2] {
+            // The mask, then the mask again, or when only the last row is
+            // marked, its bit in the last group and 0 in the others.
+            let second = if !last_row_marked {
+                present
+            } else if group == groups - 1 {
+                1 << (in_group - 1)
+            } else {
+                0
+            };
+            for (at, word) in [(base - 4, present), (base - 2, second)] {
                 if at + 2 <= page.len() {
-                    page[at..at + 2].copy_from_slice(&present.to_le_bytes());
+                    page[at..at + 2].copy_from_slice(&word.to_le_bytes());
                 }
             }
         }
@@ -250,7 +361,7 @@ impl FileBuilder {
     /// table's further data pages and its empty candidate are allocated
     /// when it is written, so a table written early has its candidate
     /// before a later table's overflow. Types not named here follow the
-    /// named ones in table order. Without this, `history` (type 19) is
+    /// named ones in table order. Without this, `property` (type 19) is
     /// written first and the rest in table order, as `export.pdb` has it
     /// [OBS 7.2.11]; `exportExt.pdb` writes its type 7 before its type 3.
     pub fn write_order(&mut self, order: &[u32]) {
@@ -268,17 +379,20 @@ impl FileBuilder {
     /// index, times 32, in their third and fourth bytes, and it starts
     /// again on every page.
     pub fn add_table_numbered(&mut self, page_type: u32, rows: &[Vec<u8>], number: impl Fn(&mut Vec<u8>, u16)) {
+        self.add_table_styled(page_type, rows, number, PageStyle::Counted);
+    }
+
+    /// [`add_table_numbered`](Self::add_table_numbered), with the data
+    /// pages filled and headed in `style`.
+    pub fn add_table_styled(&mut self, page_type: u32, rows: &[Vec<u8>], number: impl Fn(&mut Vec<u8>, u16), style: PageStyle) {
         // Page indices are assigned in `finish`, so use a placeholder for now
         // and patch the links afterwards.
         let mut pages: Vec<Vec<u8>> = Vec::new();
-        let mut builder = PageBuilder::new(self.page_size, 0, page_type, 0);
+        let fresh = || PageBuilder::new(self.page_size, 0, page_type, 0).with_style(style);
+        let mut builder = fresh();
         for row in rows {
-            if builder.free_space() < row.len() + 8 {
-                pages.push(std::mem::replace(
-                    &mut builder,
-                    PageBuilder::new(self.page_size, 0, page_type, 0),
-                )
-                .finish());
+            if !builder.fits(row.len()) {
+                pages.push(std::mem::replace(&mut builder, fresh()).finish());
             }
             let mut row = row.clone();
             number(&mut row, u16::try_from(builder.row_count()).unwrap_or(u16::MAX));
@@ -311,7 +425,8 @@ impl FileBuilder {
         // with rows keeps the rest of its pages back until it is "written".
         let mut held: Vec<(usize, Vec<Vec<u8>>)> = Vec::new();
         for (table_at, (page_type, mut table_pages)) in self.tables.into_iter().enumerate() {
-            let has_rows = table_pages.iter().any(|p| p[0x18] != 0 || p[0x22] != 0 || p[0x23] != 0);
+            // The row index's length is the low 13 bits of `0x18..0x1b`.
+            let has_rows = table_pages.iter().any(|p| p[0x18] != 0 || p[0x19] & 0x1f != 0 || p[0x22] != 0 || p[0x23] != 0);
             let index_at = next_index;
             next_index += 1;
             if has_rows {
@@ -333,7 +448,7 @@ impl FileBuilder {
             }
         }
         // Then each table's further pages and its candidate, in the order
-        // the tables were written: as asked, else `history` (type 19)
+        // the tables were written: as asked, else `property` (type 19)
         // first and the rest in table order.
         let order = |page_type: u32| -> (usize, u32) {
             match self.write_order.iter().position(|&t| t == page_type) {
@@ -402,6 +517,150 @@ impl FileBuilder {
         }
         out
     }
+}
+
+/// The value an index page names in place of a first data page when its
+/// table has none.
+const NO_PAGE: u32 = 0x03ff_ffff;
+
+/// Splits rows into pages the way [`FileBuilder::add_table`] does: a page
+/// rolls over when its free space is less than the next row plus eight bytes.
+fn paginate(page_size: usize, rows: &[Vec<u8>]) -> Vec<Vec<&[u8]>> {
+    let mut pages: Vec<Vec<&[u8]>> = Vec::new();
+    let mut current: Vec<&[u8]> = Vec::new();
+    let mut scratch = PageBuilder::new(page_size, 0, 0, 0);
+    for row in rows {
+        if scratch.free_space() < row.len() + 8 && !current.is_empty() {
+            pages.push(std::mem::take(&mut current));
+            scratch = PageBuilder::new(page_size, 0, 0, 0);
+        }
+        scratch.push_row(row);
+        current.push(row);
+    }
+    if !current.is_empty() {
+        pages.push(current);
+    }
+    pages
+}
+
+/// Replaces every row of one table inside an existing file, leaving every
+/// other table's pages byte for byte as they were.
+///
+/// The table keeps its index page. Its data pages are reused in chain order;
+/// when the new rows need more, the table's empty candidate is taken and a
+/// fresh candidate is allocated at the file's next unused page, which is how
+/// [`FileBuilder`] lays a growing table out. Pages the rows no longer need
+/// are zeroed and left out of the chain. Each page written takes the next
+/// sequence number, and the header records the last one, the table's last
+/// page, its candidate and the next unused page.
+///
+/// `None` when the file does not hold the table, its chain does not lead
+/// from the index page to the last page the header names, or the pages it
+/// would take are not free: the caller must not write anything then.
+#[must_use]
+pub fn replace_table(file: &[u8], page_type: u32, rows: &[Vec<u8>]) -> Option<Vec<u8>> {
+    let word = |at: usize| -> Option<u32> { Some(u32::from_le_bytes(file.get(at..at + 4)?.try_into().ok()?)) };
+    let page_size = usize::try_from(word(4)?).ok()?;
+    if !(512..=65_536).contains(&page_size) || !page_size.is_power_of_two() {
+        return None;
+    }
+    let num_tables = usize::try_from(word(8)?).ok()?;
+    let mut next_unused = word(0x0c)?;
+    let mut sequence = word(0x14)?;
+    let entry_at = (0..num_tables.min(64)).map(|i| 28 + i * 16).find(|&at| word(at) == Some(page_type))?;
+    let mut candidate = word(entry_at + 4)?;
+    let first = word(entry_at + 8)?;
+    let last = word(entry_at + 12)?;
+    let page_at = |index: u32| -> Option<usize> { usize::try_from(index).ok()?.checked_mul(page_size) };
+
+    // The index page heads the chain; it must be one, and of this table.
+    let index_at = page_at(first)?;
+    let index_page = file.get(index_at..index_at + page_size)?;
+    if index_page[0x1b] & 0x40 == 0 || crate::u4(index_page, 0x08) != page_type {
+        return None;
+    }
+    // The data pages, walked the way a reader walks them: from the index
+    // page's next pointer to the last page the header names.
+    let mut data_pages: Vec<u32> = Vec::new();
+    if last != first {
+        let mut at = crate::u4(index_page, 0x0c);
+        loop {
+            if at == first || data_pages.contains(&at) || data_pages.len() > 1_000_000 {
+                return None;
+            }
+            let offset = page_at(at)?;
+            let page = file.get(offset..offset + page_size)?;
+            if page[0x1b] & 0x40 != 0 || crate::u4(page, 0x08) != page_type || crate::u4(page, 0x04) != at {
+                return None;
+            }
+            data_pages.push(at);
+            if at == last {
+                break;
+            }
+            at = crate::u4(page, 0x0c);
+        }
+    }
+
+    let chunks = paginate(page_size, rows);
+    // Where each page goes: the table's own pages first, then its candidate,
+    // then fresh pages at the end of the file.
+    let mut assigned: Vec<u32> = Vec::with_capacity(chunks.len());
+    for k in 0..chunks.len() {
+        if let Some(&index) = data_pages.get(k) {
+            assigned.push(index);
+        } else {
+            assigned.push(candidate);
+            candidate = next_unused;
+            next_unused = next_unused.checked_add(1)?;
+        }
+    }
+    // Taken pages that were not the table's must hold nothing: a candidate
+    // or an unused page with data in it means the file is not what the
+    // header says, and writing over it would destroy another table.
+    let is_free = |index: u32| -> bool {
+        page_at(index).is_some_and(|offset| file.get(offset..offset + page_size).is_none_or(|p| p.iter().all(|&b| b == 0)))
+    };
+    if assigned.iter().filter(|i| !data_pages.contains(i)).any(|&i| !is_free(i)) || !is_free(candidate) {
+        return None;
+    }
+
+    let mut out = file.to_vec();
+    let needed = assigned.iter().map(|&i| page_at(i).map(|o| o + page_size)).max().flatten().unwrap_or(0);
+    if needed > out.len() {
+        out.resize(needed, 0);
+    }
+    for (k, chunk) in chunks.iter().enumerate() {
+        let index = assigned[k];
+        let next = assigned.get(k + 1).copied().unwrap_or(candidate);
+        let mut builder = PageBuilder::new(page_size, index, page_type, next);
+        for row in chunk {
+            builder.push_row(row);
+        }
+        sequence = sequence.checked_add(1)?;
+        let offset = page_at(index)?;
+        out.get_mut(offset..offset + page_size)?.copy_from_slice(&builder.finish_with(sequence));
+    }
+    // Pages the table no longer uses hold nothing.
+    for &index in data_pages.iter().skip(chunks.len()) {
+        let offset = page_at(index)?;
+        out.get_mut(offset..offset + page_size)?.fill(0);
+    }
+    // The index page points at the first data page, or at the candidate
+    // with no data page named when the table is empty, as a fresh file has it.
+    let (index_next, first_data) = assigned.first().map_or((candidate, NO_PAGE), |&f| (f, f));
+    out.get_mut(index_at + 0x0c..index_at + 0x10)?.copy_from_slice(&index_next.to_le_bytes());
+    out.get_mut(index_at + PAGE_HEADER_LEN + 4..index_at + PAGE_HEADER_LEN + 8)?.copy_from_slice(&first_data.to_le_bytes());
+
+    let new_last = assigned.last().copied().unwrap_or(first);
+    out.get_mut(0x0c..0x10)?.copy_from_slice(&next_unused.to_le_bytes());
+    out.get_mut(0x14..0x18)?.copy_from_slice(&sequence.to_le_bytes());
+    out.get_mut(entry_at + 4..entry_at + 8)?.copy_from_slice(&candidate.to_le_bytes());
+    out.get_mut(entry_at + 12..entry_at + 16)?.copy_from_slice(&new_last.to_le_bytes());
+    // rekordbox's files stop at the last page with anything in it.
+    while out.len() > page_size && out[out.len() - page_size..].iter().all(|&b| b == 0) {
+        out.truncate(out.len() - page_size);
+    }
+    Some(out)
 }
 
 /// Replaces the rows of a table that fits one data page — the colours, on
