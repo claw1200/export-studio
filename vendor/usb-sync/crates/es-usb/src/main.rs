@@ -1,4 +1,4 @@
-//! Runs one rbxport USB export from a JSON job.
+//! Runs one USB export from a JSON job.
 //!
 //! Progress is one JSON object per line on stdout. The last line is either
 //! `{"event":"result",...}` or `{"event":"error","kind":"...","message":"..."}`.
@@ -197,7 +197,7 @@ fn narrow_u8(value: u32) -> u8 {
 /// A measured loop end, or one derived from `BeatLoopSize` and tempo.
 ///
 /// `BeatLoopSize` is `(numerator << 16) | denominator`. This is the same
-/// derivation rbxport uses when it reads `djmdCue`.
+/// derivation used when reading `djmdCue`.
 fn loop_end(start_ms: u32, stored_end: Option<i64>, beat_loop_size: u32, bpm_x100: u32) -> Option<u32> {
     if let Some(end) = stored_end.and_then(|end| u32::try_from(end).ok()) {
         if end > start_ms {

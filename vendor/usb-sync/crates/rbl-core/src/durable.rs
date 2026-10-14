@@ -440,7 +440,7 @@ pub fn read_lock(root: &Path) -> std::io::Result<std::fs::File> {
         .truncate(false)
         .read(true)
         .write(true)
-        .open(root.join(".rbxport-write.lock"))?;
+        .open(root.join(".exportstudio-write.lock"))?;
     fs2::FileExt::lock_shared(&file)?;
     Ok(file)
 }
@@ -451,7 +451,7 @@ fn lock(root: &Path) -> std::io::Result<std::fs::File> {
         .write(true)
         .create(true)
         .truncate(false)
-        .open(root.join(".rbxport-write.lock"))?;
+        .open(root.join(".exportstudio-write.lock"))?;
     fs2::FileExt::lock_exclusive(&file)?;
     Ok(file)
 }

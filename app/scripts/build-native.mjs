@@ -15,7 +15,7 @@ const target = targetAt >= 0 ? args[targetAt + 1] : process.env.ES_NATIVE_TARGET
 const cargo = ['build', '-p', 'es-node', ...(debug ? [] : ['--release']), ...(target ? ['--target', target] : [])]
 execFileSync('cargo', cargo, { cwd: native, stdio: 'inherit' })
 
-const usbRoot = resolve(native, '..', 'vendor', 'rbxport')
+const usbRoot = resolve(native, '..', 'vendor', 'usb-sync')
 const usbCargo = ['build', '-p', 'es-usb', ...(debug ? [] : ['--release']), ...(target ? ['--target', target] : [])]
 execFileSync('cargo', usbCargo, { cwd: usbRoot, stdio: 'inherit' })
 

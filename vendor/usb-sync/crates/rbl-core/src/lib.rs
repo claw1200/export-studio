@@ -1,4 +1,4 @@
-//! Primitives shared across every rbxport crate.
+//! Primitives shared across the USB export crates.
 //!
 //! Shared types and durable filesystem publication; no network or Tauri.
 

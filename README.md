@@ -9,7 +9,7 @@ Export Studio is a library browser for rekordbox. Browse your collection, previe
 
 ## Why Export Studio?
 
-Export Studio is a library browser for rekordbox, with with a fundemtaly different vision to other alternate tools like [rbxport](https://github.com/chrisle/rbxport).
+Export Studio is a library browser for rekordbox, with with a fundemtaly different vision to other alternate tools.
 
 Export Studio looks to compltly overhaul the avalible feature set of a library manager, not just to strip down Rekordbox to its essentials. I beleive that rekordbox does not just need optimization, but a redesign from the ground up, hence why I have chosen not to copy the old interface and workflow.
 

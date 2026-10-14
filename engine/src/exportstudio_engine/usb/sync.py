@@ -1,9 +1,9 @@
-"""Publish playlists to a USB stick with rbxport's exporter.
+"""Publish playlists to a USB stick.
 
 Audio, analysis, artwork, Device Library, and OneLibrary are written by the
-vendored rbxport sync (`es-usb`). That is the same pipeline that keeps the
-two device databases in agreement. Tracks and playlists already on the stick
-are reconciled by that exporter.
+USB exporter (`es-usb`). That is the same pipeline that keeps the two device
+databases in agreement. Tracks and playlists already on the stick are
+reconciled by that exporter.
 """
 
 import json
@@ -146,8 +146,8 @@ def _exporter() -> Path:
     if getattr(sys, "frozen", False):
         candidates.append(Path(sys.executable).resolve().parent / name)
     repo = Path(__file__).resolve().parents[4]
-    candidates.append(repo / "vendor" / "rbxport" / "target" / "release" / name)
-    candidates.append(repo / "vendor" / "rbxport" / "target" / "debug" / name)
+    candidates.append(repo / "vendor" / "usb-sync" / "target" / "release" / name)
+    candidates.append(repo / "vendor" / "usb-sync" / "target" / "debug" / name)
     for path in candidates:
         if path.is_file():
             return path

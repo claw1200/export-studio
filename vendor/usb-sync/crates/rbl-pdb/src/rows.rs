@@ -107,7 +107,7 @@ pub fn track_row(input: &TrackInput) -> Vec<u8> {
     // These are part of the record layout, not optional metadata. A zero
     // subtype makes the CDJ-3000 ignore the tracks; zero trailer words leave
     // its string columns misread. Pinned against rekordbox's MP3 export and
-    // CDJ-3000 firmware browse/load tests (../rbxport-private/docs/audits/usb-track-records.md).
+    // CDJ-3000 firmware browse/load tests.
     put_u2(&mut row, 0x00, 0x24); // track record with 16-bit string offsets
     put_u2(&mut row, 0x02, 0); // index_shift
     put_u4(&mut row, 0x04, 0); // bitmask

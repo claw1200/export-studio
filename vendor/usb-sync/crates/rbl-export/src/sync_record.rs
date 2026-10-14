@@ -215,7 +215,7 @@ fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
 /// Writes both files under `destination`, keeping the times the previous
 /// record there gave the playlists that are still ticked.
 pub fn write(destination: &Path, source: &SyncSource, ticked: &[u64], synced_at_ms: u64) -> std::io::Result<()> {
-    let publication = rbl_core::durable::Publication::new(destination, ".rbxport-publication")?;
+    let publication = rbl_core::durable::Publication::new(destination, crate::PUBLICATION)?;
     let kept = read(destination).map(|r| r.timestamps).unwrap_or_default();
     let bytes = render(source, ticked, synced_at_ms, &kept);
     for file in FILES {

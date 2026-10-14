@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Shared ids, time formats and error primitives for rbxport."
+description = "Shared ids, time formats and error primitives for USB export."
 
 [lints]
 workspace = true

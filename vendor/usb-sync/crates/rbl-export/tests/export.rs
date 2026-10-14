@@ -564,7 +564,7 @@ fn failed_export_staging_preserves_previous_databases_and_audio() {
     assert!(export(dest.path(), &tracks, &playlists).is_err());
     assert_eq!(std::fs::read(&audio).unwrap(), old_audio);
     assert_eq!(std::fs::read(&database).unwrap(), old_db);
-    assert!(!dest.path().join(".rbxport-publication").exists());
+    assert!(!dest.path().join(".exportstudio-publication").exists());
     assert!(verify(dest.path()).unwrap().is_ok());
 }
 

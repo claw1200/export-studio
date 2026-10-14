@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 /// Where the record sits, relative to the root of the stick.
-pub const MANIFEST_PATH: &str = "PIONEER/rbxport/manifest.json";
+pub const MANIFEST_PATH: &str = "PIONEER/exportstudio/manifest.json";
 
 /// Bumped when a field changes meaning. An older or newer manifest is ignored
 /// rather than guessed at, which costs one full export and never a wrong one.
@@ -116,7 +116,7 @@ pub fn track_key(library_id: u64, source: &str) -> String {
 
 impl Manifest {
     pub fn path(destination: &Path) -> PathBuf {
-        crate::export_root(destination).join("rbxport/manifest.json")
+        crate::export_root(destination).join("exportstudio/manifest.json")
     }
 
     /// Reads the record a previous export left, if there is a usable one.
@@ -137,7 +137,7 @@ impl Manifest {
         self.save_at(destination, crate::export_root_name(destination).map_err(std::io::Error::other)?)
     }
     pub fn save_at(&self, destination: &Path, root_name: &str) -> std::io::Result<()> {
-        let path = destination.join(root_name).join("rbxport/manifest.json");
+        let path = destination.join(root_name).join("exportstudio/manifest.json");
         if let Some(parent) = path.parent() {
             rbl_core::durable::create_dir_all(parent)?;
         }

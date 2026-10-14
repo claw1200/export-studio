@@ -14,7 +14,7 @@ _cache: dict[str, tuple] = {}
 def _signature(volume: Path) -> tuple:
     root, _name = pioneer_dir(volume)
     parts = []
-    for rel in ("rekordbox/export.pdb", "rekordbox/exportLibrary.db", "rbxport/manifest.json"):
+    for rel in ("rekordbox/export.pdb", "rekordbox/exportLibrary.db", "exportstudio/manifest.json"):
         path = root / rel
         try:
             st = path.stat()

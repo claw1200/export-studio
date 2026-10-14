@@ -52,7 +52,7 @@ fn built() -> (tempfile::TempDir, std::path::PathBuf) {
     for i in 0..3 {
         builder.add_to_playlist(1, i64::from(i) + 1, i64::from(i) + 1).unwrap();
     }
-    builder.finish("RBXPORT", "2026-09-07", 0).unwrap();
+    builder.finish("EXPORTSTUDIO", "2026-09-07", 0).unwrap();
     (dir, path)
 }
 
@@ -174,7 +174,7 @@ fn the_property_row_reports_what_was_written() {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .unwrap();
-    assert_eq!(device, "RBXPORT");
+    assert_eq!(device, "EXPORTSTUDIO");
     assert_eq!(version, DB_VERSION);
     assert_eq!(count, 3, "the track count is written, not assumed");
     assert_eq!(created, "2026-09-07", "a date, not a timestamp");
@@ -262,7 +262,7 @@ fn the_stick_settings_read_back_as_the_reference_and_update_in_place() {
 
     let (dir, path) = built();
     let mut settings = StickSettings::read(&path).expect("read");
-    assert_eq!(settings.device_name, "RBXPORT");
+    assert_eq!(settings.device_name, "EXPORTSTUDIO");
     // Untouched, a fresh export carries exactly the reference rows.
     let reference = StickSettings::default();
     assert_eq!(settings.categories, reference.categories);

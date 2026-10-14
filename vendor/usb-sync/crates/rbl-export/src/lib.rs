@@ -217,19 +217,31 @@ const FILE_NAME_MAX: usize = 120;
 /// A directory component under `Contents/`: FAT-safe and cut to rekordbox's
 /// length, trailing spaces and dots dropped after the cut too.
 fn dir_name(name: &str) -> String {
-    let safe = fat_safe(name);
-    if safe.chars().count() <= DIR_NAME_MAX {
-        return safe;
-    }
-    let mut cut: String = safe.chars().take(DIR_NAME_MAX).collect();
-    while cut.ends_with('.') || cut.ends_with(' ') {
-        cut.pop();
-    }
-    if cut.is_empty() { "Unknown".to_owned() } else { cut }
+    let safe = composed_fat(name);
+    let cut = if safe.chars().count() <= DIR_NAME_MAX {
+        safe
+    } else {
+        let mut cut: String = safe.chars().take(DIR_NAME_MAX).collect();
+        while cut.ends_with('.') || cut.ends_with(' ') {
+            cut.pop();
+        }
+        if cut.is_empty() { "Unknown".to_owned() } else { cut }
+    };
+    decompose(cut)
 }
 
 /// Makes a name safe for FAT32, which is what a DJ stick is formatted as.
+///
+/// The length limit is applied to the precomposed form, then the name is
+/// decomposed. macOS stores a precomposed path on exFAT as a decomposed
+/// directory entry, and `rename(2)` later returns ENOENT for that entry, so
+/// publication cannot move the file. Writing the decomposed name creates an
+/// entry that can be renamed, and it matches the bytes the database records.
 fn fat_safe(name: &str) -> String {
+    decompose(composed_fat(name))
+}
+
+fn composed_fat(name: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
     let mut out: String = name
         .nfc()
@@ -249,15 +261,20 @@ fn fat_safe(name: &str) -> String {
     out
 }
 
+fn decompose(name: String) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    name.nfd().collect()
+}
+
 /// A rekordbox-style audio filename: FAT-safe and short enough for the player,
 /// while retaining the extension that identifies the audio format [OBS: the
 /// RBX-21 reporter's rekordbox export shortened the stem and kept `.aiff`].
-/// macOS can expose decomposed Unicode names, so `fat_safe` normalizes before
-/// the byte limit is applied and staged and published paths stay identical.
+/// The byte limit is applied to the precomposed form; the result is then
+/// decomposed, same as [`fat_safe`].
 fn fat_file_name(name: &str) -> String {
-    let safe = fat_safe(name);
+    let safe = composed_fat(name);
     if safe.len() <= FILE_NAME_MAX {
-        return safe;
+        return decompose(safe);
     }
     let (stem, suffix) = safe
         .rsplit_once('.')
@@ -268,7 +285,7 @@ fn fat_file_name(name: &str) -> String {
     let mut shortened = stem[..end].trim_end_matches(['.', ' ']).to_owned();
     if shortened.is_empty() { shortened.push_str("Unknown"); }
     shortened.push_str(&suffix);
-    shortened
+    decompose(shortened)
 }
 
 /// The lookup tables an export builds as it walks the tracks.
@@ -882,7 +899,7 @@ pub fn export_cancellable(
                 // alongside the replacement path.
                 parsed.sections.retain(|s| s.tag != rbl_core::FourCc::new(b"PPTH"));
                 parsed.sections.splice(0..0, path.sections);
-                // Older RBXport analysis files predate the PVBR section. A
+                // Older analysis files predate the PVBR section. A
                 // freshly initialized Pioneer DAT always writes it between
                 // PPTH and PQTZ, even when there are no VBR frames. Repair
                 // those stale files while exporting rather than asking the
@@ -1716,7 +1733,7 @@ pub fn verify_databases(destination: &Path) -> Result<VerifyReport> {
     verification::verify_databases(destination)
 }
 
-const PUBLICATION: &str = ".rbxport-publication";
+pub(crate) const PUBLICATION: &str = ".exportstudio-publication";
 
 /// Complete an interrupted export before reading or changing the device.
 pub fn recover(destination: &Path) -> std::io::Result<()> {
@@ -1765,9 +1782,10 @@ mod tests {
         assert_eq!(fat_safe("trailing dots..."), "trailing dots");
         assert_eq!(fat_safe(""), "Unknown");
         assert_eq!(fat_safe("   "), "Unknown");
-        // Unicode is fine on FAT32 long names.
-        assert_eq!(fat_safe("Ébano — Tiësto"), "Ébano — Tiësto");
-        assert_eq!(fat_safe("Kesa\u{308} (On Kaunis).aiff"), "Kesä (On Kaunis).aiff");
+        // Decomposed, so a Mac-mounted stick can rename the file later.
+        assert_eq!(fat_safe("Ébano — Tiësto"), decompose("Ébano — Tiësto".to_owned()));
+        assert_eq!(fat_safe("Kesä (On Kaunis).aiff"), decompose("Kesä (On Kaunis).aiff".to_owned()));
+        assert_eq!(fat_safe("Kesa\u{308} (On Kaunis).aiff"), decompose("Kesä (On Kaunis).aiff".to_owned()));
     }
 
     #[test]
@@ -1779,7 +1797,7 @@ mod tests {
             .extension()
             .is_some_and(|extension| extension.eq_ignore_ascii_case("aiff")));
         assert_eq!(fat_file_name("Omega - The Hidden Beauty Of Dutch House '94-'98 - 04 Le Rève.aiff"),
-            "Omega - The Hidden Beauty Of Dutch House '94-'98 - 04 Le Rève.aiff");
+            decompose("Omega - The Hidden Beauty Of Dutch House '94-'98 - 04 Le Rève.aiff".to_owned()));
     }
 
     #[test]
