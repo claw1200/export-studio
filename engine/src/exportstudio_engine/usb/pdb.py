@@ -8,6 +8,8 @@ import struct
 from dataclasses import dataclass, field
 from datetime import date
 
+from .onelib import COLOR_NAMES
+
 PAGE = 4096
 HEADER = 0x28
 TABLES = 20
@@ -88,7 +90,6 @@ _SORTS = (
     "0600050000060000",
     "0B000C0000070000",
 )
-COLORS = ("Pink", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple")
 
 
 @dataclass
@@ -557,7 +558,7 @@ def build_pdb(library: PdbLibrary, *, today: date | None = None) -> bytes:
         table_rows[4].append(_id_name(row.export_id, row.name))
     for row in library.keys:
         table_rows[5].append(_key_row(row.export_id, row.name))
-    for index, name in enumerate(COLORS, 1):
+    for index, name in enumerate(COLOR_NAMES, 1):
         table_rows[6].append(_color(index, name))
     for row in library.playlists:
         table_rows[7].append(_playlist(row))
