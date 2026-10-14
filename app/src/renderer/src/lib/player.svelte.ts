@@ -130,7 +130,6 @@ export class Player {
     return this.deck.loop
   }
 
-  /** Whether the deck's track file is missing, as found by the latest attempt to load it. Null until it is known. */
   get fileMissing(): boolean | null {
     const track = this.track
     if (!track) return null
@@ -139,7 +138,6 @@ export class Player {
     return this.deck.ready ? false : null
   }
 
-  /** Hears whether the deck's track file was found, each time a load finishes. */
   onFileChecked(listener: (id: string, missing: boolean) => void): () => void {
     this.fileListeners.add(listener)
     return () => this.fileListeners.delete(listener)
@@ -189,7 +187,6 @@ export class Player {
     if (this.track?.id === track.id) await this.open(track, false)
   }
 
-  /** Empty the deck, e.g. when its track leaves the collection. */
   eject(): void {
     if (!this.track) return
     this.cuePoint = 0
@@ -229,7 +226,6 @@ export class Player {
     this.pause()
   }
 
-  /** Continue after a preview that paused this deck. */
   resumeAfterPreview(): void {
     if (!this.returnAfterPreview) return
     this.returnAfterPreview = false
@@ -369,7 +365,6 @@ export class Player {
     this.endHold(kind)
   }
 
-  /** Calls a memory cue: it becomes the cue point, and a saved loop becomes the active loop. */
   callCue(cue: Cue): void {
     const start = this.insideFile(cue.start / 1000)
     this.cuePoint = start
@@ -388,7 +383,6 @@ export class Player {
     if (cue) this.callCue(cue)
   }
 
-  /** LOOP IN: sets the cue point, which is the in point. */
   setLoopIn(): void {
     if (!this.track || this.audioError) return
     const here = this.here()
@@ -396,7 +390,6 @@ export class Player {
     if (!this.playing && !this.deck.scrubbing) this.seek(here)
   }
 
-  /** LOOP OUT: closes a loop from the cue point. */
   setLoopOut(): void {
     if (!this.track || this.audioError) return
     const start = this.cuePoint
@@ -405,13 +398,12 @@ export class Player {
     this.deck.setLoop(start, end)
   }
 
-  /** RELOOP / EXIT. */
   reloopExit(): void {
     const loop = this.loop
     if (loop) this.deck.setLooping(!loop.active)
   }
 
-  /** A loop of `beats` from the playhead, on the grid. Pressing it again on the same loop leaves it. */
+  /** Pressing the same loop length again leaves the loop. */
   beatLoop(beats: number): void {
     if (!this.track || this.audioError) return
     const range = beatLoop(this.position, beats, this.displayGrid, this.track.bpm ?? 0, this.quantise)
@@ -431,7 +423,6 @@ export class Player {
     this.deck.setLoop(range[0], Math.min(range[1], this.duration || range[1]))
   }
 
-  /** Halves (0.5) or doubles (2) the loop from its in point. */
   resizeLoop(factor: number): void {
     const loop = this.loop
     if (!loop) return
