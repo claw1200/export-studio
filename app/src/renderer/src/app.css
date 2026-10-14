@@ -17,8 +17,8 @@
 
   --color-accent: oklch(0.8 0.14 205);
   --color-accent-soft: oklch(0.8 0.14 205 / 0.14);
-  --color-select: oklch(0.55 0.13 240 / 0.32);
-  --color-select-strong: oklch(0.6 0.15 240 / 0.48);
+  --color-select: color-mix(in oklab, var(--color-accent) 32%, transparent);
+  --color-select-strong: color-mix(in oklab, var(--color-accent) 48%, transparent);
   --color-danger: oklch(0.68 0.2 20);
   --color-warn: oklch(0.82 0.15 80);
   --color-ok: oklch(0.78 0.17 145);

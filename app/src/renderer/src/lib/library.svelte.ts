@@ -6,6 +6,7 @@ import { buildTree } from './library/tree'
 import { duplicateGroups, rankCopies } from './library/duplicates'
 import { assess, factsFromProbe, factsFromTrack } from './hardware/compatibility'
 import { DEFAULT_GREEN, playerById } from './hardware/players'
+import { isDefaultRekordboxTrack } from './library/factory'
 import { loadViews, looseTrack, matchesTrack, pathKey, saveViews, type FileEntry } from './library/views'
 import { getSetting, setSetting } from './settings'
 import type {
@@ -90,6 +91,7 @@ export class Library {
   writeFileTags = $state(getSetting('writeFileTags') === '1')
   importArtwork = $state(getSetting('importArtwork') !== '0')
   hideStreaming = $state(getSetting('hideStreaming') !== '0')
+  hideDefaultTracks = $state(getSetting('hideDefaultTracks') !== '0')
   browserArtwork = $state<BrowserArtwork>(storedArtwork())
   hardwareGreen = $state(storedPlayer('hardwareGreen', DEFAULT_GREEN))
   importing = $state(false)
@@ -134,9 +136,14 @@ export class Library {
   missingTracks = $derived(this.tracks.filter((t) => t.missing))
   tagCounts = $derived.by(() => {
     const counts = new Map<string, number>()
-    for (const t of this.tracks) for (const id of t.myTags) counts.set(id, (counts.get(id) ?? 0) + 1)
+    for (const t of this.tracks) {
+      if (!this.shown(t)) continue
+      for (const id of t.myTags) counts.set(id, (counts.get(id) ?? 0) + 1)
+    }
     return counts
   })
+  /** Collection rows after the display filters. */
+  collectionSize = $derived(this.tracks.filter((track) => this.shown(track)).length)
 
   private haystack = $derived(
     new Map(
@@ -182,7 +189,7 @@ export class Library {
     return out
   })
 
-  sourceTracks = $derived(this.hideStreaming ? this.allSourceTracks.filter((t) => !t.streaming) : this.allSourceTracks)
+  sourceTracks = $derived(this.allSourceTracks.filter((track) => this.shown(track)))
 
   visible = $derived.by(() => {
     let list = this.sourceTracks
@@ -356,6 +363,19 @@ export class Library {
   setHideStreaming(on: boolean): void {
     this.hideStreaming = on
     setSetting('hideStreaming', on ? '1' : '0')
+  }
+
+  setHideDefaultTracks(on: boolean): void {
+    this.hideDefaultTracks = on
+    setSetting('hideDefaultTracks', on ? '1' : '0')
+  }
+
+  /** A row the browser lists. File-list rows that are not in the collection always stay. */
+  private shown(track: Track): boolean {
+    if (track.collected === false) return true
+    if (this.hideStreaming && track.streaming) return false
+    if (this.hideDefaultTracks && isDefaultRekordboxTrack(track.path)) return false
+    return true
   }
 
   setBrowserArtwork(style: BrowserArtwork): void {

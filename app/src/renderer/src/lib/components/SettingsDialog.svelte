@@ -20,6 +20,7 @@
     Wrench,
     X
   } from '@lucide/svelte'
+  import { accent, DEFAULT_ACCENT } from '$lib/accent.svelte'
   import { BPM_RANGES, MAX_CONCURRENCY } from '$lib/analysis.svelte'
   import { backupDate, KEEP_CHOICES } from '$lib/backups.svelte'
   import { getApp } from '$lib/context'
@@ -215,6 +216,34 @@
         {#if section === 'developer'}
           <div class="flex items-center gap-3 rounded-md px-2 py-2">
             <span class="min-w-0 flex-1">
+              <span class="block text-[12.5px] font-medium">Accent color</span>
+              <span class="mt-0.5 block text-[11px] leading-snug text-faint">
+                Buttons, highlights, and progress. The default is light blue.
+              </span>
+            </span>
+            <input
+              class="h-7 w-10 shrink-0 cursor-pointer overflow-hidden rounded-md border border-line bg-transparent p-0 [&::-webkit-color-swatch]:border-none [&::-webkit-color-swatch-wrapper]:p-0"
+              type="color"
+              aria-label="Accent color"
+              value={accent.color}
+              oninput={(e) => accent.set(e.currentTarget.value)}
+              onchange={(e) => accent.set(e.currentTarget.value)}
+            />
+            <span class="w-16 shrink-0 text-right font-mono text-[11px] text-muted uppercase tabular-nums">
+              {accent.color}
+            </span>
+            <button
+              class="grid size-6 shrink-0 place-items-center rounded text-faint hover:bg-hover hover:text-fg disabled:invisible"
+              disabled={accent.color === DEFAULT_ACCENT}
+              onclick={() => accent.reset()}
+              aria-label="Reset accent color"
+              title="Reset to default"
+            >
+              <RotateCcw class="size-3" />
+            </button>
+          </div>
+          <div class="flex items-center gap-3 rounded-md px-2 py-2">
+            <span class="min-w-0 flex-1">
               <span class="block text-[12.5px] font-medium">Fall blocks</span>
               <span class="mt-0.5 block text-[11px] leading-snug text-faint">
                 How many blocks a 3-band fall slopes across. 0 keeps the steps.
@@ -250,6 +279,12 @@
               'Leave tracks from streaming services out of the collection, playlists, histories and tags. They stay in rekordbox.',
               library.hideStreaming,
               () => library.setHideStreaming(!library.hideStreaming)
+            )}
+            {@render toggle(
+              'Hide default tracks',
+              'Leave the sampler presets rekordbox installs, such as Groove Circuit, out of the collection, playlists, histories and tags. Samples you record stay listed. The presets stay in rekordbox.',
+              library.hideDefaultTracks,
+              () => library.setHideDefaultTracks(!library.hideDefaultTracks)
             )}
           </section>
 

@@ -488,7 +488,7 @@
   >
     <LibraryIcon class="size-4 text-accent" />
     <span class="flex-1">Collection</span>
-    <span class="tabular text-[11px] text-faint">{library.tracks.length}</span>
+    <span class="tabular text-[11px] text-faint">{library.collectionSize}</span>
   </button>
 
   <div class="mt-4">
