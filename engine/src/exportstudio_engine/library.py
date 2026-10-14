@@ -18,6 +18,7 @@ from sqlalchemy import event, select
 from sqlalchemy.orm import aliased
 
 from . import anlz_build, artwork
+from .analysed import ANALYSED
 from . import tags as file_tags
 from . import waveform
 from .inspect import inspect_file, same_fingerprint
@@ -89,7 +90,6 @@ ANLZ_BACKUP_DIR = Path.home() / ".exportstudio" / "anlz-backup"
 NORMAL_PLAYLIST = 0
 STREAMING_URI = re.compile(r"^[a-z][a-z0-9+.-]+:", re.IGNORECASE)
 IMPORT_SUFFIXES = {".mp3", ".m4a", ".flac", ".wav", ".aif", ".aiff"}
-ANALYSED = 105
 PHRASE_TAG = waveform.PHRASE_TAG
 CAMELOT = re.compile(r"(1[0-2]|[1-9])[AB]")
 TONICS = ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]

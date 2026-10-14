@@ -14,6 +14,8 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..analysed import ANALYSED
+
 
 class PublicationError(RuntimeError):
     pass
@@ -171,7 +173,7 @@ def _job(volume: Path, bundle: ExportBundle) -> dict:
     for source in bundle.tracks:
         analysed = source.analysed
         if analysed <= 0 and source.analysis is not None and source.analysis.is_file():
-            analysed = 105
+            analysed = ANALYSED
         tracks.append(
             {
                 "id": _num(source.master_id),
