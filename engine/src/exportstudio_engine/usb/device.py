@@ -6,15 +6,7 @@ from datetime import date
 from pathlib import Path
 
 from . import onelib
-from .pdb import (
-    EntryRow,
-    NamedRow,
-    PdbLibrary,
-    PlaylistRow,
-    TrackRow,
-    build_pdb,
-    read_pdb,
-)
+from .pdb import NamedRow, PdbLibrary, read_pdb
 from .paths import pioneer_dir
 
 
@@ -168,74 +160,6 @@ def _intern(names: dict[str, int], name: str) -> int:
     if key not in names:
         names[key] = len(names) + 1
     return names[key]
-
-
-def to_pdb(library: DeviceLibrary, *, today: date | None = None) -> bytes:
-    artists: dict[str, int] = {}
-    albums: dict[tuple[str, int], int] = {}
-    genres: dict[str, int] = {}
-    labels: dict[str, int] = {}
-    keys: dict[str, int] = {}
-    tracks = []
-    for row in library.tracks:
-        artist_id = _intern(artists, row.artist)
-        album_key = (row.album, artist_id)
-        album_id = 0
-        if row.album:
-            if album_key not in albums:
-                albums[album_key] = len(albums) + 1
-            album_id = albums[album_key]
-        tracks.append(
-            TrackRow(
-                export_id=row.export_id,
-                title=row.title,
-                artist_id=artist_id,
-                album_id=album_id,
-                genre_id=_intern(genres, row.genre),
-                label_id=_intern(labels, row.label),
-                key_id=_intern(keys, row.key),
-                path=row.path,
-                filename=row.filename or Path(row.path).name,
-                analysis=row.analysis,
-                comment=row.comment,
-                bpm_x100=row.bpm_x100,
-                duration=row.duration,
-                bitrate=row.bitrate,
-                sample_rate=row.sample_rate,
-                bit_depth=row.bit_depth,
-                file_size=row.file_size,
-                file_type=row.file_type,
-                rating=row.rating,
-                color_id=row.color,
-                year=row.year,
-                track_no=row.track_no,
-                play_count=row.play_count,
-                hot_cue_auto=row.hot_cue_auto,
-                date_added=row.date_added,
-            )
-        )
-    entries = []
-    for playlist in library.playlists:
-        for seq, track_id in enumerate(playlist.track_ids, 1):
-            entries.append(EntryRow(seq, track_id, playlist.export_id))
-    return build_pdb(
-        PdbLibrary(
-            tracks=tracks,
-            artists=[NamedRow(i, name) for name, i in artists.items()],
-            albums=[NamedRow(i, name, artist_id) for (name, artist_id), i in albums.items()],
-            genres=[NamedRow(i, name) for name, i in genres.items()],
-            labels=[NamedRow(i, name) for name, i in labels.items()],
-            keys=[NamedRow(i, name) for name, i in keys.items()],
-            playlists=[
-                PlaylistRow(row.export_id, row.name, row.parent_id, row.seq, row.folder) for row in library.playlists
-            ],
-            entries=entries,
-            preserved=library.pdb_rows,
-            device_name=library.device_name or "USB",
-            background=library.background,
-        ),
-        today=today,
-    )
 
 
 def from_onelibrary(conn: sqlite3.Connection, root_name: str) -> DeviceLibrary:
