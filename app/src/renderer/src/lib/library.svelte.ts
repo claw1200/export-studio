@@ -37,7 +37,7 @@ function storedPlayer(key: string, fallback: string): string {
   return id && playerById(id) ? id : fallback
 }
 
-export interface ProbeRecord {
+interface ProbeRecord {
   size: number
   mtime: string | null
   missing: boolean
@@ -204,8 +204,8 @@ export class Library {
       const ranks = this.sort.key === 'compat' ? this.compatRanks(list) : undefined
       return sortTracks(list, this.sort, this.positions, ranks)
     }
-    if (this.source.type === 'collection' || this.source.type === 'tag') return newestFirst(list)
-    if (this.source.type === 'view' && this.viewById.get(this.source.id)?.type === 'tracks') return newestFirst(list)
+    const tracksView = this.source.type === 'view' && this.viewById.get(this.source.id)?.type === 'tracks'
+    if (this.source.type === 'collection' || this.source.type === 'tag' || tracksView) return newestFirst(list)
     return list
   })
 
@@ -429,7 +429,6 @@ export class Library {
     return () => this.trackListeners.delete(listener)
   }
 
-  /** Called with the tracks an import added to the collection. */
   onImported(listener: (tracks: Track[]) => void): () => void {
     this.importListeners.add(listener)
     return () => this.importListeners.delete(listener)
@@ -452,8 +451,7 @@ export class Library {
     const stats = cueStats(cues, track.phrase)
     if (stats.cueStars === track.cueStars && stats.cueCount === track.cueCount) return
     const fresh = { ...track, ...stats }
-    if (id.startsWith('usb:')) this.deviceTracks = this.deviceTracks.map((row) => (row.id === id ? fresh : row))
-    else this.applyTracks([fresh])
+    this.replaceTrack(id, fresh)
   }
 
   notify(message: string): void {
@@ -479,6 +477,11 @@ export class Library {
     }
   }
 
+  private replaceTrack(id: string, fresh: Track): void {
+    if (id.startsWith('usb:')) this.deviceTracks = this.deviceTracks.map((row) => (row.id === id ? fresh : row))
+    else this.applyTracks([fresh])
+  }
+
   private applyTracks(rows: Track[]): void {
     if (!rows.length) return
     const fresh = new Map(rows.map((r) => [r.id, r]))
@@ -491,8 +494,7 @@ export class Library {
     const track = this.byId.get(id)
     if (!track || track.missing === missing) return
     const fresh = { ...track, missing }
-    if (id.startsWith('usb:')) this.deviceTracks = this.deviceTracks.map((t) => (t.id === id ? fresh : t))
-    else this.applyTracks([fresh])
+    this.replaceTrack(id, fresh)
   }
 
   private applyPlaylistIds(id: string, ids: string[]): void {
