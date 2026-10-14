@@ -230,17 +230,10 @@ fn dir_name(name: &str) -> String {
     decompose(cut)
 }
 
-/// Makes a name safe for FAT32, which is what a DJ stick is formatted as.
-///
-/// The length limit is applied to the precomposed form, then the name is
-/// decomposed. macOS stores a precomposed path on exFAT as a decomposed
-/// directory entry, and `rename(2)` later returns ENOENT for that entry, so
-/// publication cannot move the file. Writing the decomposed name creates an
-/// entry that can be renamed, and it matches the bytes the database records.
-fn fat_safe(name: &str) -> String {
-    decompose(composed_fat(name))
-}
-
+/// Sanitizes a FAT name in precomposed form. Callers apply their own length
+/// limit, then [`decompose`]. macOS stores a precomposed path on exFAT as a
+/// decomposed directory entry, and `rename(2)` later returns ENOENT for that
+/// entry, so publication cannot move the file.
 fn composed_fat(name: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
     let mut out: String = name
@@ -270,7 +263,7 @@ fn decompose(name: String) -> String {
 /// while retaining the extension that identifies the audio format [OBS: the
 /// RBX-21 reporter's rekordbox export shortened the stem and kept `.aiff`].
 /// The byte limit is applied to the precomposed form; the result is then
-/// decomposed, same as [`fat_safe`].
+/// decomposed.
 fn fat_file_name(name: &str) -> String {
     let safe = composed_fat(name);
     if safe.len() <= FILE_NAME_MAX {
@@ -1759,6 +1752,10 @@ fn staged_files(root: &Path) -> std::io::Result<Vec<PathBuf>> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    fn fat_safe(name: &str) -> String {
+        decompose(composed_fat(name))
+    }
 
     #[test]
     fn analysis_paths_match_independent_rekordbox_exports() {
