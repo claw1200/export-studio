@@ -200,7 +200,7 @@ impl Snapshot {
         }
         Ok(())
     }
-    pub fn check_changes(&self, previous: Option<&Manifest>, next: &Self) -> Result<()> {
+    pub fn check_changes(&self, previous: Option<&Manifest>, next: &Self, overwrite: bool) -> Result<()> {
         for (label, current, target, baseline) in [
             (
                 "Device Library",
@@ -251,7 +251,10 @@ impl Snapshot {
                 }
             }
         }
-        if !self.cues.is_empty()
+        // Overwrite replaces the library's cues on purpose, including rows
+        // OneLibrary stored after the last sync.
+        if !overwrite
+            && !self.cues.is_empty()
             && previous
                 .and_then(|m| m.baseline.as_ref())
                 .is_some_and(|b| b.cues != self.cues)

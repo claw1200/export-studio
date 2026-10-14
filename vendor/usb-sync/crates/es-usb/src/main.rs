@@ -39,6 +39,9 @@ struct Job {
     my_tags: Vec<JobTag>,
     tracks: Vec<JobTrack>,
     playlists: Vec<JobPlaylist>,
+    /// Replace cue points and beat grids edited on the USB with the library's.
+    #[serde(default)]
+    overwrite: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -357,6 +360,7 @@ fn run(job_path: &Path) -> Result<(), JobError> {
     let options = ExportOptions {
         sync: Some(&sync),
         keep_unlisted: false,
+        overwrite: job.overwrite,
         ..Default::default()
     };
     let report = export_cancellable(

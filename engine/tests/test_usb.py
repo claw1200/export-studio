@@ -8,7 +8,7 @@ from datetime import date
 from pathlib import Path
 
 from exportstudio_engine.usb.anlzio import ppth_path
-from exportstudio_engine.usb.browse import detail, tracks
+from exportstudio_engine.usb.browse import detail, libraries, tracks
 from exportstudio_engine.usb.device import read_device
 from exportstudio_engine.usb.paths import analysis_dir
 from exportstudio_engine.usb.pdb import (
@@ -22,14 +22,23 @@ from exportstudio_engine.usb.pdb import (
     table_page,
 )
 from exportstudio_engine.usb.selection import recorded_playlist_ids
+from exportstudio_engine.usb.importing import (
+    candidate,
+    copy_new,
+    destination,
+    existing_copy,
+    fat_safe,
+    numbered,
+)
 from exportstudio_engine.usb.sync import (
     CueSource,
     ExportBundle,
     SourcePlaylist,
     SourceTrack,
+    _job,
     sync_volume,
 )
-from exportstudio_engine.usb.volumes import eject_volume, list_volumes
+from exportstudio_engine.usb.volumes import eject_volume, format_volume, list_volumes
 
 
 class ParseTests(unittest.TestCase):
@@ -266,6 +275,12 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(len(again.tracks), 1)
             self.assertEqual(again.tracks[0].export_id, first)
             self.assertEqual(again.tracks[0].title, "Song")
+            libs = libraries(volume)
+            self.assertEqual([row["id"] for row in libs], ["device", "one"])
+            self.assertEqual(
+                [playlist["name"] for lib in libs for playlist in lib["playlists"]],
+                ["Set", "Set"],
+            )
 
 
 class SelectionTests(unittest.TestCase):
@@ -313,6 +328,73 @@ class SelectionTests(unittest.TestCase):
             )
             self.assertEqual(recorded_playlist_ids(volume, ["20"], 8), [])
             self.assertEqual(recorded_playlist_ids(volume / "empty", ["20"], 9), [])
+
+
+class OverwriteJobTests(unittest.TestCase):
+    def test_overwrite_is_optional_on_the_export_job(self) -> None:
+        bundle = ExportBundle(
+            playlists=[SourcePlaylist("10", "Set", None, 1, False, ["1"])],
+            tracks=[
+                SourceTrack("1", "Song", "DJ", "Album", Path("/song.mp3"), None, "song.mp3"),
+            ],
+        )
+        self.assertFalse(_job(Path("/Volumes/USB"), bundle)["overwrite"])
+        self.assertTrue(_job(Path("/Volumes/USB"), bundle, overwrite=True)["overwrite"])
+
+
+class ImportCopyTests(unittest.TestCase):
+    def test_names_follow_the_vendor_import_layout(self) -> None:
+        self.assertEqual(
+            destination(Path("/Users/dj/Music")),
+            Path("/Users/dj/Music/PioneerDJ/Imported from Device"),
+        )
+        self.assertEqual(fat_safe("A/B:C*D?E"), "A_B_C_D_E")
+        self.assertEqual(numbered("song.mp3", 1), "song-1.mp3")
+        self.assertEqual(
+            candidate(Path("/music"), "DJ", "", "song.mp3"),
+            Path("/music/Contents/DJ/UnknownAlbum/song.mp3"),
+        )
+
+    def test_an_identical_copy_is_reused_and_a_different_file_is_kept(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            source = root / "song.mp3"
+            source.write_bytes(b"audio-v1")
+            wanted = candidate(root / "imported", "DJ", "Album", "song.mp3")
+            first = copy_new(source, wanted)
+            self.assertEqual(first, wanted)
+            self.assertEqual(first.read_bytes(), b"audio-v1")
+            self.assertEqual(existing_copy(source, wanted), first)
+            other = root / "other.mp3"
+            other.write_bytes(b"audio-v2")
+            second = copy_new(other, wanted)
+            self.assertEqual(second.name, "song-1.mp3")
+            self.assertEqual(wanted.read_bytes(), b"audio-v1")
+            self.assertEqual(existing_copy(other, wanted), second)
+
+
+class FormatTests(unittest.TestCase):
+    def test_only_a_listed_removable_volume_is_formatted(self) -> None:
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as raw:
+            target = Path(raw) / "Stick"
+            target.mkdir()
+            listed = [{"path": str(target), "ejectable": False, "name": "Stick"}]
+            with self.assertRaises(ValueError):
+                format_volume(str(target), listed)
+            listed = [{"path": str(target), "ejectable": True, "name": "My Stick"}]
+            info = {"RemovableMedia": True, "Ejectable": True, "Internal": False, "DeviceIdentifier": "disk9s1"}
+            with (
+                patch("exportstudio_engine.usb.volumes._disk_info", return_value=info),
+                patch("exportstudio_engine.usb.volumes.subprocess.run") as run,
+            ):
+                format_volume(str(target), listed)
+            run.assert_called_once()
+            command = run.call_args.args[0]
+            self.assertEqual(command[:3], ["diskutil", "eraseVolume", "FAT32"])
+            self.assertEqual(command[3], "MY_STICK")
+            self.assertEqual(command[4], "disk9s1")
 
 
 if __name__ == "__main__":

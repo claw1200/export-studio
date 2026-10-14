@@ -19,6 +19,7 @@ import type {
   Track,
   TrackEdit,
   TreeItem,
+  UsbImportResult,
   View,
   Volume
 } from './types'
@@ -777,7 +778,7 @@ export class Library {
     return this.devicePlaylists[volumeId]
   }
 
-  async syncTo(volumeId: string, playlistIds: string[]): Promise<boolean> {
+  async syncTo(volumeId: string, playlistIds: string[], overwrite = false): Promise<boolean> {
     if (this.syncing) return false
     if (!playlistIds.length) {
       this.syncError = 'Select a playlist to sync'
@@ -787,7 +788,7 @@ export class Library {
     this.syncError = null
     this.syncProgress = { phase: 'reading' }
     try {
-      await api.usbSync(volumeId, playlistIds)
+      await api.usbSync(volumeId, playlistIds, overwrite)
       const refreshPlaylists = volumeId in this.devicePlaylists
       const playlists = { ...this.devicePlaylists }
       delete playlists[volumeId]
@@ -795,6 +796,49 @@ export class Library {
       await this.refreshDevices()
       if (refreshPlaylists) await this.devicePlaylistTree(volumeId)
       if (this.source.type === 'device' && this.source.volumeId === volumeId) await this.setSource(this.source)
+      return true
+    } catch (e) {
+      this.syncError = (e as Error).message
+      return false
+    } finally {
+      this.syncing = false
+    }
+  }
+
+  async importDevice(volumeId: string): Promise<UsbImportResult | null> {
+    if (this.syncing) return null
+    if (!this.writable) {
+      this.syncError = 'Unlock editing to import tracks'
+      this.notify(this.syncError)
+      return null
+    }
+    this.syncing = true
+    this.syncError = null
+    this.syncProgress = { phase: 'import' }
+    try {
+      const result = await api.usbImport(volumeId)
+      await this.refreshContents()
+      return result
+    } catch (e) {
+      this.syncError = (e as Error).message
+      return null
+    } finally {
+      this.syncing = false
+    }
+  }
+
+  async formatDevice(volumeId: string): Promise<boolean> {
+    if (this.syncing) return false
+    this.syncing = true
+    this.syncError = null
+    this.syncProgress = { phase: 'format' }
+    try {
+      await api.usbFormat(volumeId)
+      const playlists = { ...this.devicePlaylists }
+      delete playlists[volumeId]
+      this.devicePlaylists = playlists
+      await this.refreshDevices()
+      if (this.source.type === 'device' && this.source.volumeId === volumeId) await this.setSource({ type: 'collection' })
       return true
     } catch (e) {
       this.syncError = (e as Error).message

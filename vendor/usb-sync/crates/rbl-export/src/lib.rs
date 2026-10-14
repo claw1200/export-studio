@@ -895,6 +895,11 @@ pub struct ExportOptions<'a> {
     /// their place, instead of being taken off. Export Playlist and Export
     /// Track add to a device as rekordbox's do; a SYNC leaves this off.
     pub keep_unlisted: bool,
+    /// Replace cue points and beat grids on the USB with this library's.
+    /// A sync normally stops when those changed on the device since the last
+    /// sync. With this set, those device edits are removed and the library's
+    /// cues and grids are written.
+    pub overwrite: bool,
 }
 
 /// Export with optional conversion of audio outside the common CDJ formats.
@@ -942,7 +947,7 @@ fn export_cancellable_inner(
     let _inspection = incremental::Inspection::new();
     let started = std::time::Instant::now();
     let requested_tracks = tracks;
-    let &ExportOptions { defaults, sync, compatibility, root, keep_unlisted: _, settings_files, cache, expected_volume, verify_all } = options;
+    let &ExportOptions { defaults, sync, compatibility, root, keep_unlisted: _, settings_files, cache, expected_volume, verify_all, overwrite } = options;
     if let Some(volume) = expected_volume { volume.check(destination)?; }
     if destination.exists() && !destination.is_dir() {
         return Err(ExportError::NotADirectory(destination.to_owned()));
@@ -1528,7 +1533,9 @@ fn export_cancellable_inner(
             }).collect::<std::io::Result<Vec<_>>>()?)
         };
         let analysis = exported_analysis.as_deref().unwrap_or(&track.analysis);
-        if let Some(c) = carried.filter(|c| !c.analysis_extensions.iter().all(|e| trusted.contains(&format!("{}/ANLZ0000.{e}", c.anlz_dir.trim_start_matches('/'))))) {
+        if let Some(c) = carried.filter(|c| {
+            !overwrite && !c.analysis_extensions.iter().all(|e| trusted.contains(&format!("{}/ANLZ0000.{e}", c.anlz_dir.trim_start_matches('/'))))
+        }) {
             snapshot::check_analysis(destination, c, analysis)?;
         }
         let mut analysis_hash: u64 = analysis_reused.map_or(0, |c| c.analysis);
@@ -1870,7 +1877,7 @@ fn export_cancellable_inner(
     let named: Vec<String> = recorded.iter().map(|track| track.audio.clone()).collect();
     let after = snapshot::Snapshot::read_at(publication.stage(), root_name)?;
     before.check_retained_history(&after)?;
-    before.check_changes(previous.as_ref(), &after)?;
+    before.check_changes(previous.as_ref(), &after, overwrite)?;
     progress(&ExportProgress { stage: "verifying", done: 0, total: 0, title: String::new(), reused: report.reused, copied: report.tracks_added + report.tracks_updated, converted: report.converted, ..Default::default() });
     let verified_reused: BTreeSet<String> = trusted.iter().filter(|p| !publication.stage().join(p).is_file()).cloned().collect();
     let verified = verification::verify_staged_incremental(publication.stage(), destination, &after, &absent_audio, &verified_reused)?;

@@ -96,6 +96,13 @@ export interface TreeItem {
   date?: string
 }
 
+/** One database on a USB, with the playlists it actually holds. */
+export interface DeviceLibraryView {
+  id: string
+  name: string
+  playlists: TreeItem[]
+}
+
 export interface Cue {
   id: string
   kind: 'hot' | 'memory'
@@ -171,6 +178,18 @@ export interface Volume {
   hasLibrary: boolean
   ejectable: boolean
   rootName: string | null
+  fileSystem: string
+  bytesTotal: number
+  bytesUsed: number
+  bytesFree: number
+}
+
+export interface UsbImportResult {
+  playlists: number
+  tracks: number
+  copied: number
+  reused: number
+  failed: { title: string; error: string }[]
 }
 
 export interface SyncProgress {

@@ -21,6 +21,7 @@
     ListFilter,
     Copy,
     Eject,
+    FolderSync,
     LoaderCircle
   } from '@lucide/svelte'
   import { getApp } from '$lib/context'
@@ -203,7 +204,7 @@
 
   let menu = $state<MenuRequest | null>(null)
   let deleting = $state<TreeNode | null>(null)
-  let syncing = $state<TreeNode | null>(null)
+  let syncing = $state<{ playlistId: string; volumeId: string } | null>(null)
   let viewDialog = $state<View | 'new' | null>(null)
   let deletingView = $state<View | null>(null)
 
@@ -254,11 +255,8 @@
         ...(isFolder ? [...createItems(node.id), SEPARATOR] : []),
         {
           label: 'Sync to…',
-          icon: HardDrive,
-          onselect: () => {
-            void library.refreshDevices()
-            syncing = node
-          }
+          icon: FolderSync,
+          onselect: () => openSync(node.id, '')
         },
         { label: 'Rename', icon: Pencil, disabled: locked, onselect: () => (library.renamingId = node.id) },
         { label: 'Delete', icon: Trash2, danger: true, disabled: locked, onselect: () => (deleting = node) },
@@ -296,6 +294,11 @@
       library.renamingId = null
     }
   }
+  function openSync(playlistId: string, volumeId: string): void {
+    void library.refreshDevices()
+    syncing = { playlistId, volumeId }
+  }
+
   async function toggleDevice(volumeId: string, hasLibrary: boolean): Promise<void> {
     const key = `device:${volumeId}`
     if (expanded.has(key)) {
@@ -526,6 +529,15 @@
               <span class="text-[11px] text-faint">Empty</span>
             {/if}
           </button>
+          <button
+            class="grid size-6 shrink-0 place-items-center rounded text-faint hover:bg-hover hover:text-fg disabled:opacity-40"
+            aria-label="Sync {volume.name}"
+            title={library.syncing ? 'Wait for the sync to finish' : `Sync ${volume.name}`}
+            disabled={library.syncing}
+            onclick={() => openSync('', volume.id)}
+          >
+            <FolderSync class="size-3.5" />
+          </button>
           {#if volume.ejectable}
             <button
               class="grid size-6 shrink-0 place-items-center rounded text-faint hover:bg-hover hover:text-fg disabled:opacity-40"
@@ -617,8 +629,8 @@
 {/if}
 
 {#if syncing}
-  {@const node = syncing}
-  <SyncDialog playlistId={node.id} onclose={() => (syncing = null)} />
+  {@const target = syncing}
+  <SyncDialog playlistId={target.playlistId} volumeId={target.volumeId} onclose={() => (syncing = null)} />
 {/if}
 
 {#if viewDialog}

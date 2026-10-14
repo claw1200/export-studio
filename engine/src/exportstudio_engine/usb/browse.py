@@ -4,9 +4,11 @@ from pathlib import Path
 
 from .. import waveform
 from ..library import stored_file_type
-from .device import DeviceLibrary, DeviceTrack, read_device
+from . import onelib
+from .device import DeviceLibrary, DevicePlaylist, DeviceTrack, from_onelibrary, from_pdb, read_device
 from .ids import parse_track_key, track_key
 from .paths import pioneer_dir, volume_path
+from .pdb import read_pdb
 
 _cache: dict[str, tuple] = {}
 
@@ -106,8 +108,7 @@ def track_row(volume: Path, track: DeviceTrack) -> dict:
     }
 
 
-def playlists(volume: Path) -> list[dict]:
-    library = load(volume)
+def _playlist_nodes(playlists: list[DevicePlaylist]) -> list[dict]:
     return [
         {
             "id": str(row.export_id),
@@ -117,8 +118,46 @@ def playlists(volume: Path) -> list[dict]:
             "kind": "folder" if row.folder else "playlist",
             "count": None if row.folder else len(row.track_ids),
         }
-        for row in library.playlists
+        for row in playlists
     ]
+
+
+def playlists(volume: Path) -> list[dict]:
+    return _playlist_nodes(load(volume).playlists)
+
+
+def libraries(volume: Path) -> list[dict]:
+    """Each library on the stick, Device Library then OneLibrary, with its own playlist tree."""
+    volume = volume.resolve()
+    if not volume.is_dir():
+        raise FileNotFoundError(f"Volume is not mounted: {volume}")
+    root, root_name = pioneer_dir(volume)
+    found: list[dict] = []
+    pdb_path = root / "rekordbox" / "export.pdb"
+    plus = root / "rekordbox" / "exportLibrary.db"
+    if pdb_path.is_file():
+        found.append(
+            {
+                "id": "device",
+                "name": "Device Library",
+                "playlists": _playlist_nodes(from_pdb(read_pdb(pdb_path.read_bytes()), root_name).playlists),
+            }
+        )
+    if plus.is_file():
+        conn = onelib.connect(plus)
+        try:
+            found.append(
+                {
+                    "id": "one",
+                    "name": "OneLibrary",
+                    "playlists": _playlist_nodes(from_onelibrary(conn, root_name).playlists),
+                }
+            )
+        finally:
+            conn.close()
+    if not found:
+        raise FileNotFoundError("This volume has no rekordbox library")
+    return found
 
 
 def tracks(volume: Path, playlist_id: str | None = None) -> list[dict]:

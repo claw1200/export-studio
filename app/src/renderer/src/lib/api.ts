@@ -16,7 +16,9 @@ import type {
   TrackPreview,
   TrackEdit,
   TrackUpdate,
+  DeviceLibraryView,
   TreeItem,
+  UsbImportResult,
   Volume
 } from './types'
 
@@ -66,10 +68,13 @@ export const api = {
   usbList: () => call<Volume[]>('usb.list'),
   usbEject: (volumeId: string) => call<void>('usb.eject', { volumeId }),
   usbPlaylists: (volumeId: string) => call<TreeItem[]>('usb.playlists', { volumeId }),
+  usbLibraries: (volumeId: string) => call<DeviceLibraryView[]>('usb.libraries', { volumeId }),
   usbSelection: (volumeId: string) => call<{ playlistIds: string[] }>('usb.selection', { volumeId }),
   usbTracks: (volumeId: string, playlistId: string | null) => call<Track[]>('usb.tracks', { volumeId, playlistId }),
-  usbSync: (volumeId: string, playlistIds: string[]) =>
-    call<{ volumeId: string; tracks: number; playlists: number }>('usb.sync', { volumeId, playlistIds }),
+  usbSync: (volumeId: string, playlistIds: string[], overwrite = false) =>
+    call<{ volumeId: string; tracks: number; playlists: number }>('usb.sync', { volumeId, playlistIds, overwrite }),
+  usbImport: (volumeId: string) => call<UsbImportResult>('usb.import', { volumeId }),
+  usbFormat: (volumeId: string) => call<void>('usb.format', { volumeId }),
   backupList: () => call<Backup[]>('backup.list'),
   backupCreate: () => call<Backup>('backup.create'),
   backupRestore: (id: string) => call<RestoreResult>('backup.restore', { id }),

@@ -168,7 +168,7 @@ def _analysis_files(analysis: Path | None) -> list[str]:
     return found
 
 
-def _job(volume: Path, bundle: ExportBundle) -> dict:
+def _job(volume: Path, bundle: ExportBundle, *, overwrite: bool = False) -> dict:
     tracks = []
     for source in bundle.tracks:
         analysed = source.analysed
@@ -261,6 +261,7 @@ def _job(volume: Path, bundle: ExportBundle) -> dict:
         "myTags": tags,
         "tracks": tracks,
         "playlists": playlists,
+        "overwrite": bool(overwrite),
     }
 
 
@@ -272,7 +273,7 @@ def _raise_export(kind: str, message: str) -> None:
     raise PublicationError(message)
 
 
-def sync_volume(volume: Path, bundle: ExportBundle, *, on_progress=None) -> dict:
+def sync_volume(volume: Path, bundle: ExportBundle, *, on_progress=None, overwrite: bool = False) -> dict:
     """Copy the selected playlists onto `volume` and publish both device databases."""
     from . import browse
 
@@ -289,7 +290,7 @@ def sync_volume(volume: Path, bundle: ExportBundle, *, on_progress=None) -> dict
     job_file = tempfile.NamedTemporaryFile(prefix="exportstudio-usb-", suffix=".json", delete=False)
     job_path = Path(job_file.name)
     try:
-        job_file.write(json.dumps(_job(volume, bundle)).encode())
+        job_file.write(json.dumps(_job(volume, bundle, overwrite=overwrite)).encode())
         job_file.close()
         proc = subprocess.Popen(
             [str(binary), str(job_path)],

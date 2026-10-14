@@ -12,8 +12,9 @@ from .backup import Backups
 from .library import WRITE_BLOCKED, Library, _rekordbox_db_path
 from .usb import browse
 from .usb.selection import library_db_id, recorded_playlist_ids
+from .usb.importing import import_device
 from .usb.sync import bundle_from_library, sync_volume
-from .usb.volumes import eject_volume, list_volumes
+from .usb.volumes import eject_volume, format_volume, list_volumes
 
 log = logging.getLogger("exportstudio_engine")
 
@@ -82,10 +83,13 @@ class Engine:
             "usb.list": lambda: list_volumes(),
             "usb.eject": lambda volumeId: self.eject(volumeId),
             "usb.playlists": lambda volumeId: browse.playlists(Path(volumeId)),
+            "usb.libraries": lambda volumeId: browse.libraries(Path(volumeId)),
             "usb.selection": lambda volumeId: self.selection(volumeId),
             "usb.tracks": lambda volumeId, playlistId=None: browse.tracks(Path(volumeId), playlistId),
             "usb.detail": lambda id: browse.detail(id),
-            "usb.sync": lambda volumeId, playlistIds: self.sync(volumeId, playlistIds),
+            "usb.sync": lambda volumeId, playlistIds, overwrite=False: self.sync(volumeId, playlistIds, overwrite),
+            "usb.import": lambda volumeId: self.import_usb(volumeId),
+            "usb.format": lambda volumeId: self.format(volumeId),
             "backup.list": lambda: self.backups.list_backups(self._source(required=False)),
             "backup.create": lambda: self.back_up("manual"),
             "backup.restore": lambda id: self.restore(id),
@@ -194,19 +198,38 @@ class Engine:
         ids = [row["id"] for row in self.lib.playlists()]
         return {"playlistIds": recorded_playlist_ids(Path(volumeId), ids, library_db_id(self.lib))}
 
-    def sync(self, volumeId: str, playlistIds: list[str]) -> dict:
+    def _listed_volume(self, volumeId: str) -> Path:
         volume = Path(volumeId).resolve()
         allowed = {Path(item["path"]).resolve() for item in list_volumes()}
         if volume not in allowed:
             raise ValueError("Choose a volume from the device list")
+        return volume
+
+    def sync(self, volumeId: str, playlistIds: list[str], overwrite: bool = False) -> dict:
+        volume = self._listed_volume(volumeId)
         bundle = bundle_from_library(self.lib, list(playlistIds))
 
         def progress(event: dict) -> None:
             emit("usb.progress", event)
 
-        result = sync_volume(volume, bundle, on_progress=progress)
+        result = sync_volume(volume, bundle, on_progress=progress, overwrite=bool(overwrite))
         emit("usb.volumes", {"volumes": list_volumes()})
         return result
+
+    def import_usb(self, volumeId: str) -> dict:
+        volume = self._listed_volume(volumeId)
+
+        def progress(event: dict) -> None:
+            emit("usb.progress", event)
+
+        result = import_device(self.lib, volume, on_progress=progress)
+        emit("usb.progress", {"phase": "done"})
+        return result
+
+    def format(self, volumeId: str) -> None:
+        format_volume(volumeId)
+        browse.invalidate(Path(volumeId))
+        emit("usb.volumes", {"volumes": list_volumes()})
 
     def eject(self, volumeId: str) -> None:
         eject_volume(volumeId)

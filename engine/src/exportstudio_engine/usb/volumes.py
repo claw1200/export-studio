@@ -1,17 +1,36 @@
 import plistlib
+import shutil
 import subprocess
 from pathlib import Path
 
 from .paths import ROOT_NAMES, has_library
 
 
-def _ejectable(path: Path) -> bool:
+def _disk_info(path: Path) -> dict:
     try:
         raw = subprocess.check_output(["diskutil", "info", "-plist", str(path)], timeout=3, stderr=subprocess.DEVNULL)
         info = plistlib.loads(raw)
     except (OSError, subprocess.SubprocessError, plistlib.InvalidFileException):
-        return False
+        return {}
+    return info if isinstance(info, dict) else {}
+
+
+def _ejectable(info: dict) -> bool:
     return bool(info.get("RemovableMedia") or info.get("Ejectable")) and not info.get("Internal")
+
+
+def _usage(path: Path) -> tuple[int, int, int]:
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError:
+        return 0, 0, 0
+    return int(usage.total), int(usage.used), int(usage.free)
+
+
+def _fat_label(name: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() else "_" for ch in name.upper())
+    cleaned = cleaned.strip("_") or "USB"
+    return cleaned[:11]
 
 
 def _root_name(volume: Path) -> str | None:
@@ -43,9 +62,14 @@ def list_volumes(root: Path | None = None) -> list[dict]:
         if real and dev == boot:
             continue
         library = has_library(path)
-        ejectable = _ejectable(path) if real else False
+        info = _disk_info(path) if real else {}
+        ejectable = _ejectable(info) if real else False
         if real and not library and not ejectable:
             continue
+        total, used, free = _usage(path)
+        file_system = ""
+        if real:
+            file_system = str(info.get("FilesystemName") or info.get("FilesystemType") or "")
         volumes.append(
             {
                 "id": str(path),
@@ -54,6 +78,10 @@ def list_volumes(root: Path | None = None) -> list[dict]:
                 "hasLibrary": library,
                 "ejectable": ejectable,
                 "rootName": _root_name(path),
+                "fileSystem": file_system,
+                "bytesTotal": total,
+                "bytesUsed": used,
+                "bytesFree": free,
             }
         )
     return volumes
@@ -79,3 +107,31 @@ def eject_volume(volume_id: str, volumes: list[dict] | None = None) -> None:
         raise RuntimeError(detail or "Couldn’t eject the device") from err
     except subprocess.TimeoutExpired as err:
         raise RuntimeError("Ejecting the device took too long") from err
+
+
+def format_volume(volume_id: str, volumes: list[dict] | None = None) -> None:
+    """Erase a removable volume and format it FAT32. `volumes` stands in for the live list in tests."""
+    volume = Path(volume_id).resolve()
+    listed = list_volumes() if volumes is None else volumes
+    match = next((item for item in listed if Path(item["path"]).resolve() == volume), None)
+    if match is None or not match.get("ejectable"):
+        raise ValueError("That device can’t be formatted")
+    info = _disk_info(volume)
+    if not _ejectable(info):
+        raise ValueError("That device can’t be formatted")
+    device = str(info.get("DeviceIdentifier") or "")
+    if not device:
+        raise RuntimeError("Couldn’t identify the device")
+    try:
+        subprocess.run(
+            ["diskutil", "eraseVolume", "FAT32", _fat_label(str(match.get("name") or volume.name)), device],
+            check=True,
+            timeout=120,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as err:
+        detail = (err.stderr or err.stdout or "").strip()
+        raise RuntimeError(detail or "Couldn’t format the device") from err
+    except subprocess.TimeoutExpired as err:
+        raise RuntimeError("Formatting the device took too long") from err
