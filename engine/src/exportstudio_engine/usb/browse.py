@@ -150,26 +150,19 @@ def _anlz(volume: Path, relative: str) -> dict[str, waveform.Tags | None]:
 
 
 def _cues(track: DeviceTrack, ext: waveform.Tags | None) -> list[dict]:
-    cues = []
-    for index, cue in enumerate(track.cues, 1):
-        cues.append(
-            {
-                "id": f"{track.export_id}:{index}",
-                "kind": "hot" if cue.kind and cue.kind > 0 else "memory",
-                "slot": cue.kind or 0,
-                "start": cue.start_ms,
-                "end": cue.end_ms,
-                "color": cue.color,
-                "colorIndex": cue.color_index,
-                "comment": cue.comment,
-            }
+    stored = [
+        waveform.browser_cue(
+            f"{track.export_id}:{index}",
+            cue.kind,
+            cue.start_ms,
+            cue.end_ms,
+            cue.color,
+            cue.color_index,
+            cue.comment,
         )
-    colors = waveform.hot_cue_colors(ext)
-    for cue in cues:
-        if cue["kind"] == "hot":
-            cue["rgb"] = colors.get((cue["slot"], cue["start"]))
-    cues.sort(key=lambda cue: (cue["kind"] != "hot", cue["slot"], cue["start"]))
-    return cues
+        for index, cue in enumerate(track.cues, 1)
+    ]
+    return waveform.paint_browser_cues(stored, waveform.hot_cue_colors(ext))
 
 
 def _blank_preview(key: str) -> dict:

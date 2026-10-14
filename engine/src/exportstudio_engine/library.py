@@ -758,26 +758,12 @@ class Library:
         return rows
 
     def _cues(self, content: t.DjmdContent, ext: waveform.Tags | None) -> list[dict]:
-        cues = []
-        for q in content.Cues:
-            if q.rb_local_deleted:
-                continue
-            cues.append({
-                "id": q.ID,
-                "kind": "hot" if q.Kind and q.Kind > 0 else "memory",
-                "slot": q.Kind or 0,
-                "start": q.InMsec or 0,
-                "end": q.OutMsec if q.OutMsec is not None and q.OutMsec >= 0 else None,
-                "color": q.Color if q.Color is not None and q.Color >= 0 else None,
-                "colorIndex": q.ColorTableIndex,
-                "comment": q.Comment or "",
-            })
-        anlz_colors = waveform.hot_cue_colors(ext)
-        for c in cues:
-            if c["kind"] == "hot":
-                c["rgb"] = anlz_colors.get((c["slot"], c["start"]))
-        cues.sort(key=lambda c: (c["kind"] != "hot", c["slot"], c["start"]))
-        return cues
+        stored = [
+            waveform.browser_cue(q.ID, q.Kind, q.InMsec, q.OutMsec, q.Color, q.ColorTableIndex, q.Comment)
+            for q in content.Cues
+            if not q.rb_local_deleted
+        ]
+        return waveform.paint_browser_cues(stored, waveform.hot_cue_colors(ext))
 
     def set_hot_cue(self, content_id: str, kind: int, msec: int) -> list[dict]:
         if kind not in HOT_CUE_KINDS:
