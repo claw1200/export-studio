@@ -78,8 +78,7 @@ def stream_fields(path: Path, info: dict | None = None) -> dict:
 CLOUD_LIBRARY_SYNC = "100000"
 HIDDEN_PLAYLISTS = {CLOUD_LIBRARY_SYNC}
 WRITE_BLOCKED = "Close rekordbox before editing the library"
-LOOP_KIND = 4
-HOT_CUE_KINDS = tuple(kind for kind in range(1, 10) if kind != LOOP_KIND)
+HOT_CUE_KINDS = tuple(sorted(waveform.HOT_SLOTS))
 HOT_CUE_PALETTE_SIZE = 62
 CDJ_FRAMES_PER_SECOND = 150
 FOLDER = 1

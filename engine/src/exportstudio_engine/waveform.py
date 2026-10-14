@@ -121,17 +121,15 @@ def has_phrase(ext: Tags | None) -> bool:
     return bool(ext and ext.get(PHRASE_TAG))
 
 
-def _hot_slots() -> set[int]:
-    return {kind for kind in range(1, 10) if kind != 4}
+HOT_SLOTS = frozenset(kind for kind in range(1, 10) if kind != 4)
 
 
 def cue_marks(kinds) -> tuple[bool, bool]:
     """Whether any memory cue (kind 0) or hot cue is present. One of each, at most."""
     memory = hot = False
-    hot_kinds = _hot_slots()
     for kind in kinds:
         slot = int(kind or 0)
-        if slot in hot_kinds:
+        if slot in HOT_SLOTS:
             hot = True
         elif slot == 0:
             memory = True
@@ -146,10 +144,9 @@ def cue_sort_facts(kinds, phrase: bool) -> dict:
     A loop (kind 4) is neither. Phrase analysis adds a star and no cue.
     """
     memory = hot = 0
-    hot_kinds = _hot_slots()
     for kind in kinds:
         slot = int(kind or 0)
-        if slot in hot_kinds:
+        if slot in HOT_SLOTS:
             hot += 1
         elif slot == 0:
             memory += 1
