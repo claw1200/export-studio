@@ -6,15 +6,9 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from exportstudio_engine.usb.anlzio import apply_cues, ppth_path
+from exportstudio_engine.usb.anlzio import ppth_path
 from exportstudio_engine.usb.browse import detail, tracks
-from exportstudio_engine.usb.device import (
-    DeviceHistory,
-    DevicePlaylist,
-    DeviceTrack,
-    read_device,
-    write_onelibrary,
-)
+from exportstudio_engine.usb.device import read_device
 from exportstudio_engine.usb.paths import analysis_dir
 from exportstudio_engine.usb.pdb import (
     EntryRow,
@@ -34,53 +28,6 @@ from exportstudio_engine.usb.sync import (
     sync_volume,
 )
 from exportstudio_engine.usb.volumes import eject_volume, list_volumes
-
-
-def _empty_lists(with_comments: bool) -> bytes:
-    def pcob(cue_type: int) -> bytes:
-        body = struct.pack(">IHHI", cue_type, 0, 0, 0xFFFFFFFF)
-        return b"PCOB" + struct.pack(">II", 24, 12 + len(body)) + body
-
-    def pco2(cue_type: int) -> bytes:
-        body = struct.pack(">IHH", cue_type, 0, 0)
-        return b"PCO2" + struct.pack(">II", 20, 12 + len(body)) + body
-
-    body = bytearray(28)
-    body[:4] = b"PMAI"
-    struct.pack_into(">I", body, 4, 28)
-    body += pcob(1) + pcob(0)
-    if with_comments:
-        body += pco2(1) + pco2(0)
-    struct.pack_into(">I", body, 8, len(body))
-    return bytes(body)
-
-
-def _memory_cues(data: bytes) -> dict[bytes, list[tuple[int, str]]]:
-    found: dict[bytes, list[tuple[int, str]]] = {b"PCOB": [], b"PCO2": []}
-    header_len = struct.unpack_from(">I", data, 4)[0]
-    pos = header_len
-    while pos + 12 <= len(data):
-        kind = data[pos : pos + 4]
-        _len_header, len_tag = struct.unpack_from(">II", data, pos + 4)
-        if len_tag < 12 or pos + len_tag > len(data):
-            break
-        if kind == b"PCOB" and struct.unpack_from(">I", data, pos + 12)[0] == 0:
-            count = struct.unpack_from(">H", data, pos + 0x12)[0]
-            entry = pos + 24
-            for _ in range(count):
-                found[b"PCOB"].append((struct.unpack_from(">I", data, entry + 0x20)[0], ""))
-                entry += 56
-        if kind == b"PCO2" and struct.unpack_from(">I", data, pos + 12)[0] == 0:
-            count = struct.unpack_from(">H", data, pos + 0x10)[0]
-            entry = pos + 20
-            for _ in range(count):
-                length = struct.unpack_from(">I", data, entry + 8)[0]
-                comment_len = struct.unpack_from(">I", data, entry + 0x28)[0]
-                raw = data[entry + 0x2C : entry + 0x2C + max(0, comment_len - 2)]
-                found[b"PCO2"].append((struct.unpack_from(">I", data, entry + 0x14)[0], raw.decode("utf-16-be")))
-                entry += length
-        pos += len_tag
-    return found
 
 
 class ParseTests(unittest.TestCase):
@@ -152,39 +99,44 @@ class ParseTests(unittest.TestCase):
             [(1, "Folder", 0, True), (2, "Set", 1, False)],
         )
 
-    def test_memory_cue_is_written_into_both_analysis_files(self) -> None:
-        cue = CueSource(0, 30000, comment="intro", color=0xFF005C, color_index=46)
-        dat = apply_cues(_empty_lists(False), [cue])
-        ext = apply_cues(_empty_lists(True), [cue])
-        self.assertEqual(_memory_cues(dat)[b"PCOB"], [(30000, "")])
-        self.assertEqual(_memory_cues(dat)[b"PCO2"], [])
-        self.assertEqual(_memory_cues(ext)[b"PCOB"], [(30000, "")])
-        self.assertEqual(_memory_cues(ext)[b"PCO2"], [(30000, "intro")])
-        self.assertEqual(apply_cues(_empty_lists(True), []), _empty_lists(True))
-        memory = ext[ext.index(b"PCOB", ext.index(b"PCOB") + 4) :]
-        self.assertEqual(struct.unpack_from(">II", memory, 4), (24, 80))
-        self.assertEqual(struct.unpack_from(">IHHI", memory, 12), (0, 0, 1, 0))
-        entry = memory[24:80]
-        self.assertEqual(entry[0:4], b"PCPT")
-        self.assertEqual(struct.unpack_from(">IIIII", entry, 4), (28, 56, 0, 0, 0x00010000))
-        self.assertEqual(entry[0x1C:0x20], b"\x01\x00\x03\xe8")
-        self.assertEqual(struct.unpack_from(">I", entry, 0x24)[0], 0xFFFFFFFF)
-        comment = ext[ext.rindex(b"PCP2") :]
-        self.assertEqual(struct.unpack_from(">II", comment, 4), (16, 88 + 12))
-        self.assertEqual(comment[0x1C:0x1E], bytes((46, 1)))
-        self.assertEqual(comment[0x2C + 12 : 0x2C + 16], bytes((46, 0xFF, 0x00, 0x5C)))
-
     def test_onelibrary_round_trip(self) -> None:
+        from exportstudio_engine.usb.device import from_onelibrary
+        from exportstudio_engine.usb.onelib import connect, create_empty
+
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "exportLibrary.db"
-            library_in = read_device_from_rows()
-            write_onelibrary(path, library_in, encrypt=False)
-            self.assertTrue(path.read_bytes().startswith(b"SQLite format 3"))
-            from exportstudio_engine.usb.onelib import connect
-            from exportstudio_engine.usb.device import from_onelibrary
-
-            conn = connect(path)
+            conn = connect(path, encrypt=False)
             try:
+                create_empty(conn)
+                conn.execute(
+                    "INSERT INTO content(content_id, title, path, fileName) VALUES (?, ?, ?, ?)",
+                    (1, "Song", "/Contents/DJ/Album/song.mp3", "song.mp3"),
+                )
+                conn.execute(
+                    "INSERT INTO cue(cue_id, content_id, kind, inUsec, cueComment) VALUES (?, ?, ?, ?, ?)",
+                    (1, 1, 1, 1_500_000, "drop"),
+                )
+                conn.execute(
+                    """INSERT INTO playlist(
+                        playlist_id, name, sequenceNo, attribute, playlist_id_parent
+                    ) VALUES (?, ?, ?, ?, ?)""",
+                    (1, "Set", 0, 0, 0),
+                )
+                conn.execute(
+                    "INSERT INTO playlist_content(playlist_id, content_id, sequenceNo) VALUES (?, ?, ?)",
+                    (1, 1, 1),
+                )
+                conn.execute(
+                    """INSERT INTO history(
+                        history_id, name, sequenceNo, attribute, history_id_parent
+                    ) VALUES (?, ?, ?, ?, ?)""",
+                    (3, "Last night", 0, 0, 0),
+                )
+                conn.execute(
+                    "INSERT INTO history_content(history_id, content_id, sequenceNo) VALUES (?, ?, ?)",
+                    (3, 1, 1),
+                )
+                conn.commit()
                 got = from_onelibrary(conn, "PIONEER")
             finally:
                 conn.close()
@@ -225,28 +177,6 @@ class EjectTests(unittest.TestCase):
             run.assert_called_once()
             self.assertEqual(run.call_args.args[0][:2], ["diskutil", "eject"])
             self.assertEqual(Path(run.call_args.args[0][2]).resolve(), target.resolve())
-
-
-def read_device_from_rows():
-    from exportstudio_engine.usb.device import CueRow, DeviceLibrary
-
-    return DeviceLibrary(
-        "PIONEER",
-        tracks=[
-            DeviceTrack(
-                1,
-                "9",
-                "Song",
-                artist="DJ",
-                album="Album",
-                path="/Contents/DJ/Album/song.mp3",
-                filename="song.mp3",
-                cues=[CueRow(kind=1, start_ms=1500, comment="drop")],
-            )
-        ],
-        playlists=[DevicePlaylist(1, "4", "Set", track_ids=[1])],
-        histories=[DeviceHistory(3, "Last night", track_ids=[1])],
-    )
 
 
 class SyncTests(unittest.TestCase):

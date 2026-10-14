@@ -2,7 +2,6 @@
 
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
 
 from . import onelib
@@ -153,15 +152,6 @@ def from_pdb(library: PdbLibrary, root_name: str) -> DeviceLibrary:
     return DeviceLibrary(root_name, tracks, playlists, pdb_rows=dict(library.preserved))
 
 
-def _intern(names: dict[str, int], name: str) -> int:
-    key = name or ""
-    if not key:
-        return 0
-    if key not in names:
-        names[key] = len(names) + 1
-    return names[key]
-
-
 def from_onelibrary(conn: sqlite3.Connection, root_name: str) -> DeviceLibrary:
     artists = {row["artist_id"]: row["name"] or "" for row in onelib.rows(conn, "SELECT artist_id, name FROM artist")}
     albums = {row["album_id"]: row["name"] or "" for row in onelib.rows(conn, "SELECT album_id, name FROM album")}
@@ -265,153 +255,6 @@ def from_onelibrary(conn: sqlite3.Connection, root_name: str) -> DeviceLibrary:
         device.colors = colors
     return device
 
-
-def write_onelibrary(path: Path, library: DeviceLibrary, *, encrypt: bool, today: date | None = None, dbid: int = 0) -> None:
-    today = today or date.today()
-    if path.exists():
-        path.unlink()
-    for suffix in ("-wal", "-shm"):
-        extra = path.with_name(path.name + suffix)
-        if extra.exists():
-            extra.unlink()
-    conn = onelib.connect(path, encrypt=encrypt)
-    try:
-        onelib.create_empty(conn)
-        if library.categories:
-            conn.execute("DELETE FROM category")
-            conn.executemany(
-                "INSERT INTO category(category_id, menuItem_id, sequenceNo, isVisible) VALUES (?, ?, ?, ?)",
-                library.categories,
-            )
-        if library.sorts:
-            conn.execute("DELETE FROM sort")
-            conn.executemany(
-                "INSERT INTO sort(sort_id, menuItem_id, sequenceNo, isVisible, isSelectedAsSubColumn) VALUES (?, ?, ?, ?, ?)",
-                library.sorts,
-            )
-        if library.colors:
-            conn.execute("DELETE FROM color")
-            conn.executemany("INSERT INTO color(color_id, name) VALUES (?, ?)", library.colors)
-        artists: dict[str, int] = {}
-        albums: dict[tuple[str, int], int] = {}
-        genres: dict[str, int] = {}
-        labels: dict[str, int] = {}
-        keys: dict[str, int] = {}
-        for row in library.tracks:
-            artist_id = _intern(artists, row.artist)
-            album_id = 0
-            if row.album:
-                key = (row.album, artist_id)
-                if key not in albums:
-                    albums[key] = len(albums) + 1
-                album_id = albums[key]
-            genre_id = _intern(genres, row.genre)
-            label_id = _intern(labels, row.label)
-            key_id = _intern(keys, row.key)
-            master = int(row.master_id) if row.master_id and row.master_id.isdigit() else 0
-            conn.execute(
-                """INSERT INTO content(
-                    content_id, title, titleForSearch, bpmx100, length, trackNo, artist_id_artist, album_id,
-                    genre_id, label_id, key_id, color_id, djComment, rating, releaseYear, dateAdded, path,
-                    fileName, fileSize, fileType, bitrate, bitDepth, samplingRate, djPlayCount,
-                    isHotCueAutoLoadOn, masterDbId, masterContentId, analysisDataFilePath, analysedBits,
-                    cueUpdateCount
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    row.export_id,
-                    row.title,
-                    row.title.casefold(),
-                    row.bpm_x100,
-                    row.duration,
-                    row.track_no,
-                    artist_id or None,
-                    album_id or None,
-                    genre_id or None,
-                    label_id or None,
-                    key_id or None,
-                    row.color or None,
-                    row.comment,
-                    row.rating,
-                    row.year,
-                    row.date_added,
-                    row.path,
-                    row.filename,
-                    row.file_size,
-                    row.file_type,
-                    row.bitrate,
-                    row.bit_depth,
-                    row.sample_rate,
-                    row.play_count,
-                    1 if row.hot_cue_auto else 0,
-                    dbid,
-                    master,
-                    row.analysis,
-                    105 if row.analysis else 0,
-                    len(row.cues),
-                ),
-            )
-            for index, cue in enumerate(row.cues, 1):
-                end = -1 if cue.end_ms is None else cue.end_ms * 1000
-                conn.execute(
-                    """INSERT INTO cue(
-                        cue_id, content_id, kind, colorTableIndex, cueComment, isActiveLoop,
-                        beatLoopNumerator, beatLoopDenominator, inUsec, outUsec, in150FramePerSec, out150FramePerSec
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (
-                        row.export_id * 1000 + index,
-                        row.export_id,
-                        cue.kind,
-                        cue.color_index if cue.color_index is not None else -1,
-                        cue.comment,
-                        1 if cue.active_loop else 0,
-                        (cue.beat_loop >> 16) & 0xFFFF,
-                        cue.beat_loop & 0xFFFF,
-                        cue.start_ms * 1000,
-                        end,
-                        cue.start_ms * 150 // 1000,
-                        -1 if cue.end_ms is None else cue.end_ms * 150 // 1000,
-                    ),
-                )
-        conn.executemany("INSERT INTO artist(artist_id, name, nameForSearch) VALUES (?, ?, ?)", [(i, n, n.casefold()) for n, i in artists.items()])
-        conn.executemany(
-            "INSERT INTO album(album_id, name, artist_id, nameForSearch) VALUES (?, ?, ?, ?)",
-            [(i, name, artist, name.casefold()) for (name, artist), i in albums.items()],
-        )
-        conn.executemany("INSERT INTO genre(genre_id, name) VALUES (?, ?)", [(i, n) for n, i in genres.items()])
-        conn.executemany("INSERT INTO label(label_id, name) VALUES (?, ?)", [(i, n) for n, i in labels.items()])
-        conn.executemany('INSERT INTO "key"(key_id, name) VALUES (?, ?)', [(i, n) for n, i in keys.items()])
-        for row in library.playlists:
-            conn.execute(
-                "INSERT INTO playlist(playlist_id, sequenceNo, name, attribute, playlist_id_parent) VALUES (?, ?, ?, ?, ?)",
-                (row.export_id, row.seq, row.name, 1 if row.folder else 0, row.parent_id or None),
-            )
-            conn.executemany(
-                "INSERT INTO playlist_content(playlist_id, content_id, sequenceNo) VALUES (?, ?, ?)",
-                [(row.export_id, track_id, seq) for seq, track_id in enumerate(row.track_ids, 1)],
-            )
-        for row in library.histories:
-            conn.execute(
-                "INSERT INTO history(history_id, sequenceNo, name, attribute, history_id_parent) VALUES (?, ?, ?, ?, ?)",
-                (row.export_id, row.seq, row.name, row.attribute, row.parent_id or None),
-            )
-            conn.executemany(
-                "INSERT INTO history_content(history_id, content_id, sequenceNo) VALUES (?, ?, ?)",
-                [(row.export_id, track_id, seq) for seq, track_id in enumerate(row.track_ids, 1)],
-            )
-        conn.execute(
-            "INSERT INTO property(deviceName, dbVersion, numberOfContents, createdDate, backGroundColorType, myTagMasterDBID) VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                library.device_name or "USB",
-                "1000",
-                len(library.tracks),
-                today.isoformat(),
-                library.background,
-                library.tag_dbid,
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def read_device(volume: Path) -> DeviceLibrary | None:
