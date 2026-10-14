@@ -1,11 +1,12 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { SvelteSet } from 'svelte/reactivity'
-  import { Music, Star, X } from '@lucide/svelte'
+  import { Music, X } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import { suspendModal } from '$lib/modal'
   import { artworkUrl } from '$lib/api'
   import { TRACK_COLORS } from '$lib/format'
+  import RatingStars from './RatingStars.svelte'
   import type { EditableField, Track, TrackEdit } from '$lib/types'
 
   let { tracks, onclose }: { tracks: Track[]; onclose: () => void } = $props()
@@ -109,7 +110,7 @@
   }
 
   function setRating(n: number): void {
-    rating = rating === n ? 0 : n
+    rating = n
     dirty.add('rating')
   }
 
@@ -239,21 +240,15 @@
             Rating
             {#if start.mixed.has('rating') && !dirty.has('rating')}<span class="ml-1 font-normal">· Mixed</span>{/if}
           </span>
-          <div class="flex h-7 items-center gap-0.5" role="radiogroup" aria-label="Rating">
-            {#each [1, 2, 3, 4, 5] as n (n)}
-              {@const lit = rating !== null && n <= rating}
-              <button
-                type="button"
-                class="grid size-6 place-items-center rounded hover:bg-hover"
-                role="radio"
-                aria-checked={rating === n}
-                aria-label="{n} star{n === 1 ? '' : 's'}"
-                onclick={() => setRating(n)}
-              >
-                <Star class={['size-4', lit ? 'fill-warn text-warn' : 'text-line']} strokeWidth={lit ? 0 : 2} />
-              </button>
-            {/each}
-          </div>
+          <RatingStars
+            value={rating}
+            interactive
+            starClass="size-4"
+            hitClass="size-6"
+            class="h-7 items-center gap-0.5"
+            label="Rating"
+            onchange={setRating}
+          />
         </div>
         <div class="flex flex-col gap-1">
           <span class="text-[11px] font-medium text-faint">

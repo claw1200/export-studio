@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Music, FolderSearch, Repeat, AlertTriangle, X, Pencil, Star } from '@lucide/svelte'
+  import { Music, FolderSearch, Repeat, AlertTriangle, X, Pencil } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import { api, artworkUrl } from '$lib/api'
   import {
@@ -15,6 +15,7 @@
   import { loadDetail } from '$lib/deck/session.svelte'
   import type { Cue, EditableField, Track, TrackDetail } from '$lib/types'
   import EditableText from './EditableText.svelte'
+  import RatingStars from './RatingStars.svelte'
 
   let { onjump, onedit }: { onjump: (seconds: number) => void; onedit: (tracks: Track[]) => void } = $props()
 
@@ -68,10 +69,6 @@
       }
       return library.updateTracks([id], { [field]: n })
     }
-  }
-
-  function setRating(t: Track, n: number): void {
-    void library.updateTracks([t.id], { rating: t.rating === n ? 0 : n })
   }
 
   const tags = $derived(track ? track.myTags.map((id) => library.tagNames.get(id)).filter(Boolean) : [])
@@ -177,24 +174,15 @@
         {@const current = track}
         <dt class="text-faint">Rating</dt>
         <dd class="flex justify-end">
-          <div class="flex gap-px" role={editable ? 'radiogroup' : 'img'} aria-label="Rating {current.rating} of 5">
-            {#each [1, 2, 3, 4, 5] as n (n)}
-              {@const lit = n <= current.rating}
-              {#if editable}
-                <button
-                  class="grid size-4.5 place-items-center rounded hover:bg-hover"
-                  role="radio"
-                  aria-checked={current.rating === n}
-                  aria-label="{n} star{n === 1 ? '' : 's'}"
-                  onclick={() => setRating(current, n)}
-                >
-                  <Star class={['size-3', lit ? 'fill-warn text-warn' : 'text-line']} strokeWidth={lit ? 0 : 2} />
-                </button>
-              {:else}
-                <Star class={['size-3', lit ? 'fill-warn text-warn' : 'text-line']} strokeWidth={lit ? 0 : 2} />
-              {/if}
-            {/each}
-          </div>
+          <RatingStars
+            value={current.rating}
+            interactive={editable}
+            starClass="size-3"
+            hitClass="size-4.5"
+            class="gap-px"
+            label="Rating {current.rating} of 5"
+            onchange={(rating) => void library.updateTracks([current.id], { rating })}
+          />
         </dd>
       {/if}
       {#if editable}

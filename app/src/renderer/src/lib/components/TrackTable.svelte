@@ -26,6 +26,7 @@
   import ConfirmDialog from './ConfirmDialog.svelte'
   import ContextMenu from './ContextMenu.svelte'
   import WaveformThumb from './WaveformThumb.svelte'
+  import RatingStars from './RatingStars.svelte'
 
   let {
     onselect,
@@ -571,14 +572,7 @@
       {/if}
     {/if}
   {:else if column.id === 'rating'}
-    <span class="flex gap-px">
-      {#each [1, 2, 3, 4, 5] as n (n)}
-        <Star
-          class={['size-3', n <= track.rating ? 'fill-warn text-warn' : 'text-line']}
-          strokeWidth={n <= track.rating ? 0 : 2}
-        />
-      {/each}
-    </span>
+    <RatingStars value={track.rating} starClass="size-3" class="gap-px" />
   {:else if column.id === 'compat'}
     {@const verdict = compatibilityOf(track)}
     <span
