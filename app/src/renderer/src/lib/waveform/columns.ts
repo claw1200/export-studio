@@ -35,6 +35,18 @@ export function logicalCount(src: number, stride: number): number {
   return stride <= 1 ? src : Math.max(1, Math.floor(src / stride))
 }
 
+/** Loudest byte of one band in the stride window that starts at `index`. */
+export function stridePeak(data: Uint8Array, src: number, index: number, stride: number, band: number): number {
+  const a = Math.min(src, Math.floor(index * stride))
+  const b = Math.min(src, Math.max(a + 1, Math.ceil((index + 1) * stride)))
+  let peak = 0
+  for (let j = a; j < b; j++) {
+    const value = data[j * 3 + band]
+    if (value > peak) peak = value
+  }
+  return peak
+}
+
 type ColumnSpan =
   { kind: 'hold'; index: number; next: number; fraction: number } | { kind: 'peak'; from: number; to: number }
 

@@ -4,7 +4,7 @@
  * cached for the one track and setting being drawn.
  */
 import { createSubscriber } from 'svelte/reactivity'
-import { logicalCount } from './columns'
+import { logicalCount, stridePeak } from './columns'
 import { fallSlice } from './dsp'
 import { poolSize, runJob } from './pool'
 
@@ -31,16 +31,7 @@ function decimateBands(bands: Uint8Array, stride: number): Uint8Array {
   if (stride <= 1) return bands
   const out = new Uint8Array(n * 3)
   for (let i = 0; i < n; i++) {
-    const a = Math.min(src, Math.floor(i * stride))
-    const b = Math.min(src, Math.max(a + 1, Math.ceil((i + 1) * stride)))
-    for (let band = 0; band < 3; band++) {
-      let peak = 0
-      for (let j = a; j < b; j++) {
-        const value = bands[j * 3 + band]
-        if (value > peak) peak = value
-      }
-      out[i * 3 + band] = peak
-    }
+    for (let band = 0; band < 3; band++) out[i * 3 + band] = stridePeak(bands, src, i, stride, band)
   }
   return out
 }

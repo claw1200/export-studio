@@ -1,6 +1,15 @@
 /** Drawing rekordbox-style analysis data: an RGB waveform, and 3-band waveforms. */
 import { BANDS_LOW_TO_HIGH } from './colors'
-import { columns, fitColumns, logicalCount, paintColumns, pixelGrid, readAmp, readRgbColumn } from './columns'
+import {
+  columns,
+  fitColumns,
+  logicalCount,
+  paintColumns,
+  pixelGrid,
+  readAmp,
+  readRgbColumn,
+  stridePeak
+} from './columns'
 import { bandFall } from './fall'
 
 /** Overview peaks stop this far short of the top of the waveform window. */
@@ -69,14 +78,7 @@ export function drawAnalysisBands(
   const reach = anchor === 'center' ? ph / 2 : ph
   const bandAt = (band: number, i: number): number => {
     if (drawStride <= 1) return data[i * 3 + band] / 255
-    const a = Math.min(src, Math.floor(i * drawStride))
-    const b = Math.min(src, Math.max(a + 1, Math.ceil((i + 1) * drawStride)))
-    let peak = 0
-    for (let j = a; j < b; j++) {
-      const value = data[j * 3 + band]
-      if (value > peak) peak = value
-    }
-    return peak / 255
+    return stridePeak(data, src, i, drawStride, band) / 255
   }
   for (const layer of BANDS_LOW_TO_HIGH) {
     for (let x = 0; x < pw; x++) {
