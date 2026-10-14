@@ -136,18 +136,21 @@
     return tracks.filter((track) => track.collected !== false && !track.id.startsWith('usb:'))
   }
 
+  function whenCollectionWritable(tracks: Track[], locked: string, act: (rows: Track[]) => void): void {
+    const rows = collectionTracks(tracks)
+    if (!rows.length) return
+    if (!library.writable) library.notify(locked)
+    else act(rows)
+  }
+
   function remove(tracks: Track[]): void {
-    const local = collectionTracks(tracks)
-    if (!local.length) return
-    if (!library.writable) library.notify('Unlock editing to remove tracks')
-    else removing = local
+    whenCollectionWritable(tracks, 'Unlock editing to remove tracks', (rows) => {
+      removing = rows
+    })
   }
 
   function analyse(tracks: Track[]): void {
-    const rows = collectionTracks(tracks)
-    if (!rows.length) return
-    if (!library.writable) library.notify('Unlock editing to analyse tracks')
-    else analysis.analyse(rows)
+    whenCollectionWritable(tracks, 'Unlock editing to analyse tracks', (rows) => analysis.analyse(rows))
   }
 
   function autoRelocate(tracks: Track[]): void {
@@ -157,10 +160,9 @@
   }
 
   function edit(tracks: Track[]): void {
-    const rows = collectionTracks(tracks)
-    if (!rows.length) return
-    if (!library.writable) library.notify('Unlock editing to change track info')
-    else editing = rows
+    whenCollectionWritable(tracks, 'Unlock editing to change track info', (rows) => {
+      editing = rows
+    })
   }
 
   function select(track: Track): void {
