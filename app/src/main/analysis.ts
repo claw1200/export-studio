@@ -99,7 +99,6 @@ export class AnalysisQueue {
     })
   }
 
-  /** Starts the counts again once everything has finished. */
   private settle(): void {
     if (this.active.size || this.queue.length) return
     this.total = this.done = this.failed = 0
