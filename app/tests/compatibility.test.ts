@@ -5,7 +5,7 @@ import { describe, it } from 'node:test'
 register(new URL('./resolve-ts.mjs', import.meta.url).href)
 
 const { assess } = await import('../src/renderer/src/lib/hardware/compatibility.ts')
-const { DEFAULT_GREEN } = await import('../src/renderer/src/lib/hardware/players.ts')
+const { DEFAULT_GREEN, PLAYERS } = await import('../src/renderer/src/lib/hardware/players.ts')
 const { introduceViews } = await import('../src/renderer/src/lib/library/defaults.ts')
 const { keepViews } = await import('../src/renderer/src/lib/library/views.ts')
 import type { AudioFacts } from '../src/renderer/src/lib/hardware/compatibility.ts'
@@ -34,15 +34,17 @@ describe('assess', () => {
     assert.deepEqual(verdict.incompatible, ['CDJ-400'])
   })
 
-  it('keeps 48 kHz flac green and names every player that cannot load it', () => {
+  it('marks 48 kHz flac yellow when a newer player cannot load it', () => {
     const verdict = assess(facts({ kind: 'FLAC', encoding: 'flac', sampleRate: 48000 }), targets)
-    assert.equal(verdict.color, 'green')
+    assert.equal(verdict.color, 'yellow')
+    assert.equal(verdict.summary, 'Plays on XDJ-1000MK2')
     assert.deepEqual(verdict.problems, ['FLAC file'])
-    assert.ok(verdict.incompatible.includes('CDJ-2000'))
-    assert.ok(verdict.incompatible.includes('CDJ-900NXS'))
-    assert.ok(verdict.incompatible.includes('XDJ-700'))
-    assert.ok(verdict.incompatible.includes('XDJ-1000'))
-    assert.equal(verdict.incompatible.includes('XDJ-1000MK2'), false)
+    for (const name of ['CDJ-2000', 'CDJ-900NXS', 'XDJ-700', 'XDJ-1000', 'XDJ-RX2', 'XDJ-RR', 'MEP-7000']) {
+      assert.equal(verdict.incompatible.includes(name), true, name)
+    }
+    for (const name of ['XDJ-1000MK2', 'XDJ-RX3', 'OMNIS-DUO', 'CDJ-TOUR1']) {
+      assert.equal(verdict.incompatible.includes(name), false, name)
+    }
   })
 
   it('marks 96 kHz flac red when the selected player stops at 48 kHz', () => {
@@ -52,6 +54,9 @@ describe('assess', () => {
     assert.deepEqual(verdict.problems, ['FLAC file', 'FLAC file is 96 kHz'])
     assert.ok(verdict.incompatible.includes('XDJ-1000MK2'))
     assert.ok(verdict.incompatible.includes('CDJ-1500X'))
+    assert.ok(verdict.incompatible.includes('OMNIS-DUO'))
+    assert.ok(verdict.incompatible.includes('XDJ-RX3'))
+    assert.equal(verdict.incompatible.includes('CDJ-TOUR1'), false)
   })
 
   it('marks alac yellow when a newer player cannot load it', () => {
@@ -60,7 +65,9 @@ describe('assess', () => {
     assert.equal(verdict.summary, 'Plays on XDJ-1000MK2')
     assert.deepEqual(verdict.problems, ['ALAC file'])
     assert.ok(verdict.incompatible.includes('XDJ-XZ'))
+    assert.ok(verdict.incompatible.includes('XDJ-RX3'))
     assert.equal(verdict.incompatible.includes('XDJ-1000MK2'), false)
+    assert.equal(verdict.incompatible.includes('OMNIS-DUO'), false)
   })
 
   it('marks a missing file red', () => {
@@ -69,6 +76,55 @@ describe('assess', () => {
     assert.equal(verdict.summary, 'File missing')
     assert.deepEqual(verdict.problems, [])
     assert.deepEqual(verdict.incompatible, [])
+  })
+
+  it('lists every rekordbox usb player', () => {
+    const names = new Set(PLAYERS.map((player) => player.name))
+    for (const name of [
+      'XDJ-AERO',
+      'XDJ-R1',
+      'XDJ-RX',
+      'XDJ-RX2',
+      'XDJ-RR',
+      'XDJ-RX3',
+      'XDJ-XZ',
+      'XDJ-AZ',
+      'OPUS-QUAD',
+      'OMNIS-DUO',
+      'CDJ-3000X',
+      'CDJ-3000',
+      'CDJ-2000NXS2',
+      'CDJ-2000NXS',
+      'CDJ-2000',
+      'CDJ-900NXS',
+      'CDJ-900',
+      'CDJ-850',
+      'CDJ-350',
+      'CDJ-400',
+      'CDJ-TOUR1',
+      'XDJ-1000MK2',
+      'XDJ-1000',
+      'XDJ-700',
+      'MEP-7000'
+    ]) {
+      assert.equal(names.has(name), true, name)
+    }
+  })
+
+  it('marks aac red on the CDJ-400, which plays MP3 only', () => {
+    const verdict = assess(facts({ kind: 'AAC', encoding: 'aac', bitDepth: 16, bitrate: 256 }), {
+      greenId: 'cdj-400'
+    })
+    assert.equal(verdict.color, 'red')
+    assert.equal(verdict.summary, "Won't play on CDJ-400")
+    assert.deepEqual(verdict.problems, ['AAC file'])
+  })
+
+  it('marks a 48 kHz wav red on the MEP-7000', () => {
+    const verdict = assess(facts({ sampleRate: 48000 }), { greenId: 'mep-7000' })
+    assert.equal(verdict.color, 'red')
+    assert.equal(verdict.summary, "Won't play on MEP-7000")
+    assert.ok(verdict.problems.includes('WAV file is 48 kHz'))
   })
 
   it('marks 32-bit float red because the selected player cannot load it', () => {
