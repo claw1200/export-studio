@@ -21,12 +21,6 @@ function visibleRange(wf: Waveform, view: DetailView, cssWidth: number): [number
   return [center - halfEntries, center + halfEntries]
 }
 
-/**
- * Each analysis entry is the peak of the window that starts at its index, so drawing it from that start puts
- * transients up to one entry early. Rekordbox draws an entry at the end of its window.
- */
-const ANALYSIS_LAG_ENTRIES = 0
-
 function paintWave(
   frame: Frame,
   mode: WaveformMode,
@@ -36,8 +30,6 @@ function paintWave(
 ): void {
   const { ctx, wf, from, to, pw, ph, dpr } = frame
   const waveH = ph - 18 * dpr
-  const entryFrom = from - ANALYSIS_LAG_ENTRIES
-  const entryTo = to - ANALYSIS_LAG_ENTRIES
   ctx.save()
   ctx.translate(0, 9 * dpr)
   const custom = quality > 0 ? samples : null
@@ -45,10 +37,10 @@ function paintWave(
   else if (mode === '3band' && custom?.bands && custom.bandRate) {
     const stride = waveStride(quality)
     const scale = custom.bandRate / stride / wf.rate
-    drawAnalysisBands(ctx, custom.bands, entryFrom * scale, entryTo * scale, pw, waveH, 'center', stride, fallBlocks)
-  } else if (mode === '3band' && wf.bands) drawAnalysisBands(ctx, wf.bands, entryFrom, entryTo, pw, waveH, 'center')
+    drawAnalysisBands(ctx, custom.bands, from * scale, to * scale, pw, waveH, 'center', stride, fallBlocks)
+  } else if (mode === '3band' && wf.bands) drawAnalysisBands(ctx, wf.bands, from, to, pw, waveH, 'center')
   else if (wf.rgbHeights && wf.rgbColors)
-    drawAnalysisRgb(ctx, wf.rgbHeights, wf.rgbColors, entryFrom, entryTo, pw, waveH, 'center')
+    drawAnalysisRgb(ctx, wf.rgbHeights, wf.rgbColors, from, to, pw, waveH, 'center')
   ctx.restore()
 }
 
