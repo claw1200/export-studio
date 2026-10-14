@@ -16,10 +16,8 @@ from pathlib import Path
 
 from pyrekordbox.db6 import tables as t
 
-from . import waveform
+from . import anlz_build, waveform
 from .library import Library
-
-WAVE_TAGS = {"DAT": ["PWAV", "PWV2"], "EXT": ["PWV3", "PWV4", "PWV5"], "2EX": ["PWV6", "PWV7"]}
 
 
 def _tag_body(tags: waveform.Tags | None, kind: str) -> dict | None:
@@ -62,7 +60,7 @@ def export(out: Path, limit: int | None, seed: int) -> int:
                 "key": keys.get(content.KeyID),
                 "beats": grid,
                 "waves": {
-                    kind: _tag_body(anlz[file], kind) for file, kinds in WAVE_TAGS.items() for kind in kinds
+                    kind: _tag_body(anlz[file], kind) for file, kinds in anlz_build.WAVE_TAGS.items() for kind in kinds
                 },
             }
         )
