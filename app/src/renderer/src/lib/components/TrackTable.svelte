@@ -69,9 +69,8 @@
     return [...COLUMNS].sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
   })
   const shownColumns = $derived(orderedColumns.filter((column) => !hidden.includes(column.id)))
-  const tableColumns = $derived(shownColumns)
   const template = $derived(
-    tableColumns
+    shownColumns
       .map((column) => {
         const width = columnWidth(column)
         return column.fr && !sized.includes(column.id) ? `minmax(${column.width}px, ${column.fr}fr)` : `${width}px`
@@ -79,7 +78,7 @@
       .join(' ')
   )
   const minWidth = $derived(
-    tableColumns.reduce((sum, column) => {
+    shownColumns.reduce((sum, column) => {
       if (column.fr && !sized.includes(column.id)) return sum + column.width
       return sum + columnWidth(column)
     }, 0)
@@ -411,12 +410,16 @@
     dropIndex = null
   }
 
+  function dropRow(clientY: number, top: number): number {
+    return Math.max(0, Math.min(list.length, Math.round((clientY - top) / ROW)))
+  }
+
   function rowsDragOver(e: DragEvent): void {
     if (!library.dragging || !library.canReorder) return
     e.preventDefault()
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
     const top = (e.currentTarget as HTMLElement).getBoundingClientRect().top
-    dropIndex = Math.max(0, Math.min(list.length, Math.round((e.clientY - top) / ROW)))
+    dropIndex = dropRow(e.clientY, top)
   }
 
   function rowsDragLeave(e: DragEvent): void {
@@ -451,7 +454,7 @@
     fileDrop = true
     if (fileTarget === 'playlist' && library.canReorder && rowsEl) {
       const top = rowsEl.getBoundingClientRect().top
-      dropIndex = Math.max(0, Math.min(list.length, Math.round((e.clientY - top) / ROW)))
+      dropIndex = dropRow(e.clientY, top)
     }
   }
 
@@ -626,7 +629,7 @@
         onpointerdown={startMove}
         oncontextmenu={openColumnMenu}
       >
-        {#each tableColumns as column (column.id)}
+        {#each shownColumns as column (column.id)}
           <div
             class={[
               'relative flex h-full min-w-0 items-center',
@@ -725,7 +728,7 @@
               ondragend={dragEnd}
               ondblclick={() => onactivate(track)}
             >
-              {#each tableColumns as column (column.id)}
+              {#each shownColumns as column (column.id)}
                 <div
                   class={[
                     'flex min-w-0 items-center overflow-hidden px-2 whitespace-nowrap',
