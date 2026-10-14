@@ -45,14 +45,22 @@ describe('assess', () => {
     assert.equal(verdict.incompatible.includes('XDJ-1000MK2'), false)
   })
 
-  it('marks 96 kHz flac yellow with the file problems, then one incompatible list', () => {
+  it('marks 96 kHz flac red when the selected player stops at 48 kHz', () => {
     const verdict = assess(facts({ kind: 'FLAC', encoding: 'flac', sampleRate: 96000 }), targets)
-    assert.equal(verdict.color, 'yellow')
-    assert.equal(verdict.summary, '')
+    assert.equal(verdict.color, 'red')
+    assert.equal(verdict.summary, "Won't play on XDJ-1000MK2")
     assert.deepEqual(verdict.problems, ['FLAC file', 'FLAC file is 96 kHz'])
     assert.ok(verdict.incompatible.includes('XDJ-1000MK2'))
     assert.ok(verdict.incompatible.includes('CDJ-1500X'))
-    assert.ok(verdict.incompatible.includes('XDJ-700'))
+  })
+
+  it('marks alac yellow when a newer player cannot load it', () => {
+    const verdict = assess(facts({ kind: 'ALAC', encoding: 'alac' }), targets)
+    assert.equal(verdict.color, 'yellow')
+    assert.equal(verdict.summary, 'Plays on XDJ-1000MK2')
+    assert.deepEqual(verdict.problems, ['ALAC file'])
+    assert.ok(verdict.incompatible.includes('XDJ-XZ'))
+    assert.equal(verdict.incompatible.includes('XDJ-1000MK2'), false)
   })
 
   it('marks a missing file red', () => {
@@ -63,9 +71,10 @@ describe('assess', () => {
     assert.deepEqual(verdict.incompatible, [])
   })
 
-  it('marks 32-bit float yellow', () => {
+  it('marks 32-bit float red because the selected player cannot load it', () => {
     const verdict = assess(facts({ bitDepth: 32, encoding: 'float' }), targets)
-    assert.equal(verdict.color, 'yellow')
+    assert.equal(verdict.color, 'red')
+    assert.equal(verdict.summary, "Won't play on XDJ-1000MK2")
     assert.deepEqual(verdict.problems, ['32-bit float'])
   })
 })

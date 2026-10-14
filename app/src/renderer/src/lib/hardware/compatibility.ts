@@ -14,7 +14,7 @@ export interface AudioFacts {
 
 export interface Verdict {
   color: Light
-  /** Why the light is green, or why the file itself cannot be loaded. Empty when the light is yellow. */
+  /** How the file relates to the selected player. */
   summary: string
   /** Distinct reasons some player cannot load the file. */
   problems: string[]
@@ -122,17 +122,19 @@ export function assess(
   if (options.missing) return { color: 'red', summary: 'File missing', ...empty }
   if (options.unreadable) return { color: 'red', summary: "File can't be read", ...empty }
   if (options.streaming) {
-    return { color: 'yellow', summary: 'Streaming track', problems: ['No file to load'], incompatible: [] }
+    return { color: 'red', summary: 'Streaming track', problems: ['No file to load'], incompatible: [] }
   }
 
-  const green = target(options.greenId, DEFAULT_GREEN)
-  const modern = PLAYERS.filter((player) => player.id === green.id || player.year > green.year)
-  const plays = modern.every((player) => failure(player, facts) == null)
+  const selected = target(options.greenId, DEFAULT_GREEN)
+  const newer = PLAYERS.filter((player) => player.year > selected.year)
+  const playsHere = failure(selected, facts) == null
+  const playsNewer = newer.every((player) => failure(player, facts) == null)
   const { problems, incompatible } = collect(PLAYERS, facts)
-  return {
-    color: plays ? 'green' : 'yellow',
-    summary: plays ? `Plays on ${green.name} and newer` : '',
-    problems,
-    incompatible
+  if (!playsHere) {
+    return { color: 'red', summary: `Won't play on ${selected.name}`, problems, incompatible }
   }
+  if (!playsNewer) {
+    return { color: 'yellow', summary: `Plays on ${selected.name}`, problems, incompatible }
+  }
+  return { color: 'green', summary: `Plays on ${selected.name} and newer`, problems, incompatible }
 }

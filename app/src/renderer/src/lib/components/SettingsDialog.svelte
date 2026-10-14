@@ -257,7 +257,7 @@
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Hardware</h3>
             {@render playerMenu(
               'Target',
-              'A track is green when it plays on this player and every newer one.',
+              'Green plays on this player and every newer one. Yellow plays here, but not on a newer player. Red will not play here.',
               library.hardwareGreen,
               (id) => library.setHardwareGreen(id)
             )}
