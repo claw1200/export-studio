@@ -1,10 +1,9 @@
 <script lang="ts">
   import { getApp } from '$lib/context'
-  import { cueColor, formatClock, hotCueLetter } from '$lib/format'
   import { setupCanvas } from '$lib/waveform/canvas'
-  import { CUE_POINT_COLOR, LOOP_ACTIVE_COLOR } from '$lib/waveform/colors'
+  import { CUE_POINT_COLOR } from '$lib/waveform/colors'
   import { drawOverview } from '$lib/waveform/overview'
-  import type { Cue } from '$lib/types'
+  import WaveformMarks from './WaveformMarks.svelte'
 
   const { player } = getApp()
 
@@ -53,12 +52,6 @@
     else player.clearPreview(WAVEFORM_PREVIEW)
   }
 
-  function cueLabel(cue: Cue): string {
-    const name = cue.kind === 'hot' ? `Hot cue ${hotCueLetter(cue.slot)}` : 'Memory cue'
-    const time = formatClock(cue.start)
-    return cue.comment ? `${name}, ${time}, ${cue.comment}` : `${name}, ${time}`
-  }
-
   function onwheel(e: WheelEvent): void {
     if (!player.waveform || !width) return
     e.preventDefault()
@@ -103,51 +96,13 @@
   <canvas {@attach paint} class="absolute inset-0 size-full"></canvas>
   <div class="pointer-events-none absolute inset-y-0 left-0 bg-black/50" style:width="{pct(player.position)}%"></div>
 
-  {#if player.loop}
-    <div
-      class={['pointer-events-none absolute inset-y-0 border-x', player.loop.active ? 'opacity-40' : 'opacity-15']}
-      style:left="{pct(player.loop.start)}%"
-      style:width="{pct(player.loop.end) - pct(player.loop.start)}%"
-      style:background={LOOP_ACTIVE_COLOR}
-      style:border-color={LOOP_ACTIVE_COLOR}
-    ></div>
-  {/if}
-
-  {#each player.displayCues as cue (cue.id)}
-    {#if cue.end != null}
-      <div
-        class="pointer-events-none absolute inset-y-0 opacity-25"
-        style:left="{pct(cue.start / 1000)}%"
-        style:width="{pct(cue.end / 1000) - pct(cue.start / 1000)}%"
-        style:background={cueColor(cue)}
-      ></div>
-    {/if}
-    <button
-      type="button"
-      class={[
-        'absolute cursor-pointer border-0 bg-transparent p-0 hover:brightness-125',
-        cue.kind === 'hot'
-          ? 'top-0 z-20 grid size-3 place-items-center text-[8px] leading-none font-bold text-black/85'
-          : 'top-0 z-10 flex h-4 w-4 -translate-x-1/2 items-start justify-center'
-      ]}
-      style:left="{pct(cue.start / 1000)}%"
-      style:background={cue.kind === 'hot' ? cueColor(cue) : undefined}
-      title={cueLabel(cue)}
-      aria-label={cueLabel(cue)}
-      onpointerdown={(e) => e.stopPropagation()}
-      onclick={() => (cue.kind === 'memory' ? player.callCue(cue) : player.seek(cue.start / 1000))}
-    >
-      {#if cue.kind === 'hot'}
-        {hotCueLetter(cue.slot)}
-      {:else}
-        <span
-          class="pointer-events-none h-[7px] w-[9px]"
-          style:background={cueColor(cue)}
-          style:clip-path="polygon(0 0, 100% 0, 50% 100%)"
-        ></span>
-      {/if}
-    </button>
-  {/each}
+  <WaveformMarks
+    cues={player.displayCues}
+    loop={player.loop}
+    {pct}
+    onpointerdown={(_cue, e) => e.stopPropagation()}
+    onclick={(cue) => (cue.kind === 'memory' ? player.callCue(cue) : player.seek(cue.start / 1000))}
+  />
 
   {#if player.track}
     <span

@@ -1,11 +1,10 @@
 <script lang="ts">
-  import { getApp } from '$lib/context'
-  import { cueColor, formatClock, hotCueLetter } from '$lib/format'
   import type { BrowserWave } from '$lib/browserPreview.svelte'
+  import { getApp } from '$lib/context'
   import type { Cue, Track } from '$lib/types'
   import { drawAnalysisRgb, drawStackedBands } from '$lib/waveform/analysis'
   import { setupCanvas } from '$lib/waveform/canvas'
-  import { LOOP_ACTIVE_COLOR } from '$lib/waveform/colors'
+  import WaveformMarks from './WaveformMarks.svelte'
 
   let { track, wave, cues }: { track: Track; wave: BrowserWave | null; cues: Cue[] } = $props()
 
@@ -46,12 +45,6 @@
 
   function pct(seconds: number): number {
     return Math.max(0, Math.min(100, (seconds / span) * 100))
-  }
-
-  function cueLabel(cue: Cue): string {
-    const name = cue.kind === 'hot' ? `Hot cue ${hotCueLetter(cue.slot)}` : 'Memory cue'
-    const time = formatClock(cue.start)
-    return cue.comment ? `${name}, ${time}, ${cue.comment}` : `${name}, ${time}`
   }
 </script>
 
@@ -111,71 +104,34 @@
     {#if head != null}
       <div class="pointer-events-none absolute inset-y-0 left-0 bg-black/45" style:width="{pct(head)}%"></div>
     {/if}
-    {#if loop}
-      <div
-        class={['pointer-events-none absolute inset-y-0 border-x', loop.active ? 'opacity-40' : 'opacity-15']}
-        style:left="{pct(loop.start)}%"
-        style:width="{pct(loop.end) - pct(loop.start)}%"
-        style:background={LOOP_ACTIVE_COLOR}
-        style:border-color={LOOP_ACTIVE_COLOR}
-      ></div>
-    {/if}
-    {#each cues as cue (cue.id)}
-      {#if cue.end != null}
-        <div
-          class="pointer-events-none absolute inset-y-0 opacity-25"
-          style:left="{pct(cue.start / 1000)}%"
-          style:width="{pct(cue.end / 1000) - pct(cue.start / 1000)}%"
-          style:background={cueColor(cue)}
-        ></div>
-      {/if}
-      <button
-        type="button"
-        class={[
-          'absolute cursor-pointer border-0 bg-transparent p-0 hover:brightness-125',
-          cue.kind === 'hot'
-            ? 'top-0 z-20 grid size-3 place-items-center text-[8px] leading-none font-bold text-black/85'
-            : 'top-0 z-10 flex h-4 w-4 -translate-x-1/2 items-start justify-center'
-        ]}
-        style:left="{pct(cue.start / 1000)}%"
-        style:background={cue.kind === 'hot' ? cueColor(cue) : undefined}
-        title={cueLabel(cue)}
-        aria-label={cueLabel(cue)}
-        draggable="false"
-        onpointerdown={(e) => {
-          if (e.button !== 0) return
-          e.stopPropagation()
-          e.preventDefault()
-          e.currentTarget.setPointerCapture(e.pointerId)
-          holding = true
-          hover = null
-          audition.playCue(track, cue)
-        }}
-        onpointerup={(e) => {
-          e.stopPropagation()
-          if (!holding) return
-          holding = false
-          audition.stop()
-        }}
-        onpointercancel={(e) => {
-          e.stopPropagation()
-          if (!holding) return
-          holding = false
-          audition.stop()
-        }}
-        onclick={(e) => e.stopPropagation()}
-      >
-        {#if cue.kind === 'hot'}
-          {hotCueLetter(cue.slot)}
-        {:else}
-          <span
-            class="pointer-events-none h-[7px] w-[9px]"
-            style:background={cueColor(cue)}
-            style:clip-path="polygon(0 0, 100% 0, 50% 100%)"
-          ></span>
-        {/if}
-      </button>
-    {/each}
+    <WaveformMarks
+      {cues}
+      {loop}
+      {pct}
+      draggable={false}
+      onpointerdown={(cue, e) => {
+        if (e.button !== 0) return
+        e.stopPropagation()
+        e.preventDefault()
+        if (e.currentTarget instanceof HTMLButtonElement) e.currentTarget.setPointerCapture(e.pointerId)
+        holding = true
+        hover = null
+        audition.playCue(track, cue)
+      }}
+      onpointerup={(_cue, e) => {
+        e.stopPropagation()
+        if (!holding) return
+        holding = false
+        audition.stop()
+      }}
+      onpointercancel={(_cue, e) => {
+        e.stopPropagation()
+        if (!holding) return
+        holding = false
+        audition.stop()
+      }}
+      onclick={(_cue, e) => e.stopPropagation()}
+    />
     {#if line != null}
       <div
         class="pointer-events-none absolute inset-y-0 w-px -translate-x-1/2 bg-white"
