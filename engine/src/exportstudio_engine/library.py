@@ -230,13 +230,6 @@ def _is_local(path: str) -> bool:
     return bool(path) and not STREAMING_URI.match(path)
 
 
-def _whole(value) -> int:
-    try:
-        return int(value or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
 def analysis_files(share_dir: Path, relative: str | None) -> list[Path]:
     """The DAT, EXT and 2EX files for one analysis path, limited to the library share folder."""
     if not relative or not str(relative).strip():

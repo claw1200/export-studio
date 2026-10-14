@@ -1,4 +1,3 @@
-import unicodedata
 from pathlib import Path
 
 ROOT_NAMES = ("PIONEER", ".PIONEER")
@@ -45,34 +44,6 @@ def volume_path(relative: str, volume: Path) -> Path:
     if not text or text.startswith("/") or any(part in ("", ".", "..") for part in text.split("/")):
         raise ValueError(f"Unsafe device path: {relative}")
     return inside(volume, volume / text)
-
-
-def sanitize(name: str, *, chars: int | None = None, byte_limit: int | None = None) -> str:
-    cleaned = []
-    for ch in name:
-        if ch in '/\\:*?"<>|' or ord(ch) < 0x20:
-            cleaned.append("_")
-        else:
-            cleaned.append(ch)
-    text = "".join(cleaned).rstrip(". ")
-    if chars is not None:
-        text = text[:chars].rstrip(". ")
-    if byte_limit is not None:
-        raw = text.encode("utf-8")
-        if len(raw) > byte_limit:
-            text = raw[:byte_limit].decode("utf-8", "ignore").rstrip(". ")
-    return text or "Unknown"
-
-
-def audio_relative(artist: str, album: str, filename: str) -> str:
-    artist_name = sanitize(artist, chars=48) if artist.strip() else "UnknownArtist"
-    album_name = sanitize(album, chars=48) if album.strip() else "UnknownAlbum"
-    file_name = sanitize(Path(filename).name, byte_limit=120)
-    return f"/Contents/{artist_name}/{album_name}/{file_name}"
-
-
-def path_key(relative: str) -> str:
-    return unicodedata.normalize("NFC", relative).casefold()
 
 
 def analysis_dir(audio_path: str, root_name: str) -> str:

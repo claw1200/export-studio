@@ -89,7 +89,6 @@ _SORTS = (
     "0B000C0000070000",
 )
 COLORS = ("Pink", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple")
-FORMATS = {"MP3": 1, "M4A": 4, "AAC": 4, "FLAC": 5, "WAV": 11, "AIFF": 12, "AIF": 12}
 
 
 @dataclass
