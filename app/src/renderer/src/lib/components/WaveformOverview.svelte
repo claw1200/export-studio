@@ -70,7 +70,7 @@
 </script>
 
 <div
-  class="relative h-full w-full cursor-ew-resize overflow-hidden rounded-md bg-black/30"
+  class="relative h-full w-full cursor-ew-resize overflow-hidden bg-black/30"
   bind:clientWidth={width}
   bind:clientHeight={height}
   role="slider"

@@ -57,7 +57,7 @@
 
 {#if wave}
   <div
-    class="relative h-[85%] max-h-[85%] w-full min-w-0 cursor-pointer overflow-hidden rounded-[3px] bg-black/40"
+    class="relative h-[85%] max-h-[85%] w-full min-w-0 cursor-pointer overflow-hidden bg-black/40"
     {@attach releaseOnRemove}
     bind:clientWidth={width}
     bind:clientHeight={height}

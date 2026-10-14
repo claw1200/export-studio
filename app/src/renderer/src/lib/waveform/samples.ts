@@ -10,7 +10,10 @@ export function waveStride(quality: number): number {
   return quality >= 100 ? 1 : 100 / Math.max(1, quality)
 }
 
-/** Entries `from`–`to` of `wf` (its rate), drawn from `samples` in the analysis's colours. */
+/**
+ * Entries `from`–`to` of `wf` (its rate), drawn from `samples` in the analysis's colours.
+ * `headroom` is the share of the height left clear above a full-scale peak.
+ */
 export function drawSampleWave(
   ctx: CanvasRenderingContext2D,
   wf: Waveform,
@@ -19,7 +22,8 @@ export function drawSampleWave(
   to: number,
   pw: number,
   ph: number,
-  quality: number
+  quality: number,
+  headroom = 0.04
 ): void {
   const span = to - from
   const data = samples.data
@@ -37,7 +41,7 @@ export function drawSampleWave(
   if (!(per > 0)) return
   const first = Math.floor(sample0 / per)
   const mid = ph / 2
-  const scale = (ph * 0.46) / samples.peak
+  const scale = (ph * (0.5 - headroom)) / samples.peak
 
   const at = (t: number): number => {
     if (t <= 0) return data[0]

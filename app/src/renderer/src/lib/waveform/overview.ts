@@ -1,5 +1,5 @@
 import type { WaveSamples } from '../deck/waves.svelte'
-import { drawAnalysisRgb, drawStackedBands } from './analysis'
+import { OVERVIEW_TOP_PAD, drawAnalysisRgb, drawStackedBands } from './analysis'
 import type { Waveform, WaveformMode } from './data'
 import { drawSampleWave } from './samples'
 
@@ -15,7 +15,7 @@ export function drawOverview(
   ctx.clearRect(0, 0, pw, ph)
   if (samples && samples.data.length > 1) {
     if (mode === '3band' && samples.bands && samples.bands.length >= 6) drawStackedBands(ctx, samples.bands, pw, ph)
-    else drawSampleWave(ctx, wf, samples, 0, wf.length, pw, ph, 100)
+    else drawSampleWave(ctx, wf, samples, 0, wf.length, pw, ph, 100, OVERVIEW_TOP_PAD)
     return
   }
   const bands = mode === '3band' ? (wf.previewBands ?? wf.bands) : null

@@ -3,6 +3,9 @@ import { BANDS_LOW_TO_HIGH } from './colors'
 import { columns, fitColumns, logicalCount, paintColumns, pixelGrid, readAmp, readRgbColumn } from './columns'
 import { bandFall } from './fall'
 
+/** Overview peaks stop this far short of the top of the waveform window. */
+export const OVERVIEW_TOP_PAD = 0.1
+
 /** Entries `from`–`to` of an RGB waveform across `pw` pixels. */
 export function drawAnalysisRgb(
   ctx: CanvasRenderingContext2D,
@@ -20,7 +23,7 @@ export function drawAnalysisRgb(
   fitColumns(pw)
   const { amp, color } = columns
   const { per, first } = grid
-  const reach = anchor === 'center' ? ph / 2 : ph
+  const reach = anchor === 'center' ? ph / 2 : ph * (1 - OVERVIEW_TOP_PAD)
   for (let x = 0; x < pw; x++) {
     const start = (first + x) * per
     const col = readRgbColumn(heights, colors, n, start, start + per)
@@ -104,7 +107,7 @@ export function drawStackedBands(ctx: CanvasRenderingContext2D, bands: Uint8Arra
     }
     if (sum > peak) peak = sum
   }
-  const scale = (ph - 1) / peak
+  const scale = (ph * (1 - OVERVIEW_TOP_PAD)) / peak
   for (let band = 0; band < 3; band++) {
     const floor = band === 0 ? floor0 : level[band - 1]
     const ceil = level[band]
