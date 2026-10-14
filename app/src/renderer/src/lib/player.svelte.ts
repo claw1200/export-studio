@@ -187,24 +187,24 @@ export class Player {
     if (this.track?.id === track.id) await this.open(track, false)
   }
 
-  eject(): void {
-    if (!this.track) return
+  private clearHeld(): void {
     this.cuePoint = 0
     this.holding = null
     this.previewOwner = null
     this.previewAt = null
     this.grid.cancel()
+  }
+
+  eject(): void {
+    if (!this.track) return
+    this.clearHeld()
     this.deck.unload()
     this.session.close()
     this.display.reload()
   }
 
   private async open(track: Track, autoplay: boolean): Promise<void> {
-    this.cuePoint = 0
-    this.holding = null
-    this.previewOwner = null
-    this.previewAt = null
-    this.grid.cancel()
+    this.clearHeld()
     if (autoplay) this.takeSpeakers()
     this.deck.load(track.id, track.duration)
     if (autoplay) this.deck.play()
