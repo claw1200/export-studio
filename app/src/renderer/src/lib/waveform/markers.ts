@@ -35,27 +35,31 @@ export function paintLoops(frame: Frame): void {
   ctx.fillRect(Math.round(x1) - edge, 0, edge, ph)
 }
 
+function eachVisibleBeat(times: number[], startMs: number, endMs: number, visit: (index: number) => void): void {
+  const first = firstIndexAtOrAfter(times, startMs)
+  for (let i = first; i < times.length && times[i] <= endMs; i++) visit(i)
+}
+
 export function paintBeatGrid(frame: Frame): void {
   const { ctx, wf, view, ph, dpr, from, to, toX } = frame
   const grid = view.beatgrid
   if (!grid) return
   const startMs = (from / wf.rate) * 1000
   const endMs = (to / wf.rate) * 1000
-  const first = firstIndexAtOrAfter(grid.times, startMs)
   const line = Math.max(1, dpr)
   if (view.gridEditing) {
-    for (let i = first; i < grid.times.length && grid.times[i] <= endMs; i++) {
+    eachVisibleBeat(grid.times, startMs, endMs, (i) => {
       const x = Math.round(toX(grid.times[i] / 1000))
       ctx.fillStyle = grid.beats[i] === 1 ? 'rgba(255,72,88,0.95)' : 'rgba(255,255,255,0.55)'
       ctx.fillRect(x, 0, line, ph)
-    }
+    })
     return
   }
   const cueXs = view.cues.map((cue) => Math.round(toX(cue.start / 1000)))
   const coveredByCue = (x: number): boolean => cueXs.some((cueX) => Math.abs(cueX - x) <= 2 * dpr)
-  for (let i = first; i < grid.times.length && grid.times[i] <= endMs; i++) {
+  eachVisibleBeat(grid.times, startMs, endMs, (i) => {
     const x = Math.round(toX(grid.times[i] / 1000))
-    if (coveredByCue(x)) continue
+    if (coveredByCue(x)) return
     const downbeat = grid.beats[i] === 1
     const tick = (downbeat ? 7 : 4) * dpr
     ctx.fillStyle = downbeat ? 'rgba(255,72,88,0.9)' : 'rgba(255,255,255,0.28)'
@@ -65,7 +69,7 @@ export function paintBeatGrid(frame: Frame): void {
       ctx.fillStyle = 'rgba(255,255,255,0.10)'
       ctx.fillRect(x, 0, line, ph)
     }
-  }
+  })
 }
 
 export function gridHandleIndex(
@@ -84,16 +88,15 @@ export function gridHandleIndex(
   const half = cssWidth / 2
   const startMs = (position - half / pxPerSecond) * 1000
   const endMs = (position + half / pxPerSecond) * 1000
-  const first = firstIndexAtOrAfter(grid.times, startMs)
   let best = -1
   let bestDx = Infinity
-  for (let i = first; i < grid.times.length && grid.times[i] <= endMs; i++) {
+  eachVisibleBeat(grid.times, startMs, endMs, (i) => {
     const dx = Math.abs(x - (half + (grid.times[i] / 1000 - position) * pxPerSecond))
     if (dx <= HANDLE_HIT_X && dx < bestDx) {
       bestDx = dx
       best = i
     }
-  }
+  })
   return best
 }
 
@@ -108,8 +111,7 @@ export function paintGridHandles(frame: Frame): void {
   const y = ph / 2
   const startMs = (from / wf.rate) * 1000
   const endMs = (to / wf.rate) * 1000
-  const first = firstIndexAtOrAfter(grid.times, startMs)
-  for (let i = first; i < grid.times.length && grid.times[i] <= endMs; i++) {
+  eachVisibleBeat(grid.times, startMs, endMs, (i) => {
     const x = Math.round(toX(grid.times[i] / 1000)) + line / 2
     const downbeat = grid.beats[i] === 1
     const hot = i === view.hotGridIndex
@@ -120,7 +122,7 @@ export function paintGridHandles(frame: Frame): void {
     ctx.lineWidth = Math.max(1, dpr)
     ctx.strokeStyle = 'rgba(0,0,0,0.5)'
     ctx.stroke()
-  }
+  })
 }
 
 function memoryCueBeforeHotCue(a: Cue, b: Cue): number {
