@@ -117,7 +117,7 @@ export class Deck {
     if (this.ready) this.send({ op: 'scrubBegin', deck: this.index })
   }
 
-  /** Moves the scrub target. `at` is the input event's timestamp, which sets how fast the head moves. */
+  /** `at` is the input event's timestamp, which sets how fast the head moves. */
   scrubTo(seconds: number, at: number = performance.now()): void {
     this.hold(seconds)
     if (this.ready) this.send({ op: 'scrubTo', deck: this.index, ms: seconds * 1000, at })
