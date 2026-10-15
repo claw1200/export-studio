@@ -94,6 +94,45 @@ class ConvertFileTests(unittest.TestCase):
             convert.convert_file(Path("/nonexistent/tune.wav"), {"format": "mp3", "bitrate": 320})
 
 
+def _mp3(path: Path, delay: int | None, tag: bytes = b"Info", id3: bool = False) -> None:
+    body = b"\xff\xfb\x90\x00" + bytes(32)
+    if delay is not None:
+        body += tag + struct.pack(">I", 1) + struct.pack(">I", 10)
+        body += b"LAME3.100" + bytes(12) + ((delay << 12) | 1000).to_bytes(3, "big") + bytes(60)
+    prefix = b"ID3\x03\x00\x00\x00\x00\x00\x05" + bytes(5) if id3 else b""
+    path.write_bytes(prefix + body + bytes(400))
+
+
+class Mp3DelayTests(unittest.TestCase):
+    def test_reads_the_encoder_delay_and_adds_the_decoder_delay(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "a.mp3"
+            _mp3(path, 576)
+            self.assertEqual(convert.mp3_delay(path), (1105, 44100))
+
+    def test_skips_an_id3_tag(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "a.mp3"
+            _mp3(path, 576, tag=b"Xing", id3=True)
+            self.assertEqual(convert.mp3_delay(path), (1105, 44100))
+
+    def test_no_tag_means_no_correction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "a.mp3"
+            _mp3(path, None)
+            self.assertIsNone(convert.mp3_delay(path))
+            self.assertEqual(convert.delay_offset_ms(Path(directory) / "a.wav", path), 0)
+
+    def test_offset_direction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            mp3 = Path(directory) / "a.mp3"
+            _mp3(mp3, 576)
+            wav = Path(directory) / "a.wav"
+            self.assertEqual(convert.delay_offset_ms(wav, mp3), 25)
+            self.assertEqual(convert.delay_offset_ms(mp3, wav), -25)
+            self.assertEqual(convert.delay_offset_ms(mp3, mp3), 0)
+
+
 class ResolverTests(unittest.TestCase):
     def test_environment_wins(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

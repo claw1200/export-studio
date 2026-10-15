@@ -1,5 +1,6 @@
 import os
 import shutil
+import struct
 import subprocess
 import tempfile
 from pathlib import Path
@@ -19,6 +20,10 @@ BITRATES = (96, 128, 160, 192, 224, 256, 320)
 SAMPLE_RATES = (44100, 48000, 88200, 96000)
 MODES = ("copy", "update", "update_delete")
 CONVERT_TIMEOUT = 60 * 30
+# MPEG-1 sample rates by header index; MPEG-2 and 2.5 halve and quarter them.
+MPEG_RATES = (44100, 48000, 32000)
+MP3_SCAN_BYTES = 1 << 16
+MP3_DECODER_DELAY = 529
 
 
 class ConvertError(RuntimeError):
@@ -57,8 +62,81 @@ def clean_preset(raw: dict) -> dict:
 
 
 def delay_offset_ms(source: Path, target: Path) -> int:
-    """Shift in milliseconds that cues need when the encoder adds or removes padding. None yet."""
-    return 0
+    """Shift in milliseconds that cues and the beatgrid need after converting `source` to `target`.
+
+    A decoder that ignores the LAME tag, as rekordbox does, plays an MP3 later by its encoder delay
+    plus the decoder delay. ffmpeg trims both. So going to MP3 moves positions later, and coming
+    from one moves them earlier. A file with no readable tag is not corrected.
+    """
+    return _mp3_delay_ms(target) - _mp3_delay_ms(source)
+
+
+def _mp3_delay_ms(path: Path) -> int:
+    if path.suffix.lower() != ".mp3":
+        return 0
+    try:
+        found = mp3_delay(path)
+    except OSError:
+        return 0
+    if found is None:
+        return 0
+    samples, rate = found
+    return round(samples * 1000 / rate)
+
+
+def _frame_header(data: bytes, pos: int) -> tuple[int, int, bool, bool] | None:
+    """(side info size, sample rate, mono, crc) of the MPEG audio frame header at `pos`."""
+    if pos + 4 > len(data) or data[pos] != 0xFF or data[pos + 1] & 0xE0 != 0xE0:
+        return None
+    version = (data[pos + 1] >> 3) & 3
+    layer = (data[pos + 1] >> 1) & 3
+    rate_index = (data[pos + 2] >> 2) & 3
+    if version == 1 or layer != 1 or rate_index == 3:
+        return None
+    rate = MPEG_RATES[rate_index] // (1 if version == 3 else 2 if version == 2 else 4)
+    mono = (data[pos + 3] >> 6) == 3
+    side = (17 if mono else 32) if version == 3 else (9 if mono else 17)
+    return side, rate, mono, not data[pos + 1] & 1
+
+
+def mp3_delay(path: Path) -> tuple[int, int] | None:
+    """Total samples an MP3 decoder that ignores gapless data adds at the start, and the sample rate.
+
+    Read from the encoder delay in the LAME/Xing Info tag, plus the decoder delay. None when the
+    file has no such tag.
+    """
+    with path.open("rb") as f:
+        data = f.read(MP3_SCAN_BYTES)
+    start = 0
+    if data[:3] == b"ID3" and len(data) >= 10:
+        size = (data[6] << 21) | (data[7] << 14) | (data[8] << 7) | data[9]
+        start = 10 + size + (10 if data[5] & 0x10 else 0)
+        if start >= len(data):
+            with path.open("rb") as f:
+                f.seek(start)
+                data = f.read(MP3_SCAN_BYTES)
+            start = 0
+    header = None
+    pos = start
+    for pos in range(start, min(len(data) - 4, start + 4096)):
+        header = _frame_header(data, pos)
+        if header:
+            break
+    if header is None:
+        return None
+    side, rate, _mono, crc = header
+    tag = pos + 4 + (2 if crc else 0) + side
+    if data[tag : tag + 4] not in (b"Xing", b"Info"):
+        return None
+    (flags,) = struct.unpack_from(">I", data, tag + 4)
+    lame = tag + 8 + 4 * bool(flags & 1) + 4 * bool(flags & 2) + 100 * bool(flags & 4) + 4 * bool(flags & 8)
+    if data[lame : lame + 4] not in (b"LAME", b"Lavc", b"Lavf") or lame + 24 > len(data):
+        return None
+    packed = int.from_bytes(data[lame + 21 : lame + 24], "big")
+    delay, padding = packed >> 12, packed & 0xFFF
+    if not delay and not padding:
+        return None
+    return delay + MP3_DECODER_DELAY, rate
 
 
 def output_path(source: Path, extension: str) -> Path:

@@ -232,6 +232,27 @@ def _check_grid(times: list[int], beats: list[int], bpms: list[float]) -> None:
         raise ValueError(f"Tempo must be between {MIN_GRID_BPM} and {MAX_GRID_BPM} BPM")
 
 
+def _shifted_grid_tags(path: Path, offset_ms: int) -> dict[str, bytes]:
+    """Beatgrid tags of one ANLZ file moved by `offset_ms`. The extended grid can't be rebuilt, so it is emptied."""
+    tags = _read_anlz(path)
+    if tags is None:
+        return {}
+    out: dict[str, bytes] = {}
+    grid = waveform.decode_beatgrid(tags)
+    if grid is not None and waveform.BEATGRID_TAG in tags:
+        keep = [i for i, ms in enumerate(grid["times"]) if ms + offset_ms >= 0]
+        if keep:
+            out[waveform.BEATGRID_TAG] = waveform.build_beatgrid(
+                tags[waveform.BEATGRID_TAG][0],
+                [grid["times"][i] + offset_ms for i in keep],
+                [grid["beats"][i] for i in keep],
+                [grid["bpms"][i] for i in keep],
+            )
+    if waveform.EXTENDED_BEATGRID_TAG in tags:
+        out[waveform.EXTENDED_BEATGRID_TAG] = waveform.clear_extended_beatgrid(tags[waveform.EXTENDED_BEATGRID_TAG][0])
+    return out
+
+
 def _is_local(path: str) -> bool:
     return bool(path) and not STREAMING_URI.match(path)
 
@@ -1226,7 +1247,16 @@ class Library:
         def update() -> None:
             row = content
             if copy:
-                row = db.add_content(stored, Title=content.Title)
+                # Removing a track only marks its row deleted, and add_content refuses a path that still has one.
+                removed = db.query(t.DjmdContent).filter_by(FolderPath=stored).first()
+                if removed is not None:
+                    if not removed.rb_local_deleted:
+                        raise ValueError("The converted file is already in the collection")
+                    removed.rb_local_deleted = 0
+                    row = removed
+                    _set(row, "Title", content.Title)
+                else:
+                    row = db.add_content(stored, Title=content.Title)
                 for column in COPIED_COLUMNS:
                     if getattr(content, column) is not None:
                         _set(row, column, getattr(content, column))
@@ -1246,7 +1276,11 @@ class Library:
                 row.FolderPath = stored
                 for cue in content.Cues:
                     if offset_ms and not cue.rb_local_deleted:
-                        _move_cue(content, cue, {"start": cue.InMsec + offset_ms, "end": None})
+                        _move_cue(
+                            content,
+                            cue,
+                            {"start": cue.InMsec + offset_ms, "end": (cue.OutMsec or 0) + offset_ms},
+                        )
             for column in STREAM_COLUMNS:
                 _set(row, column, fields.get(column))
             for column in ("FileNameL", "FileSize", "Length"):
@@ -1269,7 +1303,10 @@ class Library:
                 if not source.is_file():
                     continue
                 path = dat.with_suffix(source.suffix)
-                patched = anlz_build.patch_file(source.read_bytes(), {"PPTH": anlz_build.path_tag("?/" + name)})
+                replace = {"PPTH": anlz_build.path_tag("?/" + name)}
+                if offset_ms:
+                    replace.update(_shifted_grid_tags(source, offset_ms))
+                patched = anlz_build.patch_file(source.read_bytes(), replace)
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(patched)
         return result["id"]
