@@ -175,7 +175,7 @@
 
   function select(track: Track): void {
     library.selectOnly(track.id)
-    if (player.playing) return
+    if (player.playing || library.doubleClickToLoad) return
     clearTimeout(previewTimer)
     previewTimer = setTimeout(() => player.load(track), 80)
   }

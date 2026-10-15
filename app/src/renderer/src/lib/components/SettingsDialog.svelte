@@ -352,6 +352,12 @@
         {:else if section === 'general'}
           <div class="flex flex-col gap-1">
             {@render toggle(
+              'Double-click to load',
+              'Single-click only selects a track. Double-click loads it and starts playback.',
+              library.doubleClickToLoad,
+              () => library.setDoubleClickToLoad(!library.doubleClickToLoad)
+            )}
+            {@render toggle(
               'Quantise',
               'Scrubbing, the cue point and new cues snap to the nearest beat.',
               player.quantise,

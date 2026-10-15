@@ -103,6 +103,7 @@ export class Library {
   importArtwork = $state(getSetting('importArtwork') !== '0')
   hideStreaming = $state(getSetting('hideStreaming') !== '0')
   hidePresetTracks = $state(storedHidePresetTracks())
+  doubleClickToLoad = $state(getSetting('doubleClickToLoad') === '1')
   browserArtwork = $state<BrowserArtwork>(storedArtwork())
   hardwareGreen = $state(storedPlayer('hardwareGreen', DEFAULT_GREEN))
   importing = $state(false)
@@ -386,6 +387,11 @@ export class Library {
   setHidePresetTracks(on: boolean): void {
     this.hidePresetTracks = on
     setSetting('hidePresetTracks', on ? '1' : '0')
+  }
+
+  setDoubleClickToLoad(on: boolean): void {
+    this.doubleClickToLoad = on
+    setSetting('doubleClickToLoad', on ? '1' : '0')
   }
 
   /** A row the browser lists. File-list rows that are not in the collection always stay. */
