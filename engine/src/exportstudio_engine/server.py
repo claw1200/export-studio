@@ -21,7 +21,6 @@ log = logging.getLogger("exportstudio_engine")
 _out = sys.stdout
 _out_lock = threading.Lock()
 
-DAILY = 24 * 60 * 60
 DAILY_CHECK_TICKS = 300
 
 
@@ -98,7 +97,9 @@ class Engine:
             "backup.restore": lambda id: self.restore(id),
             "backup.delete": lambda id: self.delete_backup(id),
             "backup.settings": lambda: self.backups.settings(),
-            "backup.setSettings": lambda auto=None, keep=None: self.backups.set_settings(auto, keep),
+            "backup.setSettings": lambda auto=None, keep=None, interval=None: self.backups.set_settings(
+                auto, keep, interval
+            ),
         }
 
     @property
@@ -124,7 +125,8 @@ class Engine:
         if writable and not lib.writable and not self._backed_up and self.backups.settings()["auto"]:
             if lib.rekordbox_running():
                 raise RuntimeError(WRITE_BLOCKED)
-            self.back_up("before-edit")
+            if self._auto_due():
+                self.back_up("before-edit")
             self._backed_up = True
         lib.set_writable(bool(writable))
         return lib.info()
@@ -170,11 +172,13 @@ class Engine:
         emit("library.reloaded")
         return result
 
-    def _daily_due(self) -> bool:
-        if not self.backups.settings()["auto"]:
-            return False
+    def _auto_due(self) -> bool:
         latest = self.backups.latest_automatic()
-        return latest is None or time.time() - latest.get("created", 0) >= DAILY
+        interval = self.backups.settings()["interval"] * 3600
+        return latest is None or time.time() - latest.get("created", 0) >= interval
+
+    def _daily_due(self) -> bool:
+        return self.backups.settings()["auto"] and self._auto_due()
 
     def track_detail(self, id: str) -> dict:
         if str(id).startswith("usb:"):

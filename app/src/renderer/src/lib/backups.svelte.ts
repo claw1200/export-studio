@@ -5,6 +5,14 @@ import type { Player } from './player.svelte'
 import type { Backup, BackupProgress, BackupSettings } from './types'
 
 export const KEEP_CHOICES = [5, 10, 20] as const
+export const INTERVAL_CHOICES = [
+  { hours: 1, label: '1h' },
+  { hours: 3, label: '3h' },
+  { hours: 6, label: '6h' },
+  { hours: 12, label: '12h' },
+  { hours: 24, label: '1d' },
+  { hours: 48, label: '2d' }
+] as const
 
 export function backupDate(backup: Backup): string {
   return new Date(backup.created * 1000).toLocaleString([], {
@@ -16,7 +24,7 @@ export function backupDate(backup: Backup): string {
 /** Backups of the rekordbox library, made and restored by the engine. */
 export class Backups {
   list = $state.raw<Backup[]>([])
-  settings = $state<BackupSettings>({ auto: true, keep: 10 })
+  settings = $state<BackupSettings>({ auto: true, keep: 10, interval: 12 })
   progress = $state.raw<BackupProgress | null>(null)
   busy = $state<'backup' | 'restore' | null>(null)
   error = $state<string | null>(null)

@@ -242,6 +242,7 @@ export interface Backup {
 export interface BackupSettings {
   auto: boolean
   keep: number
+  interval: number
 }
 
 export interface BackupProgress {

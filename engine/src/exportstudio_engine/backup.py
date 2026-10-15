@@ -30,7 +30,8 @@ PARTIAL = ".partial"
 AUTO_REASONS = {"before-edit", "daily"}
 REASONS = AUTO_REASONS | {"manual", "pre-restore"}
 KEEP_CHOICES = (5, 10, 20)
-DEFAULT_SETTINGS = {"auto": True, "keep": 10}
+INTERVAL_CHOICES = (1, 3, 6, 12, 24, 48)  # hours
+DEFAULT_SETTINGS = {"auto": True, "keep": 10, "interval": 12}
 STORED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 COPY_ATTEMPTS = 3
 FORMAT_VERSION = 1
@@ -123,9 +124,11 @@ class Backups:
             out["auto"] = stored["auto"]
         if stored.get("keep") in KEEP_CHOICES:
             out["keep"] = stored["keep"]
+        if stored.get("interval") in INTERVAL_CHOICES:
+            out["interval"] = stored["interval"]
         return out
 
-    def set_settings(self, auto: bool | None = None, keep: int | None = None) -> dict:
+    def set_settings(self, auto: bool | None = None, keep: int | None = None, interval: int | None = None) -> dict:
         out = self.settings()
         if auto is not None:
             out["auto"] = bool(auto)
@@ -133,6 +136,10 @@ class Backups:
             if keep not in KEEP_CHOICES:
                 raise ValueError(f"Keep must be one of {', '.join(map(str, KEEP_CHOICES))}")
             out["keep"] = keep
+        if interval is not None:
+            if interval not in INTERVAL_CHOICES:
+                raise ValueError(f"Interval must be one of {', '.join(map(str, INTERVAL_CHOICES))} hours")
+            out["interval"] = interval
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / SETTINGS).write_text(json.dumps(out))
         self._prune(out["keep"])

@@ -24,7 +24,7 @@
   } from '@lucide/svelte'
   import { accent, DEFAULT_ACCENT } from '$lib/accent.svelte'
   import { BPM_RANGES, MAX_CONCURRENCY } from '$lib/analysis.svelte'
-  import { backupDate, KEEP_CHOICES } from '$lib/backups.svelte'
+  import { backupDate, INTERVAL_CHOICES, KEEP_CHOICES } from '$lib/backups.svelte'
   import {
     BIT_DEPTHS,
     BITRATES,
@@ -69,6 +69,7 @@
     'pre-restore': 'Replaced by a restore'
   }
   const KEEP: Choice[] = KEEP_CHOICES.map((n) => ({ id: String(n), label: String(n) }))
+  const INTERVAL: Choice[] = INTERVAL_CHOICES.map((c) => ({ id: String(c.hours), label: c.label }))
   const GROUPS: ActionGroup[] = ['Playback', 'Cues', 'Library', 'App']
   const PLACEMENTS: { id: CuePlacement; label: string }[] = [
     { id: 'playhead', label: 'Playhead' },
@@ -400,9 +401,16 @@
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Backups</h3>
             {@render toggle(
               'Automatic backups',
-              'Back up the library before the first edit each time you unlock editing, and once a day. Skipped when nothing has changed.',
+              'Back up the library before the first edit each time you unlock editing, and periodically while the app is open. Skipped when nothing has changed.',
               backups.settings.auto,
               () => void backups.setSettings({ auto: !backups.settings.auto })
+            )}
+            {@render choice(
+              'Minimum time between backups',
+              'Automatic backups are skipped if one was already taken within this time.',
+              INTERVAL,
+              String(backups.settings.interval),
+              (id) => void backups.setSettings({ interval: Number(id) })
             )}
             {@render choice(
               'Keep',
