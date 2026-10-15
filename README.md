@@ -6,6 +6,11 @@
 
 Export Studio is a library browser for rekordbox. Browse your collection, preview tracks, edit playlists and tags, analyse new files, and copy playlists to a USB stick. Your library stays in rekordbox's own database.
 
+## Download
+
+Export Studio is currently in alpha, the app is not considered stable and anything is subject to change.
+
+Builds can be downloaded from the [releases page](https://github.com/claw1200/export-studio/releases).
 
 ## Why Export Studio?
 
@@ -18,7 +23,7 @@ Export Studio looks to compltly overhaul the avalible feature set of a library m
 I would eventally like to add support for Serato and other DJ software libraries, so that DJs using these programs can also export a rekordbox USB for their DJ sets. However, I want to get full feature parity with rekordbox before I add support for other libraries.
 
 
-
+## Key Features
 
 
 | Feature                           | Export Studio | rekordbox |
@@ -42,8 +47,6 @@ I would eventally like to add support for Serato and other DJ software libraries
 - 🔴 Can't
 - ⚫️ Maybe
 
-
-## Key Features
 
 Export Studio's goal is not just to strip down Rekordbox, but improve on the feature set. Export Studio improves:
 
@@ -102,7 +105,3 @@ Select multiple tracks to edit their metadata in bulk.
 You can also change your preferences to write the changes to the actual file as well as the database.
 
 <img src="preview/images/editing_metadata.webp" alt="Editing a track's title, artist, rating, and colour." height="480">
-
-## Download
-
-Export Studio is currently in alpha, and can be downloaded from the [releases page](https://github.com/claw1200/export-studio/releases).
