@@ -307,10 +307,10 @@
               () => library.setHideStreaming(!library.hideStreaming)
             )}
             {@render toggle(
-              'Hide default tracks',
+              'Hide preset tracks',
               'Leave the sampler presets rekordbox installs, such as Groove Circuit, out of the collection, playlists, histories and tags. Samples you record stay listed. The presets stay in rekordbox.',
-              library.hideDefaultTracks,
-              () => library.setHideDefaultTracks(!library.hideDefaultTracks)
+              library.hidePresetTracks,
+              () => library.setHidePresetTracks(!library.hidePresetTracks)
             )}
           </section>
 

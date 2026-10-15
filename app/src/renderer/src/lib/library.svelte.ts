@@ -6,7 +6,7 @@ import { buildTree } from './library/tree'
 import { duplicateGroups, rankCopies } from './library/duplicates'
 import { verdictForTrack } from './hardware/compatibility'
 import { DEFAULT_GREEN, playerById } from './hardware/players'
-import { isDefaultRekordboxTrack } from './library/factory'
+import { isRekordboxPresetTrack } from './library/factory'
 import { loadViews, looseTrack, matchesTrack, pathKey, saveViews, type FileEntry } from './library/views'
 import { getSetting, setSetting } from './settings'
 import type {
@@ -33,6 +33,10 @@ export type BrowserArtwork = 'fill' | 'whole'
 
 function storedArtwork(): BrowserArtwork {
   return getSetting('browserArtwork') === 'whole' ? 'whole' : 'fill'
+}
+
+function storedHidePresetTracks(): boolean {
+  return getSetting('hidePresetTracks') !== '0'
 }
 
 function storedPlayer(key: string, fallback: string): string {
@@ -98,7 +102,7 @@ export class Library {
   writeFileTags = $state(getSetting('writeFileTags') === '1')
   importArtwork = $state(getSetting('importArtwork') !== '0')
   hideStreaming = $state(getSetting('hideStreaming') !== '0')
-  hideDefaultTracks = $state(getSetting('hideDefaultTracks') !== '0')
+  hidePresetTracks = $state(storedHidePresetTracks())
   browserArtwork = $state<BrowserArtwork>(storedArtwork())
   hardwareGreen = $state(storedPlayer('hardwareGreen', DEFAULT_GREEN))
   importing = $state(false)
@@ -379,16 +383,16 @@ export class Library {
     setSetting('hideStreaming', on ? '1' : '0')
   }
 
-  setHideDefaultTracks(on: boolean): void {
-    this.hideDefaultTracks = on
-    setSetting('hideDefaultTracks', on ? '1' : '0')
+  setHidePresetTracks(on: boolean): void {
+    this.hidePresetTracks = on
+    setSetting('hidePresetTracks', on ? '1' : '0')
   }
 
   /** A row the browser lists. File-list rows that are not in the collection always stay. */
   private shown(track: Track): boolean {
     if (track.collected === false) return true
     if (this.hideStreaming && track.streaming) return false
-    if (this.hideDefaultTracks && isDefaultRekordboxTrack(track.path)) return false
+    if (this.hidePresetTracks && isRekordboxPresetTrack(track.path)) return false
     return true
   }
 
