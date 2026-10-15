@@ -12,7 +12,7 @@
   import { HOT_CUE_KINDS } from '$lib/format'
   import { isFileDrag } from '$lib/library/drop'
   import { getSetting, setSetting } from '$lib/settings'
-  import type { Track } from '$lib/types'
+  import type { ConvertPreset, Track } from '$lib/types'
   import TitleBar from '$lib/components/TitleBar.svelte'
   import Sidebar from '$lib/components/Sidebar.svelte'
   import TrackTable from '$lib/components/TrackTable.svelte'
@@ -22,6 +22,7 @@
   import TrackEditDialog from '$lib/components/TrackEditDialog.svelte'
   import RelocateDialog from '$lib/components/RelocateDialog.svelte'
   import RemoveDialog from '$lib/components/RemoveDialog.svelte'
+  import ConvertDialog from '$lib/components/ConvertDialog.svelte'
   import type { SettingsSection } from '$lib/components/SettingsDialog.svelte'
 
   const library = new Library()
@@ -130,6 +131,7 @@
   let editing = $state.raw<Track[] | null>(null)
   let relocating = $state.raw<Track[] | null>(null)
   let removing = $state.raw<Track[] | null>(null)
+  let converting = $state.raw<{ tracks: Track[]; preset: ConvertPreset } | null>(null)
   let settings = $state<SettingsSection | null>(null)
 
   function collectionTracks(tracks: Track[]): Track[] {
@@ -146,6 +148,12 @@
   function remove(tracks: Track[]): void {
     whenCollectionWritable(tracks, 'Unlock editing to remove tracks', (rows) => {
       removing = rows
+    })
+  }
+
+  function convert(tracks: Track[], preset: ConvertPreset): void {
+    whenCollectionWritable(tracks, 'Unlock editing to convert tracks', (rows) => {
+      converting = { tracks: rows, preset }
     })
   }
 
@@ -368,6 +376,7 @@
           onautorelocate={autoRelocate}
           onremove={remove}
           onanalyse={analyse}
+          onconvert={convert}
         />
       </main>
       {#if inspectorOpen}
@@ -394,5 +403,9 @@
 
   {#if removing}
     <RemoveDialog tracks={removing} onclose={() => (removing = null)} />
+  {/if}
+
+  {#if converting}
+    <ConvertDialog tracks={converting.tracks} preset={converting.preset} onclose={() => (converting = null)} />
   {/if}
 </div>

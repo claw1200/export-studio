@@ -10,6 +10,8 @@ import { isDefaultRekordboxTrack } from './library/factory'
 import { loadViews, looseTrack, matchesTrack, pathKey, saveViews, type FileEntry } from './library/views'
 import { getSetting, setSetting } from './settings'
 import type {
+  ConvertMode,
+  ConvertPreset,
   Cue,
   ImportResult,
   LibraryInfo,
@@ -96,6 +98,7 @@ export class Library {
   browserArtwork = $state<BrowserArtwork>(storedArtwork())
   hardwareGreen = $state(storedPlayer('hardwareGreen', DEFAULT_GREEN))
   importing = $state(false)
+  converting = $state(false)
   renamingId = $state<string | null>(null)
   dragging = $state.raw<string[] | null>(null)
   private noticeTimer: ReturnType<typeof setTimeout> | undefined
@@ -246,6 +249,10 @@ export class Library {
       if (event === 'library.changed') this.changed = true
       if (event === 'usb.volumes') void this.refreshDevices()
       if (event === 'usb.progress') this.syncProgress = data as SyncProgress
+      if (event === 'convert.progress') {
+        const { done, total } = data as { done: number; total: number }
+        if (this.converting && done < total) this.notify(`Converting track ${done + 1} of ${total}…`)
+      }
       if (event === 'library.rekordbox') {
         const running = Boolean((data as { running?: boolean } | undefined)?.running)
         if (this.info && this.info.rekordboxRunning !== running) {
@@ -655,6 +662,37 @@ export class Library {
     }
     this.notify(`Removed ${count} from the collection`)
     return true
+  }
+
+  /** Encode tracks to `preset` and point the library at the new files, or add them as copies. */
+  async convertTracks(ids: string[], preset: ConvertPreset, mode: ConvertMode): Promise<boolean> {
+    const local = ids.filter((id) => !id.startsWith('usb:') && !id.startsWith('file:'))
+    if (!local.length || this.converting) return false
+    this.converting = true
+    try {
+      const result = await this.edit(() => api.convertTracks(local, preset, mode))
+      if (!result) return false
+      dropCaches()
+      const known = new Set(this.tracks.map((t) => t.id))
+      const fresh = result.tracks.filter((t) => !known.has(t.id))
+      if (fresh.length) this.tracks = [...this.tracks, ...fresh]
+      this.applyTracks(result.tracks.filter((t) => known.has(t.id)))
+      const count = result.ids.length === 1 ? 'one track' : `${result.ids.length} tracks`
+      let message = `Converted ${count}`
+      if (result.originals.length) {
+        const failed = await window.api.trash(result.originals)
+        if (failed.length) message += `, but couldn\u2019t move ${failed.length} original file(s) to the Trash`
+      }
+      if (result.failed.length) {
+        const first = result.failed[0]
+        const title = this.byId.get(first.id)?.title ?? 'a track'
+        message += `. ${result.failed.length} failed (${title}: ${first.error})`
+      }
+      this.notify(result.ids.length || result.failed.length ? message : 'Nothing to convert')
+      return result.failed.length === 0
+    } finally {
+      this.converting = false
+    }
   }
 
   async addToPlaylist(playlistId: string, ids: string[]): Promise<void> {

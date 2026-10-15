@@ -1,5 +1,6 @@
 import {
   AudioWaveform,
+  FileAudio,
   FilePlus,
   FileSearch,
   Folder,
@@ -17,11 +18,13 @@ import {
   Trash2
 } from '@lucide/svelte'
 import { TRACK_COLORS } from './format'
+import { matchesPreset, presetLabel } from './convertPresets'
+import { loadPresets } from './convertPresetStore'
 import type { Library } from './library.svelte'
 import type { TreeNode } from './library/tree'
 import { tidy, type MenuEntry } from './menu'
 import type { Player } from './player.svelte'
-import type { Track, TrackEdit } from './types'
+import type { ConvertPreset, Track, TrackEdit } from './types'
 
 export type TrackMenuShortcut =
   'library.editInfo' | 'library.removeFromPlaylist' | 'library.removeFromCollection' | 'library.analyse'
@@ -31,6 +34,7 @@ export interface TrackMenuActions {
   autoRelocate: (tracks: Track[]) => void
   remove: (tracks: Track[]) => void
   analyse: (tracks: Track[]) => void
+  convert: (tracks: Track[], preset: ConvertPreset) => void
   shortcut: (id: TrackMenuShortcut) => string | undefined
 }
 
@@ -101,7 +105,7 @@ export function trackMenu(library: Library, player: Player, tracks: Track[], act
   const missing = tracks.filter((t) => t.missing && !t.id.startsWith('usb:'))
   const device = tracks.some((t) => t.id.startsWith('usb:'))
   const analysable = tracks.filter((t) => !t.missing && !t.streaming)
-
+  const presets = loadPresets()
   return tidy([
     tracks.length > 1 && { kind: 'header', label: `${tracks.length} tracks` },
     {
@@ -185,6 +189,18 @@ export function trackMenu(library: Library, player: Player, tracks: Track[], act
       shortcut: actions.shortcut('library.analyse'),
       disabled: locked || !analysable.length,
       onselect: () => actions.analyse(analysable)
+    },
+    !device && {
+      label: 'Convert file type',
+      icon: FileAudio,
+      disabled: locked || !analysable.length,
+      items: presets.length
+        ? presets.map((preset) => ({
+            label: presetLabel(preset),
+            disabled: analysable.length === 1 && matchesPreset(analysable[0], preset),
+            onselect: () => actions.convert(analysable, preset)
+          }))
+        : [{ kind: 'header', label: 'Add formats in Settings' }]
     },
     !device && {
       label: single ? 'Remove from collection…' : `Remove ${tracks.length} tracks from collection…`,

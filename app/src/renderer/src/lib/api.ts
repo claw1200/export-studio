@@ -5,6 +5,9 @@ import type {
   BeatgridSaved,
   Cue,
   CueMove,
+  ConvertMode,
+  ConvertPreset,
+  ConvertResult,
   ImportResult,
   LibraryInfo,
   MissingScan,
@@ -55,6 +58,8 @@ export const api = {
   importTracks: (paths: string[], playlistId: string | null, artwork: boolean) =>
     call<ImportResult>('track.import', { paths, playlistId, artwork }),
   removeFromCollection: (ids: string[]) => call<RemoveResult>('track.removeFromCollection', { ids }),
+  convertTracks: (ids: string[], preset: ConvertPreset, mode: ConvertMode) =>
+    call<ConvertResult>('track.convert', { ids, preset, mode }),
   addToPlaylist: (id: string, trackIds: string[]) => call<string[]>('playlist.add', { id, trackIds }),
   removeFromPlaylist: (id: string, trackIds: string[]) => call<string[]>('playlist.remove', { id, trackIds }),
   moveInPlaylist: (id: string, trackIds: string[], index: number) =>

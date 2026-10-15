@@ -22,6 +22,12 @@ function usbExport(): string {
   return join(process.resourcesPath, 'engine', name)
 }
 
+function ffmpegBinary(): string {
+  const name = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
+  if (is.dev) return resolve(app.getAppPath(), 'resources', 'native', name)
+  return join(process.resourcesPath, 'engine', name)
+}
+
 function engineCommand(): { cmd: string; args: string[]; cwd: string } {
   if (is.dev) {
     const cwd = resolve(app.getAppPath(), '..', 'engine')
@@ -45,7 +51,7 @@ export class Engine {
     this.ready = new Promise((resolveReady, rejectReady) => {
       const proc = spawn(cmd, args, {
         cwd,
-        env: { ...process.env, PYTHONUNBUFFERED: '1', EXPORTSTUDIO_USB_EXPORT: usbExport() }
+        env: { ...process.env, PYTHONUNBUFFERED: '1', EXPORTSTUDIO_USB_EXPORT: usbExport(), EXPORTSTUDIO_FFMPEG: ffmpegBinary() }
       })
       this.proc = proc
 

@@ -68,6 +68,9 @@ class Engine:
             "track.inspect": lambda tracks: self.lib.inspect_tracks(tracks),
             "track.import": lambda paths, playlistId=None, artwork=True: self.lib.import_tracks(paths, playlistId, artwork),
             "track.removeFromCollection": lambda ids: self.lib.remove_from_collection(ids),
+            "track.convert": lambda ids, preset, mode: self.lib.convert_tracks(
+                ids, preset, mode, on_progress=lambda e: emit("convert.progress", e)
+            ),
             "track.applyAnalysis": lambda id, result, options: self.lib.apply_analysis(id, result, options),
             "playlist.add": lambda id, trackIds: self.lib.add_to_playlist(id, trackIds),
             "playlist.remove": lambda id, trackIds: self.lib.remove_from_playlist(id, trackIds),

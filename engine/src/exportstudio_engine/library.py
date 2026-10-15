@@ -18,6 +18,7 @@ from sqlalchemy import event, select
 from sqlalchemy.orm import aliased
 
 from . import anlz_build, artwork
+from . import convert as converter
 from .analysed import ANALYSED
 from . import tags as file_tags
 from . import waveform
@@ -76,6 +77,12 @@ def stream_fields(path: Path, info: dict | None = None) -> dict:
     return fields
 
 
+# Track columns a converted copy inherits; file, analysis and sync columns are rebuilt.
+COPIED_COLUMNS = (
+    "Title", "ArtistID", "AlbumID", "GenreID", "BPM", "TrackNo", "Commnt", "Rating", "ReleaseYear",
+    "RemixerID", "LabelID", "OrgArtistID", "KeyID", "ColorID", "ImagePath", "DiscNo", "ComposerID",
+    "Subtitle", "ReleaseDate", "DateCreated", "Lyricist", "ISRC", "DisableQuantize", "HotCueAutoLoad",
+)
 CLOUD_LIBRARY_SYNC = "100000"
 HIDDEN_PLAYLISTS = {CLOUD_LIBRARY_SYNC}
 WRITE_BLOCKED = "Close rekordbox before editing the library"
@@ -1164,6 +1171,108 @@ class Library:
             discard_analysis_files(files)
         self._content_cache.clear()
         return {"removed": sorted(drop), "playlists": self.playlists()}
+
+    def convert_tracks(self, ids: list[str], preset: dict, mode: str, on_progress=None) -> dict:
+        """Encode each track's audio file to `preset` and point the library at the result.
+
+        `copy` adds a new track with the cues and analysis of the original. `update` repoints the
+        track and leaves the old file. `update_delete` does the same and lists the old file in
+        `originals` for the caller to remove. A track that fails is left as it was.
+        """
+        if mode not in converter.MODES:
+            raise ValueError(f"Unknown conversion mode: {mode}")
+        preset = converter.clean_preset(preset)
+        db = self._writable_db()
+        ordered = list(dict.fromkeys(ids))
+        changed: list[str] = []
+        originals: list[str] = []
+        failed: list[dict] = []
+        for done, content_id in enumerate(ordered):
+            if on_progress:
+                on_progress({"done": done, "total": len(ordered), "id": content_id})
+            target: Path | None = None
+            try:
+                content = self._content(content_id)
+                source = Path(content.FolderPath or "")
+                target = converter.convert_file(source, preset)
+                info = file_tags.read(target)
+                offset = converter.delay_offset_ms(source, target)
+                result_id = self._apply_conversion(db, content, target, info, offset, mode == "copy")
+            except Exception as e:
+                log.warning("Could not convert track %s: %s", content_id, e)
+                if target is not None:
+                    target.unlink(missing_ok=True)
+                failed.append({"id": content_id, "error": str(e) or e.__class__.__name__})
+                continue
+            changed.append(result_id)
+            if mode == "update_delete":
+                originals.append(str(source))
+        if on_progress:
+            on_progress({"done": len(ordered), "total": len(ordered)})
+        self._content_cache.clear()
+        return {"tracks": self.tracks(ids=changed) if changed else [], "ids": changed, "originals": originals, "failed": failed}
+
+    def _apply_conversion(
+        self, db: Rekordbox6Database, content: t.DjmdContent, target: Path, info: dict, offset_ms: int, copy: bool
+    ) -> str:
+        stored = _stored_path(target)
+        fields = stream_fields(target, info)
+        old_files = analysis_files(self.share_dir, content.AnalysisDataPath)
+        result: dict = {}
+
+        def shifted(msec: int) -> int:
+            return _clamp_msec(content, msec + offset_ms) if offset_ms else msec
+
+        def update() -> None:
+            row = content
+            if copy:
+                row = db.add_content(stored, Title=content.Title)
+                for column in COPIED_COLUMNS:
+                    if getattr(content, column) is not None:
+                        _set(row, column, getattr(content, column))
+                row.StockDate = datetime.now().strftime("%Y-%m-%d")
+                for cue in content.Cues:
+                    if cue.rb_local_deleted:
+                        continue
+                    clone = _new_cue(db, row, cue.Kind, shifted(cue.InMsec))
+                    for column in ("Color", "ColorTableIndex", "Comment", "ActiveLoop", "BeatLoopSize"):
+                        setattr(clone, column, getattr(cue, column))
+                    if cue.OutMsec is not None and cue.OutMsec >= 0:
+                        out = shifted(cue.OutMsec)
+                        clone.OutMsec = out
+                        clone.OutFrame = out * CDJ_FRAMES_PER_SECOND // 1000
+                    db.add(clone)
+            else:
+                row.FolderPath = stored
+                for cue in content.Cues:
+                    if offset_ms and not cue.rb_local_deleted:
+                        _move_cue(content, cue, {"start": cue.InMsec + offset_ms, "end": None})
+            for column in STREAM_COLUMNS:
+                _set(row, column, fields.get(column))
+            for column in ("FileNameL", "FileSize", "Length"):
+                if column in fields:
+                    _set(row, column, fields[column])
+            if old_files and old_files[0].with_suffix(".DAT").is_file():
+                relative = row.AnalysisDataPath
+                if copy:
+                    relative = f"/PIONEER/USBANLZ/{row.UUID[:3]}/{row.UUID[3:]}/ANLZ0000.DAT"
+                    row.AnalysisDataPath = relative
+                    row.Analysed = content.Analysed
+                result["files"] = (relative, target.name)
+            result["id"] = str(row.ID)
+
+        _commit(db, update)
+        if "files" in result:
+            relative, name = result["files"]
+            dat = self.share_dir / relative.strip("/\\")
+            for source in old_files:
+                if not source.is_file():
+                    continue
+                path = dat.with_suffix(source.suffix)
+                patched = anlz_build.patch_file(source.read_bytes(), {"PPTH": anlz_build.path_tag("?/" + name)})
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(patched)
+        return result["id"]
 
     def apply_analysis(self, content_id: str, result: dict, options: dict) -> dict:
         """Write an analysis from the native analyser: the ANLZ files, BPM, key and analysed flag.

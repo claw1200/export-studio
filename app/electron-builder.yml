@@ -18,6 +18,11 @@ extraResources:
     to: engine
   - from: resources/native/es-usb
     to: engine/es-usb
+  - from: resources/native
+    to: engine
+    filter:
+      - ffmpeg
+      - ffmpeg.exe
 win:
   executableName: ExportStudio
   icon: build/icon.ico

@@ -16,6 +16,7 @@
     "dev": "node scripts/build-native.mjs && electron-vite dev",
     "build:native": "node scripts/build-native.mjs",
     "build:native:debug": "node scripts/build-native.mjs --debug",
+    "build:ffmpeg": "node scripts/build-ffmpeg.mjs",
     "test:native": "cd ../native && cargo test --workspace",
     "build": "npm run typecheck && electron-vite build",
     "build:engine": "cd ../engine && uv run pyinstaller --noconfirm --onedir --name exportstudio-engine --collect-data pyrekordbox --collect-binaries sqlcipher3 --hidden-import sqlcipher3.dbapi2 --collect-submodules mutagen --log-level WARN entry.py",

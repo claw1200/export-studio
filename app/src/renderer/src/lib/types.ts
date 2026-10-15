@@ -87,6 +87,25 @@ export interface RemoveResult {
   playlists: TreeItem[]
 }
 
+export type ConvertFormat = 'wav' | 'aiff' | 'flac' | 'alac' | 'mp3' | 'aac'
+export type ConvertMode = 'copy' | 'update' | 'update_delete'
+
+/** Lossless formats carry a sample rate and bit depth; lossy ones a bitrate in kbps. */
+export interface ConvertPreset {
+  format: ConvertFormat
+  sampleRate?: number
+  bitDepth?: number
+  bitrate?: number
+}
+
+export interface ConvertResult {
+  tracks: Track[]
+  ids: string[]
+  /** Source files of tracks converted with `update_delete`, for the caller to remove. */
+  originals: string[]
+  failed: { id: string; error: string }[]
+}
+
 export interface TreeItem {
   id: string
   name: string

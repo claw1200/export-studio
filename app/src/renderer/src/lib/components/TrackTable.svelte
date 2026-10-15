@@ -22,7 +22,7 @@
   import { menuAt, tidy, type MenuEntry, type MenuRequest } from '$lib/menu'
   import { getSetting, setSetting } from '$lib/settings'
   import { fileMenu, trackMenu, type TrackMenuShortcut } from '$lib/trackMenu'
-  import type { Track } from '$lib/types'
+  import type { ConvertPreset, Track } from '$lib/types'
   import ConfirmDialog from './ConfirmDialog.svelte'
   import ContextMenu from './ContextMenu.svelte'
   import WaveformThumb from './WaveformThumb.svelte'
@@ -34,7 +34,8 @@
     onedit,
     onautorelocate,
     onremove,
-    onanalyse
+    onanalyse,
+    onconvert
   }: {
     onselect: (track: Track) => void
     onactivate: (track: Track) => void
@@ -42,6 +43,7 @@
     onautorelocate: (tracks: Track[]) => void
     onremove: (tracks: Track[]) => void
     onanalyse: (tracks: Track[]) => void
+    onconvert: (tracks: Track[], preset: ConvertPreset) => void
   } = $props()
 
   const { library, player, keybinds, analysis } = getApp()
@@ -351,6 +353,7 @@
               autoRelocate: onautorelocate,
               remove: onremove,
               analyse: onanalyse,
+              convert: onconvert,
               shortcut
             })
           : []),
