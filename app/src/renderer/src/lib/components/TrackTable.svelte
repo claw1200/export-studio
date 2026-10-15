@@ -327,7 +327,7 @@
     library.dropFiles(paths.filter((path) => !gone.has(path)))
     if (failed.length) {
       const files = failed.length === 1 ? 'one file' : `${failed.length} files`
-      library.notify(`Couldn’t move ${files} to the ${trashName}`)
+      library.notify(`Couldn’t move ${files} to the ${trashName}`, 'error')
     }
   }
 

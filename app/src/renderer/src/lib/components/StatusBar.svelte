@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { AlertTriangle, LoaderCircle, X } from '@lucide/svelte'
+  import { AlertTriangle, CircleAlert, Info, LoaderCircle, X } from '@lucide/svelte'
+  import type { NoticeLevel } from '$lib/library.svelte'
   import { getApp } from '$lib/context'
   import { formatSize, formatTotal } from '$lib/format'
 
@@ -15,7 +16,19 @@
     return { duration, size }
   })
 
-  const message = $derived(player.editError ?? library.editError ?? library.lockError ?? player.audioError)
+  const notice = $derived.by((): { message: string; level: NoticeLevel } | null => {
+    if (player.editError) return { message: player.editError, level: 'error' }
+    if (library.editError) return { message: library.editError, level: library.editLevel }
+    if (library.lockError) return { message: library.lockError, level: library.lockLevel }
+    if (player.audioError) return { message: player.audioError, level: 'error' }
+    return null
+  })
+
+  const NOTICE_STYLES: Record<NoticeLevel, string> = {
+    info: 'border-accent/60 bg-accent/10 text-accent',
+    warning: 'border-warn/60 bg-warn/10 text-warn',
+    error: 'border-danger/60 bg-danger/10 text-danger'
+  }
 </script>
 
 <footer
@@ -32,14 +45,22 @@
     <span class="text-accent">Loading…</span>
   {/if}
 
-  {#if message}
+  {#if notice}
     <span
-      class="absolute top-1/2 left-1/2 flex h-5 max-w-[40%] -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-md border border-warn/60 bg-warn/10 px-2 text-warn"
-      role="status"
-      title={message}
+      class="absolute top-1/2 left-1/2 flex h-5 max-w-[40%] -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-md border px-2 {NOTICE_STYLES[
+        notice.level
+      ]}"
+      role={notice.level === 'error' ? 'alert' : 'status'}
+      title={notice.message}
     >
-      <AlertTriangle class="size-3 shrink-0" />
-      <span class="truncate">{message}</span>
+      {#if notice.level === 'error'}
+        <CircleAlert class="size-3 shrink-0" />
+      {:else if notice.level === 'warning'}
+        <AlertTriangle class="size-3 shrink-0" />
+      {:else}
+        <Info class="size-3 shrink-0" />
+      {/if}
+      <span class="truncate">{notice.message}</span>
     </span>
   {/if}
 
@@ -54,6 +75,20 @@
           ></span>
         </span>
       {/if}
+    </span>
+  {/if}
+
+  {#if library.convertProgress}
+    {@const { done, total } = library.convertProgress}
+    <span class="ml-auto flex items-center gap-2 text-muted" role="status">
+      <LoaderCircle class="size-3 animate-spin text-accent" />
+      <span>Converting {Math.min(done + 1, total).toLocaleString()} of {total.toLocaleString()}</span>
+      <span class="h-1 w-20 overflow-hidden rounded-full bg-line">
+        <span
+          class="block h-full rounded-full bg-accent transition-[width]"
+          style:width="{(100 * done) / Math.max(total, 1)}%"
+        ></span>
+      </span>
     </span>
   {/if}
 
@@ -84,7 +119,7 @@
   {/if}
 
   <span
-    class="truncate {analysis.running || backups.progress ? '' : 'ml-auto'}"
+    class="truncate {analysis.running || backups.progress || library.convertProgress ? '' : 'ml-auto'}"
     title={library.info?.dbPath}
   >
     {library.info?.rekordboxRunning ? 'rekordbox is running' : 'rekordbox is closed'}

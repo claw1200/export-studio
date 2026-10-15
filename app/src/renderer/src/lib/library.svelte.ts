@@ -56,6 +56,8 @@ function dropCaches(): void {
 const READ_ONLY = 'Unlock editing to change the library'
 const NOTICE_MS = 6000
 
+export type NoticeLevel = 'info' | 'warning' | 'error'
+
 export class Library {
   tracks = $state.raw<Track[]>([])
   playlists = $state.raw<TreeItem[]>([])
@@ -78,6 +80,7 @@ export class Library {
   changed = $state(false)
   switching = $state(false)
   lockError = $state<string | null>(null)
+  lockLevel = $state<NoticeLevel>('error')
 
   writable = $derived(this.info?.writable ?? false)
 
@@ -91,6 +94,7 @@ export class Library {
   private anchorId: string | null = null
 
   editError = $state<string | null>(null)
+  editLevel = $state<NoticeLevel>('info')
   writeFileTags = $state(getSetting('writeFileTags') === '1')
   importArtwork = $state(getSetting('importArtwork') !== '0')
   hideStreaming = $state(getSetting('hideStreaming') !== '0')
@@ -99,6 +103,7 @@ export class Library {
   hardwareGreen = $state(storedPlayer('hardwareGreen', DEFAULT_GREEN))
   importing = $state(false)
   converting = $state(false)
+  convertProgress = $state.raw<{ done: number; total: number } | null>(null)
   renamingId = $state<string | null>(null)
   dragging = $state.raw<string[] | null>(null)
   private noticeTimer: ReturnType<typeof setTimeout> | undefined
@@ -250,8 +255,7 @@ export class Library {
       if (event === 'usb.volumes') void this.refreshDevices()
       if (event === 'usb.progress') this.syncProgress = data as SyncProgress
       if (event === 'convert.progress') {
-        const { done, total } = data as { done: number; total: number }
-        if (this.converting && done < total) this.notify(`Converting track ${done + 1} of ${total}…`)
+        if (this.converting) this.convertProgress = data as { done: number; total: number }
       }
       if (event === 'library.rekordbox') {
         const running = Boolean((data as { running?: boolean } | undefined)?.running)
@@ -289,6 +293,7 @@ export class Library {
     if (this.switching || on === this.writable) return false
     if (on && this.info?.rekordboxRunning) {
       this.lockError = 'Close rekordbox before editing the library'
+      this.lockLevel = 'warning'
       return false
     }
     this.switching = true
@@ -300,6 +305,7 @@ export class Library {
       return this.writable === on
     } catch (e) {
       this.lockError = (e as Error).message
+      this.lockLevel = 'error'
       try {
         const info = await api.info()
         const reopened = info.writable !== this.writable || info.snapshotTime !== this.info?.snapshotTime
@@ -462,9 +468,10 @@ export class Library {
     this.replaceTrack(id, fresh)
   }
 
-  notify(message: string): void {
+  notify(message: string, level: NoticeLevel = 'info'): void {
     clearTimeout(this.noticeTimer)
     this.editError = message
+    this.editLevel = level
     this.noticeTimer = setTimeout(() => {
       if (this.editError === message) this.editError = null
     }, NOTICE_MS)
@@ -480,7 +487,7 @@ export class Library {
     try {
       return await run()
     } catch (e) {
-      this.notify((e as Error).message)
+      this.notify((e as Error).message, 'error')
       return undefined
     }
   }
@@ -532,7 +539,7 @@ export class Library {
     const failed = result.tagErrors
     if (failed.length) {
       const files = failed.length === 1 ? 'one file' : `${failed.length} files`
-      this.notify(`Saved to rekordbox, but couldn’t write tags to ${files}: ${failed[0]}`)
+      this.notify(`Saved to rekordbox, but couldn’t write tags to ${files}: ${failed[0]}`, 'warning')
     }
     return true
   }
@@ -599,7 +606,7 @@ export class Library {
         await this.refreshMembers()
       }
       void this.fillFileGaps()
-      this.notify(this.importSummary(result, playlistId))
+      this.notify(this.importSummary(result, playlistId), result.failed.length ? 'warning' : 'info')
       if (result.tracks.length) for (const listener of this.importListeners) listener(result.tracks)
       return result
     } finally {
@@ -656,7 +663,7 @@ export class Library {
       const failed = await window.api.trash(paths)
       if (failed.length) {
         const files = failed.length === 1 ? 'one file' : `${failed.length} files`
-        this.notify(`Removed ${count}, but couldn’t move ${files} to the Trash`)
+        this.notify(`Removed ${count}, but couldn’t move ${files} to the Trash`, 'warning')
         return true
       }
     }
@@ -688,10 +695,15 @@ export class Library {
         const title = this.byId.get(first.id)?.title ?? 'a track'
         message += `. ${result.failed.length} failed (${title}: ${first.error})`
       }
-      this.notify(result.ids.length || result.failed.length ? message : 'Nothing to convert')
+      const problems = result.failed.length > 0 || message.includes('Trash')
+      this.notify(
+        result.ids.length || result.failed.length ? message : 'Nothing to convert',
+        result.failed.length && !result.ids.length ? 'error' : problems ? 'warning' : 'info'
+      )
       return result.failed.length === 0
     } finally {
       this.converting = false
+      this.convertProgress = null
     }
   }
 
@@ -804,7 +816,7 @@ export class Library {
         await this.setSource({ type: 'collection' })
       }
     } catch (e) {
-      this.notify((e as Error).message)
+      this.notify((e as Error).message, 'error')
     }
   }
 
@@ -949,7 +961,7 @@ export class Library {
       } catch (e) {
         if (token === this.sourceToken) {
           this.deviceTracks = []
-          this.notify((e as Error).message)
+          this.notify((e as Error).message, 'error')
         }
       } finally {
         if (token === this.sourceToken) this.sourceLoading = false
@@ -1055,7 +1067,7 @@ export class Library {
       }
       this.probeRevision += 1
     } catch (error) {
-      this.notify((error as Error).message)
+      this.notify((error as Error).message, 'error')
     } finally {
       for (const track of tracks) this.probeInflight.delete(track.id)
     }
@@ -1086,7 +1098,7 @@ export class Library {
     } catch (e) {
       if (token === this.sourceToken) {
         this.fileEntries = []
-        this.notify((e as Error).message)
+        this.notify((e as Error).message, 'error')
       }
     } finally {
       if (token === this.sourceToken) this.sourceLoading = false
@@ -1102,7 +1114,7 @@ export class Library {
       try {
         rows = (await api.readFiles(chunk)).map((row, i) => looseTrack(chunk[i], row))
       } catch (e) {
-        this.notify((e as Error).message)
+        this.notify((e as Error).message, 'error')
         rows = chunk.map((path) => looseTrack(path))
       }
       if (token !== this.sourceToken) return

@@ -64,7 +64,7 @@
       if (!numeric) return library.updateTracks([id], { [field]: value })
       const n = value ? Number(value) : 0
       if (!Number.isInteger(n) || n < 0 || n > MAX_NUMBER) {
-        library.notify(`${label} must be a whole number between 0 and ${MAX_NUMBER}`)
+        library.notify(`${label} must be a whole number between 0 and ${MAX_NUMBER}`, 'warning')
         return false
       }
       return library.updateTracks([id], { [field]: n })

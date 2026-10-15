@@ -49,7 +49,7 @@
   analysis.onBatchDone((analysed, failed, error) => {
     if (!failed) return
     const count = failed === 1 ? 'one track' : `${failed} tracks`
-    library.notify(`Analysed ${analysed}, but couldn’t analyse ${count}: ${error ?? 'unknown error'}`)
+    library.notify(`Analysed ${analysed}, but couldn’t analyse ${count}: ${error ?? 'unknown error'}`, 'warning')
   })
 
   const PANELS = {

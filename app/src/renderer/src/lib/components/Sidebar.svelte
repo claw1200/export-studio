@@ -61,7 +61,7 @@
     try {
       await library.ejectDevice(volume.id)
     } catch (e) {
-      library.notify((e as Error).message)
+      library.notify((e as Error).message, 'error')
     } finally {
       if (ejectingId === volume.id) ejectingId = null
     }
@@ -309,7 +309,7 @@
       try {
         await library.devicePlaylistTree(volumeId)
       } catch (e) {
-        library.notify((e as Error).message)
+        library.notify((e as Error).message, 'error')
         return
       }
     }
