@@ -574,6 +574,7 @@ class Library:
                 "comment": comment or "",
                 "year": year or 0,
                 "dateAdded": stock or "",
+                "addedAt": str(created_at) if created_at else "",
                 "dateCreated": created or "",
                 "playCount": int(plays) if plays and str(plays).isdigit() else 0,
                 "bitrate": bitrate or 0,

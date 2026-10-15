@@ -51,6 +51,11 @@ function compare(a: Track, b: Track, key: Exclude<SortKey, 'position' | 'compat'
       return (a[key] ?? 0) - (b[key] ?? 0)
     case 'key':
       return camelotRank(a.key) - camelotRank(b.key)
+    case 'dateAdded':
+      return (
+        collator.compare(a.dateAdded, b.dateAdded) ||
+        collator.compare(a.addedAt ?? '', b.addedAt ?? '')
+      )
     default: {
       const av = a[key]
       const bv = b[key]
@@ -79,7 +84,10 @@ export function sortTracks(
 }
 
 export function newestFirst(list: Track[]): Track[] {
-  return [...list].sort((a, b) => collator.compare(b.dateAdded, a.dateAdded))
+  return [...list].sort(
+    (a, b) =>
+      collator.compare(b.dateAdded, a.dateAdded) || collator.compare(b.addedAt ?? '', a.addedAt ?? '')
+  )
 }
 
 /** Star total and placed-cue total after a cue edit. Phrase analysis is unchanged. */

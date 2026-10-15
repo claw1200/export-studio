@@ -16,6 +16,7 @@ export interface Track {
   comment: string
   year: number
   dateAdded: string
+  addedAt?: string
   dateCreated: string
   playCount: number
   bitrate: number

@@ -46,6 +46,7 @@ export function looseTrack(path: string, row: Partial<Track> = {}): Track {
     comment: row.comment ?? '',
     year: row.year ?? 0,
     dateAdded: row.dateAdded ?? '',
+    addedAt: row.addedAt ?? '',
     dateCreated: row.dateCreated ?? '',
     playCount: row.playCount ?? 0,
     bitrate: row.bitrate ?? 0,
