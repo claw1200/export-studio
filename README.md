@@ -18,12 +18,6 @@ Export Studio looks to compltly overhaul the avalible feature set of a library m
 I would eventally like to add support for Serato and other DJ software libraries, so that DJs using these programs can also export a rekordbox USB for their DJ sets. However, I want to get full feature parity with rekordbox before I add support for other libraries.
 
 
-| Key | Status                  |
-| --- | ----------------------- |
-| 🟢  | Comparable or better    |
-| 🟡  | Planned / Working on it |
-| 🔴  | Can't                   |
-| ⚫️  | Maybe                   |
 
 
 
@@ -42,6 +36,11 @@ I would eventally like to add support for Serato and other DJ software libraries
 | Playlist conversion               | 🟡           | ❌         |
 | Support Serato Library            | 🟡           | ❌         |
 | Streaming                         | ⚫️           | ✅         |
+
+- 🟢 Comparable or better
+- 🟡 Planned / Working on it
+- 🔴 Can't
+- ⚫️ Maybe
 
 
 ## Key Features
