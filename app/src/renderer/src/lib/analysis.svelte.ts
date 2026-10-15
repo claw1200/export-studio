@@ -23,7 +23,6 @@ export interface AnalysisSettings {
   highPrecision: boolean
   roundBpm: boolean
   key: boolean
-  overwrite: boolean
   concurrency: number
 }
 
@@ -37,7 +36,6 @@ const DEFAULTS: AnalysisSettings = {
   highPrecision: true,
   roundBpm: true,
   key: true,
-  overwrite: false,
   concurrency: 2
 }
 
@@ -106,8 +104,7 @@ export class Analysis {
     this.set('maxBpm', maxBpm)
   }
 
-  options(): AnalysisOptions {
-    const s = this.settings
+  options(s: AnalysisSettings = this.settings): AnalysisOptions {
     return {
       grid: true,
       key: s.key,
@@ -116,7 +113,7 @@ export class Analysis {
       maxBpm: s.maxBpm,
       highPrecision: s.highPrecision,
       roundBpm: s.roundBpm,
-      overwrite: s.overwrite
+      overwrite: true
     }
   }
 
@@ -126,15 +123,13 @@ export class Analysis {
     return () => this.finishListeners.delete(listener)
   }
 
-  /** Re-analysing tracks that all have an analysis replaces it, whatever `overwrite` says. */
-  analyse(tracks: Track[]): void {
+  analyse(tracks: Track[], settings: AnalysisSettings = this.settings): void {
     const wanted = tracks.filter(analysable)
     if (!wanted.length) return
-    const options = this.options()
-    if (wanted.every((t) => t.analysed)) options.overwrite = true
+    const options = this.options(settings)
     void window.api.analyse(
       wanted.map((t) => ({ id: t.id, options })),
-      this.settings.concurrency
+      settings.concurrency
     )
   }
 

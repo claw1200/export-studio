@@ -3,7 +3,7 @@
   import { Audition } from '$lib/audition.svelte'
   import { browserPreviews } from '$lib/browserPreview.svelte'
   import { setApp } from '$lib/context'
-  import { Analysis } from '$lib/analysis.svelte'
+  import { Analysis, analysable } from '$lib/analysis.svelte'
   import { Backups } from '$lib/backups.svelte'
   import { Library } from '$lib/library.svelte'
   import { Player } from '$lib/player.svelte'
@@ -23,6 +23,8 @@
   import RelocateDialog from '$lib/components/RelocateDialog.svelte'
   import RemoveDialog from '$lib/components/RemoveDialog.svelte'
   import ConvertDialog from '$lib/components/ConvertDialog.svelte'
+  import AnalysisDialog from '$lib/components/AnalysisDialog.svelte'
+  import type { AnalysisSettings } from '$lib/analysis.svelte'
   import type { SettingsSection } from '$lib/components/SettingsDialog.svelte'
 
   const library = new Library()
@@ -132,6 +134,7 @@
   let relocating = $state.raw<Track[] | null>(null)
   let removing = $state.raw<Track[] | null>(null)
   let converting = $state.raw<{ tracks: Track[]; preset: ConvertPreset } | null>(null)
+  let analysing = $state.raw<Track[] | null>(null)
   let settings = $state<SettingsSection | null>(null)
 
   function collectionTracks(tracks: Track[]): Track[] {
@@ -158,7 +161,10 @@
   }
 
   function analyse(tracks: Track[]): void {
-    whenCollectionWritable(tracks, 'Unlock editing to analyse tracks', (rows) => analysis.analyse(rows))
+    whenCollectionWritable(tracks, 'Unlock editing to analyse tracks', (rows) => {
+      const eligible = rows.filter(analysable)
+      if (eligible.length) analysing = eligible
+    })
   }
 
   function autoRelocate(tracks: Track[]): void {
@@ -407,5 +413,12 @@
 
   {#if converting}
     <ConvertDialog tracks={converting.tracks} preset={converting.preset} onclose={() => (converting = null)} />
+  {/if}
+  {#if analysing}
+    <AnalysisDialog
+      tracks={analysing}
+      onrun={(tracks, options: AnalysisSettings) => analysis.analyse(tracks, options)}
+      onclose={() => (analysing = null)}
+    />
   {/if}
 </div>

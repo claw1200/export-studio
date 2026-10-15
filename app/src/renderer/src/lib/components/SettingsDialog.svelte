@@ -564,12 +564,6 @@
             {@render toggle('Detect key', 'Work out the musical key as well as the beatgrid.', s.key, () =>
               analysis.set('key', !s.key)
             )}
-            {@render toggle(
-              'Replace existing analysis',
-              'When a selection mixes analysed and new tracks, replace the beatgrid, key and waveforms the analysed ones already have. Re-analyse always replaces them. Cues are always kept.',
-              s.overwrite,
-              () => analysis.set('overwrite', !s.overwrite)
-            )}
             {@render choice(
               'Tracks analysed at once',
               'More is faster on machines with many cores, but leaves less for playback.',
