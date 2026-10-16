@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use es_backup::Backups;
 use crate::usb::UsbOp;
 use es_db::{Library, TrackEdit, Tx};
+use es_engine::library::{LibraryService, LibrarySession};
 use napi::bindgen_prelude::AsyncTask;
 use napi::threadsafe_function::{ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::{Env, JsFunction, Task};
@@ -17,14 +18,14 @@ use serde_json::{json, Value};
 
 const WRITE_BLOCKED: &str = "Close rekordbox before editing the library";
 
-pub(crate) type State = es_engine::library::LibrarySession;
+pub(crate) type State = LibrarySession;
 
 type Events = ThreadsafeFunction<(String, String), ErrorStrategy::Fatal>;
 
 /// What every call shares: the open library, where events go, and the backup folder.
 pub(crate) struct Core {
     pub(crate) devices: crate::usb::Devices,
-    state: Mutex<Option<State>>,
+    service: Mutex<LibraryService>,
     events: Mutex<Option<Events>>,
     backups: Backups,
 }
@@ -46,7 +47,7 @@ impl Core {
         };
         Self {
             devices: crate::usb::Devices::default(),
-            state: Mutex::new(None),
+            service: Mutex::new(LibraryService::default()),
             events: Mutex::new(None),
             backups: Backups::new(backup_folder(), verify, es_db::rekordbox_running),
         }
@@ -86,10 +87,6 @@ impl Core {
 
 pub(crate) fn failure(reason: impl std::fmt::Display) -> napi::Error {
     napi::Error::from_reason(reason.to_string())
-}
-
-fn open(source: PathBuf, writable: bool, backed_up: bool) -> napi::Result<State> {
-    State::open(source, writable, backed_up).map_err(failure)
 }
 
 pub(crate) fn json_of(value: &impl Serialize) -> napi::Result<String> {
@@ -331,7 +328,7 @@ impl Run {
         }
     }
 
-    fn perform(&self, slot: &mut Option<State>) -> napi::Result<String> {
+    fn perform(&self, service: &mut LibraryService) -> napi::Result<String> {
         match &self.op {
             Op::Open(path) => {
                 let source = path
@@ -339,48 +336,35 @@ impl Run {
                     .map(PathBuf::from)
                     .or_else(Library::installed_path)
                     .ok_or_else(|| failure("No rekordbox library found on this computer"))?;
-                let writable = slot.as_ref().is_some_and(|s| s.is_writable() && s.source() == source.as_path());
-                let backed_up = slot.as_ref().is_some_and(State::backed_up);
-                *slot = None;
-                let state = open(source, writable, backed_up)?;
-                let out = info(&state);
-                *slot = Some(state);
-                return Ok(out);
+                let writable = service.session().is_some_and(|s| s.is_writable() && s.source() == source.as_path());
+                let backed_up = service.session().is_some_and(State::backed_up);
+                service.open(source, writable, backed_up).map_err(failure)?;
+                return service.session().map(info).ok_or_else(|| failure("Library not open"));
             }
             Op::Reload => {
-                let (source, writable, backed_up) = slot
-                    .as_ref()
-                    .map(|s| (s.source().to_path_buf(), s.is_writable(), s.backed_up()))
-                    .ok_or_else(|| failure("Library not open"))?;
-                *slot = None;
-                let state = open(source, writable, backed_up)?;
-                let out = info(&state);
-                *slot = Some(state);
-                return Ok(out);
+                service.reload().map_err(failure)?;
+                return service.session().map(info).ok_or_else(|| failure("Library not open"));
             }
             Op::BackupList | Op::BackupCreate | Op::BackupDelete(_) | Op::BackupSettings | Op::BackupSetSettings { .. } => {
-                return self.backup_op(slot.as_ref().map(|s| s.source().to_path_buf()));
+                return self.backup_op(service.session().map(|s| s.source().to_path_buf()));
             }
             Op::BackupRestore(id) => {
-                let source = slot
-                    .as_ref()
+                let source = service
+                    .session()
                     .map(|s| s.source().to_path_buf())
                     .or_else(Library::installed_path)
                     .ok_or_else(|| failure("No rekordbox library found on this computer"))?;
-                let backed_up = slot.as_ref().is_some_and(State::backed_up);
-                *slot = None;
+                let backed_up = service.session().is_some_and(State::backed_up);
+                service.close();
                 let restored = self.core.backups.restore(id, &source, &|event| self.core.emit("backup.progress", &event));
                 self.core.emit("backup.progress", &json!({ "stage": "done", "reason": "restore" }));
                 self.core.emit("backup.changed", &json!({}));
-                let reopened = open(source, false, backed_up);
-                if let Ok(state) = reopened {
-                    *slot = Some(state);
-                }
+                let _ = service.open(source, false, backed_up);
                 self.core.emit("library.reloaded", &json!({}));
                 return json_of(&restored.map_err(failure)?);
             }
             Op::DailyBackup => {
-                let Some(state) = slot.as_ref() else { return Ok("false".into()) };
+                let Some(state) = service.session() else { return Ok("false".into()) };
                 let due = self.core.backups.settings()["auto"].as_bool().unwrap_or(true) && self.core.auto_due();
                 if due && !es_db::rekordbox_running() {
                     self.core.back_up(state.source(), "daily")?;
@@ -393,9 +377,9 @@ impl Run {
             return json_of(&es_engine::browse::file_rows(paths));
         }
         if let Op::Usb(op) = &self.op {
-            return crate::usb::perform(&self.core, slot, op);
+            return crate::usb::perform(&self.core, service, op);
         }
-        let state = slot.as_mut().ok_or_else(|| failure("Library not open"))?;
+        let state = service.session_mut().ok_or_else(|| failure("Library not open"))?;
         match &self.op {
             Op::SetWritable(on) => {
                 if *on && !state.backed_up() && self.core.backups.settings()["auto"].as_bool().unwrap_or(true) {
@@ -687,8 +671,8 @@ impl Task for Run {
     type JsValue = String;
 
     fn compute(&mut self) -> napi::Result<String> {
-        let mut slot = self.core.state.lock().map_err(|_| failure("the library lock was poisoned"))?;
-        self.perform(&mut slot)
+        let mut service = self.core.service.lock().map_err(|_| failure("the library lock was poisoned"))?;
+        self.perform(&mut service)
     }
 
     fn resolve(&mut self, _env: Env, output: String) -> napi::Result<String> {

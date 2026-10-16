@@ -10,7 +10,8 @@ use es_engine::device_import::{self, PlaylistPolicy, TrackStatus};
 use es_engine::sync::{self, Progress as SyncProgress};
 use serde_json::json;
 
-use crate::library::{failure, json_of, with_live, Core, State};
+use crate::library::{failure, json_of, with_live, Core};
+use es_engine::library::LibraryService;
 
 pub(crate) enum UsbOp {
     List,
@@ -110,7 +111,7 @@ fn require(device: Option<Arc<Device>>) -> napi::Result<Arc<Device>> {
     device.ok_or_else(|| failure("This volume has no rekordbox library"))
 }
 
-pub(crate) fn perform(core: &Core, slot: &mut Option<State>, op: &UsbOp) -> napi::Result<String> {
+pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> napi::Result<String> {
     match op {
         UsbOp::List => json_of(&volumes::list(None)),
         UsbOp::Eject(id) => {
@@ -140,7 +141,7 @@ pub(crate) fn perform(core: &Core, slot: &mut Option<State>, op: &UsbOp) -> napi
             json_of(&found)
         }
         UsbOp::Selection(volume) => {
-            let state = slot.as_ref().ok_or_else(|| failure("Library not open"))?;
+            let state = service.session().ok_or_else(|| failure("Library not open"))?;
             let ids: Vec<String> = state.database().playlists().map_err(failure)?.into_iter().map(|n| n.id).collect();
             let db_id = u64::try_from(state.database().db_id().map_err(failure)?).unwrap_or(0);
             json_of(&json!({ "playlistIds": es_device::selection::recorded_playlist_ids(&mounted(volume)?, &ids, db_id) }))
@@ -168,7 +169,7 @@ pub(crate) fn perform(core: &Core, slot: &mut Option<State>, op: &UsbOp) -> napi
             json_of(&found)
         }
         UsbOp::ImportPreview { volume, folder, policy } => {
-            let state = slot.as_ref().ok_or_else(|| failure("Library not open"))?;
+            let state = service.session().ok_or_else(|| failure("Library not open"))?;
             let volume = listed(volume)?;
             let device = require(core.devices.load(&volume)?)?;
             let plan = device_import::preview(state.database(), &volume, &device, &import_options(folder, policy)?).map_err(failure)?;
@@ -195,7 +196,7 @@ pub(crate) fn perform(core: &Core, slot: &mut Option<State>, op: &UsbOp) -> napi
             }))
         }
         UsbOp::Import { volume, folder, policy } => {
-            let state = slot.as_mut().ok_or_else(|| failure("Library not open"))?;
+            let state = service.session_mut().ok_or_else(|| failure("Library not open"))?;
             let volume = listed(volume)?;
             let device = require(core.devices.load(&volume)?)?;
             let options = import_options(folder, policy)?;
@@ -216,7 +217,7 @@ pub(crate) fn perform(core: &Core, slot: &mut Option<State>, op: &UsbOp) -> napi
             }))
         }
         UsbOp::Sync { volume, playlists, overwrite } => {
-            let state = slot.as_ref().ok_or_else(|| failure("Library not open"))?;
+            let state = service.session().ok_or_else(|| failure("Library not open"))?;
             let volume = listed(volume)?;
             let result = sync::sync_volume(state.database(), &volume, playlists, *overwrite, &|event| {
                 core.emit(

@@ -17,6 +17,47 @@ pub struct LibrarySession {
     backed_up: bool,
 }
 
+#[derive(Default)]
+pub struct LibraryService {
+    session: Option<LibrarySession>,
+}
+
+impl LibraryService {
+    pub fn open(&mut self, source: PathBuf, writable: bool, backed_up: bool) -> Result<()> {
+        self.session = None;
+        self.session = Some(LibrarySession::open(source, writable, backed_up)?);
+        Ok(())
+    }
+
+    pub fn reload(&mut self) -> Result<()> {
+        let (source, writable, backed_up) = self
+            .session
+            .as_ref()
+            .map(|session| {
+                (
+                    session.source().to_path_buf(),
+                    session.is_writable(),
+                    session.backed_up(),
+                )
+            })
+            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        self.open(source, writable, backed_up)
+    }
+
+    pub fn close(&mut self) -> Option<LibrarySession> {
+        self.session.take()
+    }
+
+    #[must_use]
+    pub fn session(&self) -> Option<&LibrarySession> {
+        self.session.as_ref()
+    }
+
+    pub fn session_mut(&mut self) -> Option<&mut LibrarySession> {
+        self.session.as_mut()
+    }
+}
+
 impl LibrarySession {
     pub fn open(source: PathBuf, writable: bool, backed_up: bool) -> Result<Self> {
         let database = Database::open_snapshot(&source)?;
@@ -196,5 +237,35 @@ mod tests {
             error.to_string(),
             "Unlock editing to make changes to the library"
         );
+    }
+
+    #[test]
+    fn service_reload_preserves_session_policy() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = fixture::build(directory.path(), 1).unwrap();
+        let mut service = LibraryService::default();
+
+        service.open(path.clone(), true, true).unwrap();
+        service.reload().unwrap();
+
+        let session = service.session().unwrap();
+        assert_eq!(session.source(), path);
+        assert!(session.is_writable());
+        assert!(session.backed_up());
+        assert!(service.close().is_some());
+        assert!(service.session().is_none());
+    }
+
+    #[test]
+    fn failed_open_clears_the_previous_session() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = fixture::build(directory.path(), 1).unwrap();
+        let mut service = LibraryService::default();
+        service.open(path, false, false).unwrap();
+
+        assert!(service
+            .open(directory.path().join("missing.db"), false, false)
+            .is_err());
+        assert!(service.session().is_none());
     }
 }
