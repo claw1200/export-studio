@@ -67,10 +67,18 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
 
-  const unsubscribe = engine.onEvent((event, data) => {
+  const forward = (event: string, data: unknown): void => {
     if (!win.isDestroyed()) win.webContents.send('engine:event', event, data)
+  }
+  const unsubscribeRust = rustLibrary.onEvent(forward)
+  const unsubscribe = engine.onEvent((event, data) => {
+    if (event === 'library.locked') void rustLibrary.locked()
+    forward(event, data)
   })
-  win.on('closed', unsubscribe)
+  win.on('closed', () => {
+    unsubscribe()
+    unsubscribeRust()
+  })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     win.loadURL(process.env['ELECTRON_RENDERER_URL'])

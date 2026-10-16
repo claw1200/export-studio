@@ -5,28 +5,95 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use es_backup::Backups;
 use es_db::{Guard, Library, TrackEdit, Tx};
 use napi::bindgen_prelude::AsyncTask;
-use napi::{Env, Task};
+use napi::threadsafe_function::{ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode};
+use napi::{Env, JsFunction, Task};
 use napi_derive::napi;
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{json, Value};
+
+const WRITE_BLOCKED: &str = "Close rekordbox before editing the library";
 
 struct State {
     lib: Library,
     source: PathBuf,
     writable: bool,
+    /// Whether this session has already taken (or found a recent) backup before the first edit.
+    backed_up: bool,
 }
 
-type Shared = Arc<Mutex<Option<State>>>;
+type Events = ThreadsafeFunction<(String, String), ErrorStrategy::Fatal>;
+
+/// What every call shares: the open library, where events go, and the backup folder.
+struct Core {
+    state: Mutex<Option<State>>,
+    events: Mutex<Option<Events>>,
+    backups: Backups,
+}
+
+fn backup_folder() -> PathBuf {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map_or_else(|| PathBuf::from("."), PathBuf::from)
+        .join(".exportstudio")
+        .join("backups")
+}
+
+impl Core {
+    fn new() -> Self {
+        let verify = |path: &std::path::Path| {
+            es_db::verify(path)
+                .map(|c| es_backup::Counts { tracks: c.tracks, playlists: c.playlists })
+                .map_err(|e| es_backup::Error::Message(e.to_string()))
+        };
+        Self {
+            state: Mutex::new(None),
+            events: Mutex::new(None),
+            backups: Backups::new(backup_folder(), verify, es_db::rekordbox_running),
+        }
+    }
+
+    fn emit(&self, event: &str, data: &Value) {
+        if let Ok(guard) = self.events.lock() {
+            if let Some(handler) = guard.as_ref() {
+                handler.call((event.to_owned(), data.to_string()), ThreadsafeFunctionCallMode::NonBlocking);
+            }
+        }
+    }
+
+    /// Back up the library with progress events; automatic reasons skip when nothing changed.
+    fn back_up(&self, source: &std::path::Path, reason: &str) -> napi::Result<Option<Value>> {
+        let made = self.backups.create(source, reason, &|event| self.emit("backup.progress", &event));
+        self.emit("backup.progress", &json!({ "stage": "done", "reason": reason }));
+        let made = made.map_err(failure)?;
+        if made.is_some() {
+            self.emit("backup.changed", &json!({}));
+        }
+        Ok(made)
+    }
+
+    /// Whether the newest automatic backup is older than the chosen interval.
+    fn auto_due(&self) -> bool {
+        let interval = self.backups.settings()["interval"].as_i64().unwrap_or(12) as f64 * 3600.0;
+        match self.backups.latest_automatic().and_then(|m| m["created"].as_f64()) {
+            None => true,
+            Some(created) => {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
+                now - created >= interval
+            }
+        }
+    }
+}
 
 fn failure(reason: impl std::fmt::Display) -> napi::Error {
     napi::Error::from_reason(reason.to_string())
 }
 
-fn open(source: PathBuf, writable: bool) -> napi::Result<State> {
+fn open(source: PathBuf, writable: bool, backed_up: bool) -> napi::Result<State> {
     let lib = Library::open_snapshot(&source).map_err(failure)?;
-    Ok(State { lib, source, writable })
+    Ok(State { lib, source, writable, backed_up })
 }
 
 fn json_of(value: &impl Serialize) -> napi::Result<String> {
@@ -164,6 +231,13 @@ enum Op {
     CueSetColor(String, String, Option<i64>),
     TrackUpdate(Vec<String>, String),
     TrackImport { paths: Vec<String>, playlist: Option<String>, artwork: bool },
+    BackupList,
+    BackupCreate,
+    BackupDelete(String),
+    BackupRestore(String),
+    BackupSettings,
+    BackupSetSettings { auto: Option<bool>, keep: Option<i64>, interval: Option<i64> },
+    DailyBackup,
     RemoveTracks(Vec<String>),
     PlaylistAdd(String, Vec<String>),
     PlaylistRemove(String, Vec<String>),
@@ -176,11 +250,32 @@ enum Op {
 }
 
 pub struct Run {
-    shared: Shared,
+    core: Arc<Core>,
     op: Op,
 }
 
 impl Run {
+    /// Backup calls that need nothing but the library's location.
+    fn backup_op(&self, open_source: Option<PathBuf>) -> napi::Result<String> {
+        let source = open_source.or_else(Library::installed_path);
+        let backups = &self.core.backups;
+        match &self.op {
+            Op::BackupList => json_of(&backups.list(source.as_deref())),
+            Op::BackupSettings => json_of(&backups.settings()),
+            Op::BackupSetSettings { auto, keep, interval } => json_of(&backups.set_settings(*auto, *keep, *interval).map_err(failure)?),
+            Op::BackupDelete(id) => {
+                backups.delete(id).map_err(failure)?;
+                self.core.emit("backup.changed", &json!({}));
+                json_of(&backups.list(source.as_deref()))
+            }
+            Op::BackupCreate => {
+                let source = source.ok_or_else(|| failure("No rekordbox library found on this computer"))?;
+                json_of(&self.core.back_up(&source, "manual")?)
+            }
+            _ => unreachable!("not a backup call"),
+        }
+    }
+
     fn perform(&self, slot: &mut Option<State>) -> napi::Result<String> {
         match &self.op {
             Op::Open(path) => {
@@ -190,28 +285,67 @@ impl Run {
                     .or_else(Library::installed_path)
                     .ok_or_else(|| failure("No rekordbox library found on this computer"))?;
                 let writable = slot.as_ref().is_some_and(|s| s.writable && s.source == source);
+                let backed_up = slot.as_ref().is_some_and(|s| s.backed_up);
                 *slot = None;
-                let state = open(source, writable)?;
+                let state = open(source, writable, backed_up)?;
                 let out = info(&state);
                 *slot = Some(state);
                 return Ok(out);
             }
             Op::Reload => {
-                let (source, writable) = slot
+                let (source, writable, backed_up) = slot
                     .as_ref()
-                    .map(|s| (s.source.clone(), s.writable))
+                    .map(|s| (s.source.clone(), s.writable, s.backed_up))
                     .ok_or_else(|| failure("Library not open"))?;
                 *slot = None;
-                let state = open(source, writable)?;
+                let state = open(source, writable, backed_up)?;
                 let out = info(&state);
                 *slot = Some(state);
                 return Ok(out);
+            }
+            Op::BackupList | Op::BackupCreate | Op::BackupDelete(_) | Op::BackupSettings | Op::BackupSetSettings { .. } => {
+                return self.backup_op(slot.as_ref().map(|s| s.source.clone()));
+            }
+            Op::BackupRestore(id) => {
+                let source = slot
+                    .as_ref()
+                    .map(|s| s.source.clone())
+                    .or_else(Library::installed_path)
+                    .ok_or_else(|| failure("No rekordbox library found on this computer"))?;
+                let backed_up = slot.as_ref().is_some_and(|s| s.backed_up);
+                *slot = None;
+                let restored = self.core.backups.restore(id, &source, &|event| self.core.emit("backup.progress", &event));
+                self.core.emit("backup.progress", &json!({ "stage": "done", "reason": "restore" }));
+                self.core.emit("backup.changed", &json!({}));
+                let reopened = open(source, false, backed_up);
+                if let Ok(state) = reopened {
+                    *slot = Some(state);
+                }
+                self.core.emit("library.reloaded", &json!({}));
+                return json_of(&restored.map_err(failure)?);
+            }
+            Op::DailyBackup => {
+                let Some(state) = slot.as_ref() else { return Ok("false".into()) };
+                let due = self.core.backups.settings()["auto"].as_bool().unwrap_or(true) && self.core.auto_due();
+                if due && !es_db::rekordbox_running() {
+                    self.core.back_up(&state.source, "daily")?;
+                }
+                return Ok(due.to_string());
             }
             _ => {}
         }
         let state = slot.as_mut().ok_or_else(|| failure("Library not open"))?;
         match &self.op {
             Op::SetWritable(on) => {
+                if *on && !state.backed_up && self.core.backups.settings()["auto"].as_bool().unwrap_or(true) {
+                    if es_db::rekordbox_running() {
+                        return Err(failure(WRITE_BLOCKED));
+                    }
+                    if self.core.auto_due() {
+                        self.core.back_up(&state.source, "before-edit")?;
+                    }
+                    state.backed_up = true;
+                }
                 state.writable = *on;
                 Ok(info(state))
             }
@@ -330,7 +464,15 @@ impl Run {
                     playlist_ids
                 ))
             }
-            Op::Open(_) | Op::Reload => unreachable!("handled above"),
+            Op::Open(_)
+            | Op::Reload
+            | Op::BackupList
+            | Op::BackupCreate
+            | Op::BackupDelete(_)
+            | Op::BackupRestore(_)
+            | Op::BackupSettings
+            | Op::BackupSetSettings { .. }
+            | Op::DailyBackup => unreachable!("handled above"),
         }
     }
 }
@@ -340,7 +482,7 @@ impl Task for Run {
     type JsValue = String;
 
     fn compute(&mut self) -> napi::Result<String> {
-        let mut slot = self.shared.lock().map_err(|_| failure("the library lock was poisoned"))?;
+        let mut slot = self.core.state.lock().map_err(|_| failure("the library lock was poisoned"))?;
         self.perform(&mut slot)
     }
 
@@ -352,18 +494,18 @@ impl Task for Run {
 /// The master library: snapshot reads and guarded edits.
 #[napi]
 pub struct RekordboxLibrary {
-    shared: Shared,
+    core: Arc<Core>,
 }
 
 #[napi]
 impl RekordboxLibrary {
     #[napi(constructor)]
     pub fn new() -> Self {
-        Self { shared: Arc::new(Mutex::new(None)) }
+        Self { core: Arc::new(Core::new()) }
     }
 
     fn run(&self, op: Op) -> AsyncTask<Run> {
-        AsyncTask::new(Run { shared: Arc::clone(&self.shared), op })
+        AsyncTask::new(Run { core: Arc::clone(&self.core), op })
     }
 
     #[napi(ts_return_type = "Promise<string>")]
@@ -455,6 +597,59 @@ impl RekordboxLibrary {
     #[napi(ts_return_type = "Promise<string>")]
     pub fn track_update(&self, ids: Vec<String>, fields: String) -> AsyncTask<Run> {
         self.run(Op::TrackUpdate(ids, fields))
+    }
+
+    /// Where backup progress and library events go: `(event, json)`.
+    #[napi]
+    pub fn on_event(
+        &self,
+        env: Env,
+        #[napi(ts_arg_type = "(event: string, data: string) => void")] callback: JsFunction,
+    ) -> napi::Result<()> {
+        let mut handler: Events = callback.create_threadsafe_function(0, |ctx: ThreadSafeCallContext<(String, String)>| {
+            let (event, data) = ctx.value;
+            Ok(vec![ctx.env.create_string(&event)?, ctx.env.create_string(&data)?])
+        })?;
+        // Events must not keep the process alive on their own.
+        handler.unref(&env)?;
+        *self.core.events.lock().map_err(|_| failure("the event lock was poisoned"))? = Some(handler);
+        Ok(())
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn backup_list(&self) -> AsyncTask<Run> {
+        self.run(Op::BackupList)
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn backup_create(&self) -> AsyncTask<Run> {
+        self.run(Op::BackupCreate)
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn backup_delete(&self, id: String) -> AsyncTask<Run> {
+        self.run(Op::BackupDelete(id))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn backup_restore(&self, id: String) -> AsyncTask<Run> {
+        self.run(Op::BackupRestore(id))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn backup_settings(&self) -> AsyncTask<Run> {
+        self.run(Op::BackupSettings)
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn backup_set_settings(&self, auto: Option<bool>, keep: Option<i64>, interval: Option<i64>) -> AsyncTask<Run> {
+        self.run(Op::BackupSetSettings { auto, keep, interval })
+    }
+
+    /// Takes a daily backup when one is due; resolves to whether it was due.
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn daily_backup(&self) -> AsyncTask<Run> {
+        self.run(Op::DailyBackup)
     }
 
     #[napi(ts_return_type = "Promise<string>")]

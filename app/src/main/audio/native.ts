@@ -99,6 +99,14 @@ export interface NativeLibrary {
   cueAddMemory(id: string, ms: number): Promise<string>
   cueDelete(id: string, cueId: string): Promise<string>
   cueSetColor(id: string, cueId: string, colorIndex: number | null): Promise<string>
+  onEvent(callback: (event: string, data: string) => void): void
+  backupList(): Promise<string>
+  backupCreate(): Promise<string>
+  backupDelete(id: string): Promise<string>
+  backupRestore(id: string): Promise<string>
+  backupSettings(): Promise<string>
+  backupSetSettings(auto: boolean | null, keep: number | null, interval: number | null): Promise<string>
+  dailyBackup(): Promise<string>
   trackUpdate(ids: string[], fields: string): Promise<string>
   trackImport(paths: string[], playlistId: string | null, artwork: boolean): Promise<string>
   setWritable(on: boolean): Promise<string>

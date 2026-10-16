@@ -15,6 +15,8 @@ const READS: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> 
   'library.playlistMembers': (lib) => lib.playlistMembers(),
   'playlist.tracks': (lib, p) => lib.playlistTracks(text(p?.id)),
   'history.tracks': (lib, p) => lib.historyTracks(text(p?.id)),
+  'backup.list': (lib) => lib.backupList(),
+  'backup.settings': (lib) => lib.backupSettings(),
   'track.detail': (lib, p) => {
     // Tracks on a USB stick are read by the Python engine.
     if (text(p?.id).startsWith('usb:')) return Promise.reject(new Error('device track'))
@@ -28,6 +30,15 @@ const READS: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> 
 
 /** Edits the Rust library makes. A failed edit is reported, never retried in Python. */
 const WRITES: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> = {
+  'backup.create': (lib) => lib.backupCreate(),
+  'backup.delete': (lib, p) => lib.backupDelete(text(p?.id)),
+  'backup.restore': (lib, p) => lib.backupRestore(text(p?.id)),
+  'backup.setSettings': (lib, p) =>
+    lib.backupSetSettings(
+      p?.auto == null ? null : Boolean(p.auto),
+      p?.keep == null ? null : Number(p.keep),
+      p?.interval == null ? null : Number(p.interval)
+    ),
   'track.removeFromCollection': (lib, p) => lib.removeTracks(list(p?.ids)),
   'track.update': (lib, p) => lib.trackUpdate(list(p?.ids), JSON.stringify(p?.fields ?? {})),
   'track.import': (lib, p) =>
@@ -52,6 +63,13 @@ const WRITES: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>>
   'tag.add': (lib, p) => lib.tagAdd(text(p?.id), list(p?.trackIds)),
   'tag.remove': (lib, p) => lib.tagRemove(text(p?.id), list(p?.trackIds))
 }
+
+/** Edits that leave the master library alone, so the Python engine has nothing to reload after them. */
+const KEEPS_DATABASE = new Set(['backup.create', 'backup.delete', 'backup.setSettings'])
+
+const DAILY_CHECK_MS = 10 * 60 * 1000
+
+type Listener = (event: string, data: unknown) => void
 
 /** Python calls that cannot change the master library; any other call may, so the Rust snapshot is refreshed after it. */
 const PURE = new Set([
@@ -85,6 +103,8 @@ export class RustLibrary {
   private lib: NativeLibrary | null = null
   private dirty = false
   private opened = false
+  private daily: ReturnType<typeof setInterval> | null = null
+  private readonly listeners = new Set<Listener>()
 
   constructor(
     private readonly addon: () => NativeModule | null,
@@ -109,8 +129,40 @@ export class RustLibrary {
       const native = this.addon()
       if (!native?.RekordboxLibrary) throw new Error('The native library is not available')
       this.lib = new native.RekordboxLibrary()
+      this.lib.onEvent((event, data) => {
+        let parsed: unknown = {}
+        try {
+          parsed = JSON.parse(data)
+        } catch {
+          // An event without a readable payload is still worth passing on.
+        }
+        for (const listener of this.listeners) listener(event, parsed)
+      })
     }
     return this.lib
+  }
+
+  /** Events from the Rust side: backup progress and changes, and library reloads. */
+  onEvent(listener: Listener): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  /** Rekordbox started and the Python engine left write mode, so editing is locked here too. */
+  async locked(): Promise<void> {
+    if (this.opened) await this.library().setWritable(false)
+  }
+
+  private startDaily(): void {
+    if (this.daily) return
+    const check = (): void => {
+      this.library()
+        .dailyBackup()
+        .catch((e) => console.error('[rust-library] daily backup failed', e))
+    }
+    this.daily = setInterval(check, DAILY_CHECK_MS)
+    this.daily.unref()
+    check()
   }
 
   /** Called after the Python engine answers, so the Rust side can follow what it did. */
@@ -121,6 +173,7 @@ export class RustLibrary {
         await this.library().open(text(params?.dbPath) || null)
         this.opened = true
         this.dirty = false
+        this.startDaily()
       } catch (e) {
         console.error('[rust-library] open failed, using the Python engine', e)
         this.opened = false
@@ -143,7 +196,7 @@ export class RustLibrary {
     }
     const run = READS[method] ?? WRITES[method]
     const out = JSON.parse(await run(lib, params))
-    if (method in WRITES) await this.refreshPython()
+    if (method in WRITES && !KEEPS_DATABASE.has(method)) await this.refreshPython()
     return out
   }
 }

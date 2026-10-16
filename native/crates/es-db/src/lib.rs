@@ -174,6 +174,30 @@ impl Library {
     }
 }
 
+/// What a database file holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Counts {
+    pub tracks: i64,
+    pub playlists: i64,
+}
+
+/// Open a database file, check it is intact, and count what is in it.
+pub fn verify(path: &Path) -> Result<Counts> {
+    let conn = unlock(path)?;
+    let rows: Vec<String> = conn
+        .prepare("PRAGMA quick_check")?
+        .query_map([], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    if rows != ["ok"] {
+        return Err(Error::Refused(format!("The database is damaged: {}", rows.first().map_or("no result", String::as_str))));
+    }
+    let count = |sql: &str| conn.query_row(sql, [], |row| row.get::<_, i64>(0));
+    Ok(Counts {
+        tracks: count("SELECT count(*) FROM djmdContent WHERE rb_local_deleted = 0")?,
+        playlists: count("SELECT count(*) FROM djmdPlaylist")?,
+    })
+}
+
 fn unlock(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path)?;
     conn.pragma_update(None, "key", key::master_key()?)?;
