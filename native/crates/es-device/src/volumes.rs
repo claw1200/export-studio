@@ -230,7 +230,7 @@ mod tests {
             bytes_used: 0,
             bytes_free: 0,
         };
-        assert!(eject(&volume.id, Some(&[volume.clone()])).is_err());
+        assert!(eject(&volume.id, Some(std::slice::from_ref(&volume))).is_err());
         assert!(eject("/nowhere", Some(&[volume])).is_err());
     }
 }

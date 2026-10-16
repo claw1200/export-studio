@@ -3,7 +3,7 @@
 //! The exporter keeps a playlist this library wrote earlier and drops it when a later sync leaves it
 //! out, so the sync window has to start from that set.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
 use crate::paths::pioneer_dir;
@@ -20,6 +20,22 @@ pub fn recorded_playlist_ids(volume: &Path, library_ids: &[String], db_id: u64) 
     let mut wanted = manifest_ids(&root);
     wanted.extend(sync_ids(&root, db_id));
     library_ids.iter().filter(|id| wanted.contains(&library_number(id))).cloned().collect()
+}
+
+/// Stick playlist export id -> library playlist id, for playlists this app wrote from the library with `db_id`.
+#[must_use]
+pub fn playlist_origins(volume: &Path, db_id: u64) -> HashMap<i64, u64> {
+    let (root, _) = pioneer_dir(volume);
+    let Ok(text) = std::fs::read_to_string(root.join("exportstudio").join("manifest.json")) else { return HashMap::new() };
+    let Ok(data) = serde_json::from_str::<serde_json::Value>(&text) else { return HashMap::new() };
+    if db_id == 0 || data.get("db_id").and_then(serde_json::Value::as_u64) != Some(db_id) {
+        return HashMap::new();
+    }
+    let rows = data.get("playlists").and_then(serde_json::Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    rows.iter()
+        .filter(|row| !row.get("device_only").and_then(serde_json::Value::as_bool).unwrap_or(false))
+        .filter_map(|row| Some((row.get("export_id")?.as_i64()?, row.get("library_id")?.as_u64().filter(|n| *n > 0)?)))
+        .collect()
 }
 
 fn manifest_ids(root: &Path) -> BTreeSet<u64> {
@@ -85,6 +101,19 @@ mod tests {
         assert_eq!(parse_sync(SYNC, 42), Some(BTreeSet::from([10])));
         assert_eq!(parse_sync(SYNC, 7), Some(BTreeSet::new()));
         assert_eq!(parse_sync("not xml", 42), None);
+    }
+
+    #[test]
+    fn origins_need_the_manifest_to_be_from_this_library() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("PIONEER/exportstudio")).unwrap();
+        std::fs::write(
+            dir.path().join("PIONEER/exportstudio/manifest.json"),
+            r#"{"db_id":9,"playlists":[{"export_id":2,"library_id":77},{"export_id":3,"library_id":78,"device_only":true}]}"#,
+        )
+        .unwrap();
+        assert_eq!(playlist_origins(dir.path(), 9), HashMap::from([(2, 77)]));
+        assert!(playlist_origins(dir.path(), 8).is_empty());
     }
 
     #[test]

@@ -85,6 +85,40 @@ pub struct Progress {
     pub name: String,
 }
 
+/// What the library already holds that a stick playlist may stand for.
+struct Known {
+    existing: Vec<es_db::PlaylistNode>,
+    policy: PlaylistPolicy,
+    /// Stick playlist export id -> the library playlist it was synced from.
+    origins: HashMap<i64, u64>,
+}
+
+enum Match<'a> {
+    Existing(&'a es_db::PlaylistNode),
+    /// Synced from the library, which has since deleted it.
+    Retired,
+    New,
+}
+
+impl Known {
+    fn new(lib: &Library, volume: &Path, policy: PlaylistPolicy) -> Result<Self> {
+        let db_id = u64::try_from(lib.db_id()?).unwrap_or(0);
+        Ok(Self { existing: lib.playlists()?, policy, origins: es_device::selection::playlist_origins(volume, db_id) })
+    }
+
+    /// `parent` is the library playlist the row would go under; `None` when that folder is itself new.
+    fn lookup(&self, row: &Playlist, parent: Option<&str>, name: &str) -> Match<'_> {
+        if self.policy == PlaylistPolicy::CreateNew {
+            return Match::New;
+        }
+        if let Some(origin) = self.origins.get(&row.export_id) {
+            let wanted = origin.to_string();
+            return self.existing.iter().find(|n| n.id == wanted).map_or(Match::Retired, Match::Existing);
+        }
+        parent.and_then(|p| find(&self.existing, p, row.folder, name)).map_or(Match::New, Match::Existing)
+    }
+}
+
 type Children<'a> = HashMap<i64, Vec<&'a Playlist>>;
 
 fn children(device: &Device) -> Children<'_> {
@@ -177,15 +211,15 @@ pub fn preview(lib: &Library, volume: &Path, device: &Device, options: &Options)
         })
         .collect();
 
-    let existing = lib.playlists()?;
+    let known = Known::new(lib, volume, options.policy)?;
     let mut playlists = Vec::new();
-    plan_playlists(&kids, 0, Some("root".to_owned()), 0, &existing, options.policy, &mut playlists);
+    plan_playlists(&kids, 0, Some("root"), 0, &known, &mut playlists);
     Ok(Plan { destination: root, layout: if contents { "Contents/Artist/Album" } else { "Artist/Album" }, playlists, tracks })
 }
 
 fn find<'a>(nodes: &'a [es_db::PlaylistNode], parent: &str, folder: bool, name: &str) -> Option<&'a es_db::PlaylistNode> {
     let kind = if folder { PlaylistKind::Folder } else { PlaylistKind::Playlist };
-    nodes.iter().find(|n| n.parent_id == parent && n.kind == kind && (if n.name.is_empty() { "Untitled" } else { n.name.as_str() }) == name)
+    nodes.iter().find(|n| n.parent_id == parent && n.kind == kind && (if n.name.trim().is_empty() { "Untitled" } else { n.name.trim() }) == name)
 }
 
 fn name_of(row: &Playlist) -> String {
@@ -193,21 +227,22 @@ fn name_of(row: &Playlist) -> String {
     if name.is_empty() { "Untitled".into() } else { name.into() }
 }
 
-fn plan_playlists(
-    kids: &Children<'_>,
-    parent_export: i64,
-    parent: Option<String>,
-    depth: usize,
-    existing: &[es_db::PlaylistNode],
-    policy: PlaylistPolicy,
-    out: &mut Vec<PlannedPlaylist>,
-) {
+fn plan_playlists(kids: &Children<'_>, parent_export: i64, parent: Option<&str>, depth: usize, known: &Known, out: &mut Vec<PlannedPlaylist>) {
     for row in kids.get(&parent_export).map(Vec::as_slice).unwrap_or_default() {
         let name = name_of(row);
-        let found = if policy == PlaylistPolicy::CreateNew { None } else { parent.as_deref().and_then(|p| find(existing, p, row.folder, &name)) };
+        let found = match known.lookup(row, parent, &name) {
+            Match::Retired => {
+                if row.folder {
+                    plan_playlists(kids, row.export_id, None, depth, known, out);
+                }
+                continue;
+            }
+            Match::Existing(node) => Some(node),
+            Match::New => None,
+        };
         out.push(PlannedPlaylist { name, folder: row.folder, depth, tracks: if row.folder { 0 } else { row.track_ids.len() }, exists: found.is_some() });
         if row.folder {
-            plan_playlists(kids, row.export_id, found.map(|n| n.id.clone()), depth + 1, existing, policy, out);
+            plan_playlists(kids, row.export_id, found.map(|n| n.id.as_str()), depth + 1, known, out);
         }
     }
 }
@@ -334,40 +369,40 @@ fn discard(files: &[PathBuf]) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn create_playlists(
     tx: &mut es_db::Tx<'_>,
     kids: &Children<'_>,
     parent_export: i64,
     parent: Option<String>,
-    existing: &[es_db::PlaylistNode],
-    policy: PlaylistPolicy,
+    known: &Known,
     resolved: &HashMap<i64, String>,
     created: &mut usize,
 ) -> es_db::Result<()> {
     for row in kids.get(&parent_export).map(Vec::as_slice).unwrap_or_default() {
         let name = name_of(row);
         let ids: Vec<String> = if row.folder { Vec::new() } else { row.track_ids.iter().filter_map(|t| resolved.get(t).cloned()).collect() };
-        let found = if policy == PlaylistPolicy::CreateNew {
-            None
-        } else {
-            Some(parent.as_deref().unwrap_or("root")).and_then(|p| find(existing, p, row.folder, &name))
-        };
-        let id = match found {
-            Some(node) => {
-                if policy == PlaylistPolicy::Merge && !row.folder && !ids.is_empty() {
+        let (id, is_new) = match known.lookup(row, Some(parent.as_deref().unwrap_or("root")), &name) {
+            Match::Retired => {
+                if row.folder {
+                    create_playlists(tx, kids, row.export_id, None, known, resolved, created)?;
+                }
+                continue;
+            }
+            Match::Existing(node) => {
+                if known.policy == PlaylistPolicy::Merge && !row.folder && !ids.is_empty() {
                     tx.add_to_playlist(&node.id, &ids)?;
                 }
-                node.id.clone()
+                (node.id.clone(), false)
             }
-            None => {
+            Match::New => {
                 *created += 1;
-                tx.create_playlist(&name, parent.as_deref(), row.folder, &ids)?
+                (tx.create_playlist(&name, parent.as_deref(), row.folder, &ids)?, true)
             }
         };
         if row.folder {
-            let inner_existing = if found.is_some() { existing } else { &[] };
-            create_playlists(tx, kids, row.export_id, Some(id), inner_existing, policy, resolved, created)?;
+            // Nothing inside a folder that was just made can already exist.
+            let inner = if is_new { &Known { existing: Vec::new(), policy: known.policy, origins: known.origins.clone() } } else { known };
+            create_playlists(tx, kids, row.export_id, Some(id), inner, resolved, created)?;
         }
     }
     Ok(())
@@ -440,7 +475,7 @@ pub fn import_device(
     }
     progress(Progress { done: order.len(), total: order.len(), name: String::new() });
 
-    let existing = lib.playlists()?;
+    let known = Known::new(lib, volume, options.policy)?;
     let wrapper_name = format!("Imported from {}", if device.device_name.is_empty() { volume.file_name().map_or_else(|| "device".into(), |n| n.to_string_lossy().into_owned()) } else { device.device_name.clone() });
     let mut created = 0;
     lib.write(|tx| {
@@ -450,7 +485,7 @@ pub fn import_device(
         } else {
             None
         };
-        create_playlists(tx, &kids, 0, parent, &existing, options.policy, &resolved, &mut created)
+        create_playlists(tx, &kids, 0, parent, &known, &resolved, &mut created)
     })?;
     outcome.playlists = created;
     outcome.tracks = resolved.len();

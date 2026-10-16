@@ -37,7 +37,20 @@ struct World {
 }
 
 /// A stick holding two tracks in the playlist "Set" (inside "Folder"), and an empty library with a DBID of 4242.
+/// A stick whose playlists were made on the stick itself.
 fn world() -> Option<World> {
+    let w = synced_world()?;
+    let path = w.volume.join("PIONEER/exportstudio/manifest.json");
+    let mut manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    for row in manifest["playlists"].as_array_mut().unwrap() {
+        row["device_only"] = json!(true);
+    }
+    std::fs::write(&path, manifest.to_string()).unwrap();
+    Some(w)
+}
+
+/// A stick this library synced its playlists 1 ("Folder") and 2 ("Set") to.
+fn synced_world() -> Option<World> {
     let exporter = exporter()?;
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("source");
@@ -198,4 +211,39 @@ fn missing_audio_is_reported_and_the_rest_still_imports() {
     let out = run(&mut w, PlaylistPolicy::SkipExisting);
     assert_eq!((out.copied, out.failed.len()), (1, 1));
     assert_eq!(out.failed[0].1, "Audio file is missing on the USB");
+}
+
+#[test]
+fn a_playlist_the_library_deleted_is_not_recreated_from_the_stick() {
+    let Some(mut w) = synced_world() else { return };
+    // The library still has playlist 1 but deleted playlist 2.
+    {
+        let conn = fixture::connect(w.lib.path()).unwrap();
+        Rows(&conn).playlist("1", "Folder", 0).unwrap();
+    }
+    let device = es_device::read::read(&w.volume).unwrap().unwrap();
+    let plan = preview(&w.lib, &w.volume, &device, &options(&w, PlaylistPolicy::SkipExisting)).unwrap();
+    assert_eq!(plan.tracks.len(), 2, "its tracks are still offered");
+    assert!(plan.playlists.iter().all(|p| p.name != "Set"), "{:?}", plan.playlists);
+
+    let out = run(&mut w, PlaylistPolicy::SkipExisting);
+    assert_eq!((out.playlists, out.tracks), (0, 2));
+    assert!(w.lib.playlists().unwrap().iter().all(|n| n.name != "Set"));
+
+    let out = run(&mut w, PlaylistPolicy::CreateNew);
+    assert!(out.playlists >= 2, "asking for new playlists still makes them");
+}
+
+#[test]
+fn a_renamed_library_playlist_still_counts_as_the_one_on_the_stick() {
+    let Some(mut w) = synced_world() else { return };
+    {
+        let conn = fixture::connect(w.lib.path()).unwrap();
+        Rows(&conn).playlist("2", "Renamed", 0).unwrap();
+    }
+    let out = run(&mut w, PlaylistPolicy::Merge);
+    let renamed = w.lib.playlists().unwrap().into_iter().find(|n| n.id == "2").unwrap();
+    assert_eq!(w.lib.playlist_track_ids(&renamed.id).unwrap().len(), 2);
+    assert!(w.lib.playlists().unwrap().iter().all(|n| n.name != "Set"));
+    assert_eq!(out.tracks, 2);
 }
