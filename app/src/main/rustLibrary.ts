@@ -17,15 +17,27 @@ const READS: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> 
   'history.tracks': (lib, p) => lib.historyTracks(text(p?.id)),
   'backup.list': (lib) => lib.backupList(),
   'backup.settings': (lib) => lib.backupSettings(),
-  'track.detail': (lib, p) => {
-    // Tracks on a USB stick are read by the Python engine.
-    if (text(p?.id).startsWith('usb:')) return Promise.reject(new Error('device track'))
-    return lib.trackDetail(text(p?.id))
-  },
+  'track.detail': (lib, p) =>
+    text(p?.id).startsWith('usb:') ? lib.usbDetail(text(p?.id)) : lib.trackDetail(text(p?.id)),
   'media.resolve': (lib, p) => {
-    if (text(p?.id).startsWith('usb:')) return Promise.reject(new Error('device track'))
+    if (text(p?.id).startsWith('usb:')) {
+      return text(p?.kind) === 'audio' ? lib.usbMedia(text(p?.id)) : Promise.resolve('null')
+    }
     return lib.mediaResolve(text(p?.kind), text(p?.id), text(p?.size))
-  }
+  },
+  'usb.list': (lib) => lib.usbList(),
+  'usb.playlists': (lib, p) => lib.usbPlaylists(text(p?.volumeId)),
+  'usb.libraries': (lib, p) => lib.usbLibraries(text(p?.volumeId)),
+  'usb.selection': (lib, p) => lib.usbSelection(text(p?.volumeId)),
+  'usb.tracks': (lib, p) =>
+    lib.usbTracks(text(p?.volumeId), p?.playlistId == null ? null : text(p.playlistId)),
+  'usb.detail': (lib, p) => lib.usbDetail(text(p?.id)),
+  'usb.importPreview': (lib, p) =>
+    lib.usbImportPreview(
+      text(p?.volumeId),
+      p?.folder == null ? null : text(p.folder),
+      p?.policy == null ? null : text(p.policy)
+    )
 }
 
 /** Edits the Rust library makes. A failed edit is reported, never retried in Python. */
@@ -61,11 +73,27 @@ const WRITES: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>>
   'playlist.rename': (lib, p) => lib.playlistRename(text(p?.id), text(p?.name)),
   'playlist.delete': (lib, p) => lib.playlistDelete(text(p?.id)),
   'tag.add': (lib, p) => lib.tagAdd(text(p?.id), list(p?.trackIds)),
-  'tag.remove': (lib, p) => lib.tagRemove(text(p?.id), list(p?.trackIds))
+  'tag.remove': (lib, p) => lib.tagRemove(text(p?.id), list(p?.trackIds)),
+  'usb.eject': (lib, p) => lib.usbEject(text(p?.volumeId)),
+  'usb.format': (lib, p) => lib.usbFormat(text(p?.volumeId)),
+  'usb.sync': (lib, p) => lib.usbSync(text(p?.volumeId), list(p?.playlistIds), Boolean(p?.overwrite)),
+  'usb.import': (lib, p) =>
+    lib.usbImport(
+      text(p?.volumeId),
+      p?.folder == null ? null : text(p.folder),
+      p?.policy == null ? null : text(p.policy)
+    )
 }
 
 /** Edits that leave the master library alone, so the Python engine has nothing to reload after them. */
-const KEEPS_DATABASE = new Set(['backup.create', 'backup.delete', 'backup.setSettings'])
+const KEEPS_DATABASE = new Set([
+  'backup.create',
+  'backup.delete',
+  'backup.setSettings',
+  'usb.eject',
+  'usb.format',
+  'usb.sync'
+])
 
 const DAILY_CHECK_MS = 10 * 60 * 1000
 

@@ -110,6 +110,18 @@ export interface NativeLibrary {
   trackUpdate(ids: string[], fields: string): Promise<string>
   trackImport(paths: string[], playlistId: string | null, artwork: boolean): Promise<string>
   setWritable(on: boolean): Promise<string>
+  usbList(): Promise<string>
+  usbEject(volume: string): Promise<string>
+  usbFormat(volume: string): Promise<string>
+  usbPlaylists(volume: string): Promise<string>
+  usbLibraries(volume: string): Promise<string>
+  usbSelection(volume: string): Promise<string>
+  usbTracks(volume: string, playlistId: string | null): Promise<string>
+  usbDetail(key: string): Promise<string>
+  usbMedia(key: string): Promise<string>
+  usbImportPreview(volume: string, folder: string | null, policy: string | null): Promise<string>
+  usbImport(volume: string, folder: string | null, policy: string | null): Promise<string>
+  usbSync(volume: string, playlistIds: string[], overwrite: boolean): Promise<string>
   removeTracks(ids: string[]): Promise<string>
   playlistAdd(id: string, trackIds: string[]): Promise<string>
   playlistRemove(id: string, trackIds: string[]): Promise<string>

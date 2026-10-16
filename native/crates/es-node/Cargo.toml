@@ -14,6 +14,7 @@ es-analyse.workspace = true
 es-db.workspace = true
 es-index.workspace = true
 es-engine.workspace = true
+es-device.workspace = true
 es-backup.workspace = true
 es-anlz.workspace = true
 napi.workspace = true

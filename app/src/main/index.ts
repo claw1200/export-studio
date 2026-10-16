@@ -5,7 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import macIcon from '../../resources/icon-mac.png?asset'
 import { AnalysisQueue } from './analysis'
 import { AudioBridge } from './audio/bridge'
-import { Engine } from './engine'
+import { Engine, usbExport } from './engine'
 import { buildMenu, registerFiles } from './files'
 import { handleMediaProtocol, registerMediaScheme } from './media'
 import { RustLibrary } from './rustLibrary'
@@ -16,6 +16,8 @@ const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'aac', 'mp4', 'flac', 'wav', 'aif', 'aif
 const engine = new Engine()
 const audio = new AudioBridge(engine)
 const analysis = new AnalysisQueue(engine, () => audio.addon())
+// The Rust library launches the USB export program itself.
+process.env.EXPORTSTUDIO_USB_EXPORT ??= usbExport()
 const rustLibrary = new RustLibrary(
   () => audio.addon(),
   () => engine.call('library.reload')

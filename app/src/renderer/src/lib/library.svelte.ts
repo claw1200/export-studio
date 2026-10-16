@@ -21,6 +21,7 @@ import type {
   Track,
   TrackEdit,
   TreeItem,
+  PlaylistPolicy,
   UsbImportResult,
   View,
   Volume
@@ -865,7 +866,11 @@ export class Library {
     }
   }
 
-  async importDevice(volumeId: string, folder: string | null = null): Promise<UsbImportResult | null> {
+  async importDevice(
+    volumeId: string,
+    folder: string | null = null,
+    policy: PlaylistPolicy = 'skipExisting'
+  ): Promise<UsbImportResult | null> {
     if (this.syncing) return null
     if (!this.writable) {
       this.syncError = 'Unlock editing to import tracks'
@@ -876,7 +881,7 @@ export class Library {
     this.syncError = null
     this.syncProgress = { phase: 'import' }
     try {
-      const result = await api.usbImport(volumeId, folder)
+      const result = await api.usbImport(volumeId, folder, policy)
       await this.refreshContents()
       return result
     } catch (e) {

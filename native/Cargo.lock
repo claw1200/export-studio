@@ -632,6 +632,7 @@ dependencies = [
  "es-backup",
  "es-db",
  "es-deck",
+ "es-device",
  "es-engine",
  "es-index",
  "es-wave",

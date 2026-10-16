@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use es_backup::Backups;
+use crate::usb::UsbOp;
 use es_db::{Guard, Library, TrackEdit, Tx};
 use napi::bindgen_prelude::AsyncTask;
 use napi::threadsafe_function::{ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode};
@@ -16,8 +17,8 @@ use serde_json::{json, Value};
 
 const WRITE_BLOCKED: &str = "Close rekordbox before editing the library";
 
-struct State {
-    lib: Library,
+pub(crate) struct State {
+    pub(crate) lib: Library,
     source: PathBuf,
     writable: bool,
     /// Whether this session has already taken (or found a recent) backup before the first edit.
@@ -27,7 +28,8 @@ struct State {
 type Events = ThreadsafeFunction<(String, String), ErrorStrategy::Fatal>;
 
 /// What every call shares: the open library, where events go, and the backup folder.
-struct Core {
+pub(crate) struct Core {
+    pub(crate) devices: crate::usb::Devices,
     state: Mutex<Option<State>>,
     events: Mutex<Option<Events>>,
     backups: Backups,
@@ -49,13 +51,14 @@ impl Core {
                 .map_err(|e| es_backup::Error::Message(e.to_string()))
         };
         Self {
+            devices: crate::usb::Devices::default(),
             state: Mutex::new(None),
             events: Mutex::new(None),
             backups: Backups::new(backup_folder(), verify, es_db::rekordbox_running),
         }
     }
 
-    fn emit(&self, event: &str, data: &Value) {
+    pub(crate) fn emit(&self, event: &str, data: &Value) {
         if let Ok(guard) = self.events.lock() {
             if let Some(handler) = guard.as_ref() {
                 handler.call((event.to_owned(), data.to_string()), ThreadsafeFunctionCallMode::NonBlocking);
@@ -87,7 +90,7 @@ impl Core {
     }
 }
 
-fn failure(reason: impl std::fmt::Display) -> napi::Error {
+pub(crate) fn failure(reason: impl std::fmt::Display) -> napi::Error {
     napi::Error::from_reason(reason.to_string())
 }
 
@@ -96,7 +99,7 @@ fn open(source: PathBuf, writable: bool, backed_up: bool) -> napi::Result<State>
     Ok(State { lib, source, writable, backed_up })
 }
 
-fn json_of(value: &impl Serialize) -> napi::Result<String> {
+pub(crate) fn json_of(value: &impl Serialize) -> napi::Result<String> {
     serde_json::to_string(value).map_err(failure)
 }
 
@@ -112,7 +115,7 @@ fn info(state: &State) -> String {
 }
 
 /// Run something against the live database, then re-read the snapshot so later reads see it.
-fn with_live<T>(state: &mut State, work: impl FnOnce(&mut Library) -> napi::Result<T>) -> napi::Result<T> {
+pub(crate) fn with_live<T>(state: &mut State, work: impl FnOnce(&mut Library) -> napi::Result<T>) -> napi::Result<T> {
     if !state.writable {
         return Err(failure("Unlock editing to make changes to the library"));
     }
@@ -247,6 +250,7 @@ enum Op {
     PlaylistDelete(String),
     TagAdd(String, Vec<String>),
     TagRemove(String, Vec<String>),
+    Usb(UsbOp),
 }
 
 pub struct Run {
@@ -333,6 +337,9 @@ impl Run {
                 return Ok(due.to_string());
             }
             _ => {}
+        }
+        if let Op::Usb(op) = &self.op {
+            return crate::usb::perform(&self.core, slot, op);
         }
         let state = slot.as_mut().ok_or_else(|| failure("Library not open"))?;
         match &self.op {
@@ -464,6 +471,7 @@ impl Run {
                     playlist_ids
                 ))
             }
+            Op::Usb(_) => unreachable!("handled above"),
             Op::Open(_)
             | Op::Reload
             | Op::BackupList
@@ -706,6 +714,66 @@ impl RekordboxLibrary {
     #[napi(ts_return_type = "Promise<string>")]
     pub fn tag_remove(&self, tag_id: String, track_ids: Vec<String>) -> AsyncTask<Run> {
         self.run(Op::TagRemove(tag_id, track_ids))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn usb_list(&self) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::List))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn usb_eject(&self, volume: String) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::Eject(volume)))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn usb_format(&self, volume: String) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::Format(volume)))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn usb_playlists(&self, volume: String) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::Playlists(volume)))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn usb_libraries(&self, volume: String) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::Libraries(volume)))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn usb_selection(&self, volume: String) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::Selection(volume)))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn usb_tracks(&self, volume: String, playlist_id: Option<String>) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::Tracks(volume, playlist_id)))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn usb_detail(&self, key: String) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::Detail(key)))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn usb_media(&self, key: String) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::Media(key)))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn usb_import_preview(&self, volume: String, folder: Option<String>, policy: Option<String>) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::ImportPreview { volume, folder, policy }))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn usb_import(&self, volume: String, folder: Option<String>, policy: Option<String>) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::Import { volume, folder, policy }))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn usb_sync(&self, volume: String, playlist_ids: Vec<String>, overwrite: bool) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::Sync { volume, playlists: playlist_ids, overwrite }))
     }
 }
 

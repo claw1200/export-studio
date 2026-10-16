@@ -204,6 +204,9 @@ export interface Volume {
   bytesFree: number
 }
 
+/** What an import does with device playlists the library already has. */
+export type PlaylistPolicy = 'skipExisting' | 'merge' | 'createNew'
+
 export interface UsbImportPreview {
   destination: string
   layout: string
