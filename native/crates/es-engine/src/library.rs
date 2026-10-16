@@ -21,6 +21,7 @@ pub struct LibrarySession {
     writable: bool,
     backed_up: bool,
     guard: Guard,
+    snapshot_refresh_pending: bool,
 }
 
 pub struct LibraryService {
@@ -882,6 +883,7 @@ impl LibrarySession {
             writable,
             backed_up,
             guard: Guard::RefuseWhileRunning,
+            snapshot_refresh_pending: false,
         })
     }
 
@@ -897,7 +899,7 @@ impl LibrarySession {
 
     #[must_use]
     pub fn source_changed(&self) -> bool {
-        !self.writable && self.database.source_changed()
+        !self.writable && (self.snapshot_refresh_pending || self.database.source_changed())
     }
 
     #[must_use]
@@ -911,18 +913,23 @@ impl LibrarySession {
     }
 
     pub fn set_writable(&mut self, writable: bool) -> Result<()> {
-        if self.writable == writable {
+        if self.writable == writable && (writable || !self.snapshot_refresh_pending) {
             return Ok(());
         }
         if writable {
+            if self.snapshot_refresh_pending {
+                self.database = Database::open_snapshot(&self.source)?;
+                self.snapshot_refresh_pending = false;
+            }
             let live = Database::open_live(&self.source, self.guard)?;
             self.live = Some(live);
             self.writable = true;
         } else {
-            let snapshot = Database::open_snapshot(&self.source)?;
             self.live = None;
-            self.database = snapshot;
             self.writable = false;
+            self.snapshot_refresh_pending = true;
+            self.database = Database::open_snapshot(&self.source)?;
+            self.snapshot_refresh_pending = false;
         }
         Ok(())
     }
@@ -942,6 +949,9 @@ impl LibrarySession {
             return Err(crate::Error::Other(
                 "Unlock editing to make changes to the library".into(),
             ));
+        }
+        if self.guard == Guard::RefuseWhileRunning && es_db::rekordbox_running() {
+            return Err(es_db::Error::RekordboxRunning.into());
         }
         let live = self
             .live
@@ -1050,6 +1060,7 @@ mod tests {
             writable: true,
             backed_up: true,
             guard: Guard::Off,
+            snapshot_refresh_pending: false,
         });
         service
     }
@@ -1227,6 +1238,10 @@ mod tests {
         let path = fixture::build(directory.path(), 1).unwrap();
         {
             let connection = fixture::connect(&path).unwrap();
+            let journal_mode: String = connection
+                .query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
             Rows(&connection).track("track-1", "Test track").unwrap();
         }
         let mut service = writable_fixture_service(directory.path(), &path);
@@ -1241,5 +1256,31 @@ mod tests {
         service.set_writable(false, &|_| {}).unwrap();
         assert_eq!(service.cues("track-1").unwrap().len(), 1);
         assert!(!service.session().unwrap().source_changed());
+    }
+
+    #[test]
+    fn failed_relock_snapshot_refresh_can_be_retried() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = fixture::build(directory.path(), 1).unwrap();
+        {
+            let connection = fixture::connect(&path).unwrap();
+            Rows(&connection).track("track-1", "Test track").unwrap();
+        }
+        let mut service = writable_fixture_service(directory.path(), &path);
+        let missing_path = directory.path().join("temporarily-missing.db");
+        service.session.as_mut().unwrap().source = missing_path;
+
+        assert!(service
+            .session_mut()
+            .unwrap()
+            .set_writable(false)
+            .is_err());
+        assert!(service.session().unwrap().source_changed());
+        assert!(!service.session().unwrap().is_writable());
+
+        service.session.as_mut().unwrap().source = path;
+        service.session_mut().unwrap().set_writable(false).unwrap();
+        assert!(!service.session().unwrap().source_changed());
+        assert_eq!(service.tracks().unwrap().len(), 1);
     }
 }

@@ -81,7 +81,14 @@ fn signature(source: &Path) -> Vec<Option<(SystemTime, u64)>> {
     };
     [source, wal.as_path()]
         .iter()
-        .map(|p| std::fs::metadata(p).ok().and_then(|m| Some((m.modified().ok()?, m.len()))))
+        .map(|p| {
+            std::fs::metadata(p).ok().and_then(|metadata| {
+                if *p == wal.as_path() && metadata.len() == 0 {
+                    return None;
+                }
+                Some((metadata.modified().ok()?, metadata.len()))
+            })
+        })
         .collect()
 }
 
@@ -164,7 +171,17 @@ impl Library {
     /// Whether the library the snapshot was copied from has changed since.
     #[must_use]
     pub fn source_changed(&self) -> bool {
-        self.snapshot.as_ref().is_some_and(|s| signature(&s.source) != s.signature)
+        self.snapshot.as_ref().is_some_and(|snapshot| {
+            let current = signature(&snapshot.source);
+            if current != snapshot.signature && std::env::var_os("EXPORTSTUDIO_PROFILE_LIBRARY_OPEN").is_some() {
+                eprintln!(
+                    "[library-profile] snapshot_source_changed source={} captured={:?} current={current:?}",
+                    snapshot.source.display(),
+                    snapshot.signature,
+                );
+            }
+            current != snapshot.signature
+        })
     }
 
     /// The folder holding analysis files and artwork.

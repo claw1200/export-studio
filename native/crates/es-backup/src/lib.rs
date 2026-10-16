@@ -205,7 +205,7 @@ fn automatic_archive_created(path: &Path) -> Option<f64> {
     let local = NaiveDateTime::parse_from_str(&format!("{date}-{time}"), "%Y%m%d-%H%M%S").ok()?;
     Local
         .from_local_datetime(&local)
-        .single()
+        .earliest()
         .map(|created| created.timestamp_millis() as f64 / 1000.0)
 }
 
