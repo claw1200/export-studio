@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use es_device::{paths::pioneer_dir, volumes, Device, LibraryKind};
+use es_device::{paths::pioneer_dir, volumes, Device, LibraryKind, Volume};
 use es_engine::device_import::{self, PlaylistPolicy, TrackStatus};
 use serde_json::{json, Value};
 
@@ -89,6 +89,21 @@ fn publish_volumes(core: &Core) {
     core.emit("usb.volumes", &json!({ "volumes": volumes::list(None) }));
 }
 
+fn volume_value(volume: Volume) -> serde_json::Value {
+    json!({
+        "id": volume.id,
+        "name": volume.name,
+        "path": volume.path,
+        "hasLibrary": volume.has_library,
+        "ejectable": volume.ejectable,
+        "rootName": volume.root_name,
+        "fileSystem": volume.file_system,
+        "bytesTotal": volume.bytes_total as f64,
+        "bytesUsed": volume.bytes_used as f64,
+        "bytesFree": volume.bytes_free as f64,
+    })
+}
+
 fn policy(name: Option<&str>) -> napi::Result<PlaylistPolicy> {
     match name {
         None | Some("" | "skipExisting") => Ok(PlaylistPolicy::SkipExisting),
@@ -112,7 +127,10 @@ fn require(device: Option<Arc<Device>>) -> napi::Result<Arc<Device>> {
 
 pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> napi::Result<Value> {
     match op {
-        UsbOp::List => json_of(&volumes::list(None)),
+        UsbOp::List => {
+            let found: Vec<_> = volumes::list(None).into_iter().map(volume_value).collect();
+            json_of(&found)
+        }
         UsbOp::Eject(id) => {
             volumes::eject(id, None).map_err(failure)?;
             publish_volumes(core);
@@ -216,5 +234,30 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
             publish_volumes(core);
             json_of(&json!({ "volumeId": result.volume, "tracks": result.tracks, "playlists": result.playlists }))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn volume_capacities_are_serialized_as_numbers() {
+        let value = volume_value(Volume {
+            id: "/Volumes/USB".into(),
+            name: "USB".into(),
+            path: "/Volumes/USB".into(),
+            has_library: true,
+            ejectable: true,
+            root_name: None,
+            file_system: "APFS".into(),
+            bytes_total: 4096,
+            bytes_used: 1024,
+            bytes_free: 3072,
+        });
+
+        assert_eq!(value["bytesTotal"].as_f64(), Some(4096.0));
+        assert_eq!(value["bytesUsed"].as_f64(), Some(1024.0));
+        assert_eq!(value["bytesFree"].as_f64(), Some(3072.0));
     }
 }
