@@ -30,7 +30,7 @@ const TABLES: &[(&str, &str)] = &[
     ("djmdSongRelatedTracks", "`ID` VARCHAR(255) PRIMARY KEY, `RelatedTracksID` VARCHAR(255), `ContentID` VARCHAR(255), `TrackNo` INTEGER"),
     ("djmdSongSampler", "`ID` VARCHAR(255) PRIMARY KEY, `SamplerID` VARCHAR(255), `ContentID` VARCHAR(255), `TrackNo` INTEGER"),
     ("djmdActiveCensor", "`ID` VARCHAR(255) PRIMARY KEY, `ContentID` VARCHAR(255), `InMsec` INTEGER, `OutMsec` INTEGER"),
-    ("djmdCue", "`ID` VARCHAR(255) PRIMARY KEY, `ContentID` VARCHAR(255), `Kind` INTEGER, `InMsec` INTEGER, `OutMsec` INTEGER, `Color` INTEGER, `ColorTableIndex` INTEGER, `Comment` VARCHAR(255)"),
+    ("djmdCue", "`ID` VARCHAR(255) PRIMARY KEY, `ContentID` VARCHAR(255), `ContentUUID` VARCHAR(255), `Kind` INTEGER, `InMsec` INTEGER, `InFrame` INTEGER, `InMpegFrame` INTEGER, `InMpegAbs` INTEGER, `OutMsec` INTEGER, `OutFrame` INTEGER, `OutMpegFrame` INTEGER, `OutMpegAbs` INTEGER, `Color` INTEGER, `ColorTableIndex` INTEGER, `ActiveLoop` INTEGER, `Comment` VARCHAR(255), `BeatLoopSize` INTEGER"),
     ("djmdMixerParam", "`ID` VARCHAR(255) PRIMARY KEY, `ContentID` VARCHAR(255), `GainHigh` INTEGER"),
     ("contentFile", "`ID` VARCHAR(255) PRIMARY KEY, `ContentID` VARCHAR(255), `Path` VARCHAR(255)"),
     ("contentCue", "`ID` VARCHAR(255) PRIMARY KEY, `ContentID` VARCHAR(255), `Cues` TEXT"),

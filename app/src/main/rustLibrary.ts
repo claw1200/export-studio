@@ -19,12 +19,21 @@ const READS: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> 
     // Tracks on a USB stick are read by the Python engine.
     if (text(p?.id).startsWith('usb:')) return Promise.reject(new Error('device track'))
     return lib.trackDetail(text(p?.id))
+  },
+  'media.resolve': (lib, p) => {
+    if (text(p?.id).startsWith('usb:')) return Promise.reject(new Error('device track'))
+    return lib.mediaResolve(text(p?.kind), text(p?.id), text(p?.size))
   }
 }
 
 /** Edits the Rust library makes. A failed edit is reported, never retried in Python. */
 const WRITES: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> = {
   'track.removeFromCollection': (lib, p) => lib.removeTracks(list(p?.ids)),
+  'cue.setHot': (lib, p) => lib.cueSetHot(text(p?.id), Number(p?.kind), Number(p?.ms)),
+  'cue.addMemory': (lib, p) => lib.cueAddMemory(text(p?.id), Number(p?.ms)),
+  'cue.delete': (lib, p) => lib.cueDelete(text(p?.id), text(p?.cueId)),
+  'cue.setColor': (lib, p) =>
+    lib.cueSetColor(text(p?.id), text(p?.cueId), p?.colorIndex == null ? null : Number(p.colorIndex)),
   'playlist.add': (lib, p) => lib.playlistAdd(text(p?.id), list(p?.trackIds)),
   'playlist.remove': (lib, p) => lib.playlistRemove(text(p?.id), list(p?.trackIds)),
   'playlist.move': (lib, p) => lib.playlistMove(text(p?.id), list(p?.trackIds), Number(p?.index ?? 0)),
@@ -47,7 +56,6 @@ const PURE = new Set([
   'track.previews',
   'track.inspect',
   'track.findMissing',
-  'media.resolve',
   'files.read',
   'usb.list',
   'usb.eject',

@@ -23,7 +23,9 @@ export class AnalysisQueue {
   ) {}
 
   register(): void {
-    ipcMain.handle('analysis:enqueue', (_e, jobs: AnalysisJob[], concurrency: number) => this.enqueue(jobs, concurrency))
+    ipcMain.handle('analysis:enqueue', (_e, jobs: AnalysisJob[], concurrency: number) =>
+      this.enqueue(jobs, concurrency)
+    )
     ipcMain.handle('analysis:cancel', () => this.cancel())
   }
 

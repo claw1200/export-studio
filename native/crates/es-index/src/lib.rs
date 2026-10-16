@@ -7,6 +7,7 @@ use es_db::{Library, PlaylistKind, Result};
 use serde::Serialize;
 
 pub mod detail;
+pub mod media;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

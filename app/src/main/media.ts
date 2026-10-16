@@ -5,6 +5,9 @@ import { Readable } from 'stream'
 import { protocol } from 'electron'
 import type { Engine } from './engine'
 
+/** What the media protocol needs from the engine: resolving files and hearing when the library reloads. */
+type Caller = Pick<Engine, 'call' | 'onEvent'>
+
 const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -43,7 +46,7 @@ function openFile(path: string, signal: AbortSignal): ReadableStream<Uint8Array>
   return Readable.toWeb(node) as ReadableStream<Uint8Array>
 }
 
-export function handleMediaProtocol(engine: Engine): void {
+export function handleMediaProtocol(engine: Caller): void {
   const cache = new Map<string, string | null>()
   engine.onEvent((event) => {
     if (event === 'library.reloaded') cache.clear()

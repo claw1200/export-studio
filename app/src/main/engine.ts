@@ -51,7 +51,12 @@ export class Engine {
     this.ready = new Promise((resolveReady, rejectReady) => {
       const proc = spawn(cmd, args, {
         cwd,
-        env: { ...process.env, PYTHONUNBUFFERED: '1', EXPORTSTUDIO_USB_EXPORT: usbExport(), EXPORTSTUDIO_FFMPEG: ffmpegBinary() }
+        env: {
+          ...process.env,
+          PYTHONUNBUFFERED: '1',
+          EXPORTSTUDIO_USB_EXPORT: usbExport(),
+          EXPORTSTUDIO_FFMPEG: ffmpegBinary()
+        }
       })
       this.proc = proc
 

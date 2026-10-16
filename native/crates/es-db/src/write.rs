@@ -14,6 +14,16 @@ use crate::{Error, Result};
 
 const NOW: &str = "strftime('%Y-%m-%d %H:%M:%f +00:00','now')";
 
+/// Hot cue slots; 4 is a loop, not a slot.
+const HOT_SLOTS: [i64; 8] = [1, 2, 3, 5, 6, 7, 8, 9];
+const CUE_PALETTE_SIZE: i64 = 62;
+const CUE_FRAMES_PER_SECOND: i64 = 150;
+
+fn clamp_msec(msec: i64, length_seconds: i64) -> i64 {
+    let msec = msec.max(0);
+    if length_seconds > 0 { msec.min(length_seconds * 1000) } else { msec }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OnRemove {
     /// Rows are deleted with the track.
@@ -412,6 +422,94 @@ impl Tx<'_> {
             }
         }
         Ok(())
+    }
+
+    /// The track's UUID and length in seconds, which a new cue needs.
+    fn cue_context(&self, content_id: &str) -> Result<(Option<String>, i64)> {
+        match self.tx.query_row(
+            "SELECT UUID, COALESCE(Length, 0) FROM djmdContent WHERE ID = ?1",
+            [content_id],
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
+        ) {
+            Ok(found) => Ok(found),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Err(Error::NotFound(format!("track {content_id}"))),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn insert_cue(&mut self, content_id: &str, uuid: Option<&str>, kind: i64, msec: i64) -> Result<()> {
+        let id = unused_id(&self.tx, "djmdCue")?;
+        self.tx.execute(
+            &format!(
+                "INSERT INTO djmdCue (ID, ContentID, ContentUUID, Kind, InMsec, InFrame, InMpegFrame, InMpegAbs, OutMsec, \
+                 OutFrame, OutMpegFrame, OutMpegAbs, Color, UUID, rb_data_status, rb_local_data_status, rb_local_deleted, \
+                 rb_local_synced, usn, rb_local_usn, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0, -1, 0, 0, 0, -1, ?7, 0, 0, 0, 0, NULL, ?8, {NOW}, {NOW})"
+            ),
+            params![id, content_id, uuid, kind, msec, msec * CUE_FRAMES_PER_SECOND / 1000, Uuid::new_v4().to_string(), self.usn],
+        )?;
+        self.touched = true;
+        Ok(())
+    }
+
+    /// Place a hot cue in slot `kind`, replacing the one already there.
+    pub fn set_hot_cue(&mut self, content_id: &str, kind: i64, msec: i64) -> Result<()> {
+        if !HOT_SLOTS.contains(&kind) {
+            return Err(Error::Refused(format!("not a hot cue slot: {kind}")));
+        }
+        let (uuid, length) = self.cue_context(content_id)?;
+        let msec = clamp_msec(msec, length);
+        self.tx.execute(
+            "DELETE FROM djmdCue WHERE ContentID = ?1 AND Kind = ?2 AND rb_local_deleted = 0",
+            params![content_id, kind],
+        )?;
+        self.insert_cue(content_id, uuid.as_deref(), kind, msec)
+    }
+
+    /// Add a memory cue unless one already sits at that time.
+    pub fn add_memory_cue(&mut self, content_id: &str, msec: i64) -> Result<()> {
+        let (uuid, length) = self.cue_context(content_id)?;
+        let msec = clamp_msec(msec, length);
+        let present: i64 = self.tx.query_row(
+            "SELECT count(*) FROM djmdCue WHERE ContentID = ?1 AND Kind = 0 AND rb_local_deleted = 0 \
+             AND InMsec = ?2 AND (OutMsec IS NULL OR OutMsec < 0)",
+            params![content_id, msec],
+            |row| row.get(0),
+        )?;
+        if present == 0 {
+            self.insert_cue(content_id, uuid.as_deref(), 0, msec)?;
+        }
+        Ok(())
+    }
+
+    pub fn delete_cue(&mut self, content_id: &str, cue_id: &str) -> Result<()> {
+        let removed = self.tx.execute("DELETE FROM djmdCue WHERE ID = ?1 AND ContentID = ?2", params![cue_id, content_id])?;
+        if removed > 0 {
+            self.touched = true;
+        }
+        Ok(())
+    }
+
+    /// Set or clear a hot cue's palette colour (1 to 62).
+    pub fn set_cue_color(&mut self, content_id: &str, cue_id: &str, color_index: Option<i64>) -> Result<()> {
+        if let Some(c) = color_index.filter(|c| !(1..=CUE_PALETTE_SIZE).contains(c)) {
+            return Err(Error::Refused(format!("not a hot cue colour: {c}")));
+        }
+        let found = self.tx.query_row(
+            "SELECT Kind, ColorTableIndex FROM djmdCue WHERE ID = ?1 AND ContentID = ?2",
+            params![cue_id, content_id],
+            |row| Ok((row.get::<_, Option<i64>>(0)?.unwrap_or(0), row.get::<_, Option<i64>>(1)?)),
+        );
+        match found {
+            Ok((0, _)) | Err(rusqlite::Error::QueryReturnedNoRows) => {
+                return Err(Error::NotFound(format!("hot cue {cue_id}")))
+            }
+            Ok((_, current)) if current == color_index => return Ok(()),
+            Ok(_) => {}
+            Err(e) => return Err(e.into()),
+        }
+        self.tx.execute("UPDATE djmdCue SET ColorTableIndex = ?1 WHERE ID = ?2", params![color_index, cue_id])?;
+        self.stamp("djmdCue", cue_id)
     }
 
     fn require_tag(&self, tag_id: &str) -> Result<()> {

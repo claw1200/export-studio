@@ -106,6 +106,13 @@ pub fn cues(lib: &Library, content_id: &str, ext: Option<&Tags>) -> Result<Vec<C
     Ok(out)
 }
 
+/// A track's cues, with hot cue colours read from its analysis file.
+pub fn cues_for(lib: &Library, share: &Path, id: &str) -> Result<Vec<Cue>> {
+    let files = lib.track_files(id)?.ok_or_else(|| Error::NotFound(format!("track {id}")))?;
+    let ext = tags(share, files.analysis_path.as_deref(), "EXT");
+    cues(lib, id, ext.as_ref())
+}
+
 pub fn track_detail(lib: &Library, share: &Path, id: &str) -> Result<Detail> {
     let files = lib.track_files(id)?.ok_or_else(|| Error::NotFound(format!("track {id}")))?;
     let relative = files.analysis_path.as_deref();

@@ -20,6 +20,23 @@ const rustLibrary = new RustLibrary(
   () => audio.addon(),
   () => engine.call('library.reload')
 )
+
+/** A library call, answered by the Rust addon where it can and by the Python engine otherwise. */
+async function libraryCall<T = unknown>(method: string, params?: unknown): Promise<T> {
+  const args = params as Record<string, unknown> | undefined
+  const kind = rustLibrary.kind(method)
+  if (kind === 'write') return (await rustLibrary.call(method, args)) as T
+  if (kind === 'read') {
+    try {
+      return (await rustLibrary.call(method, args)) as T
+    } catch (err) {
+      console.warn(`[rust-library] ${method} fell back to the Python engine:`, (err as Error).message)
+    }
+  }
+  const result = await engine.call<T>(method, params)
+  await rustLibrary.after(method, args, result)
+  return result
+}
 registerMediaScheme()
 
 function createWindow(): BrowserWindow {
@@ -73,7 +90,7 @@ app.whenReady().then(() => {
   })
 
   engine.start().catch((err) => console.error('[engine] failed to start', err))
-  handleMediaProtocol(engine)
+  handleMediaProtocol({ call: libraryCall, onEvent: (listener) => engine.onEvent(listener) })
   audio.register()
   analysis.register()
   buildMenu()
@@ -83,19 +100,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('engine:call', async (_e, method: string, params?: unknown) => {
     try {
-      const args = params as Record<string, unknown> | undefined
-      const kind = rustLibrary.kind(method)
-      if (kind === 'write') return { ok: true, result: await rustLibrary.call(method, args) }
-      if (kind === 'read') {
-        try {
-          return { ok: true, result: await rustLibrary.call(method, args) }
-        } catch (err) {
-          console.warn(`[rust-library] ${method} fell back to the Python engine:`, (err as Error).message)
-        }
-      }
-      const result = await engine.call(method, params)
-      await rustLibrary.after(method, args, result)
-      return { ok: true, result }
+      return { ok: true, result: await libraryCall(method, params) }
     } catch (err) {
       const e = err as Error & { type?: string }
       return { ok: false, error: { message: e.message, type: e.type ?? 'Error' } }

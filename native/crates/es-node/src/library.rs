@@ -68,6 +68,10 @@ fn tracks_of(state: &State, ids: &[String]) -> napi::Result<String> {
     json_of(&es_index::track_rows(&state.lib, &state.lib.share_dir(), Some(ids)).map_err(failure)?)
 }
 
+fn cues_json(state: &State, id: &str) -> napi::Result<String> {
+    json_of(&es_index::detail::cues_for(&state.lib, &state.lib.share_dir(), id).map_err(failure)?)
+}
+
 fn clean_name(name: &str, folder: bool) -> String {
     let name = name.trim();
     if name.is_empty() {
@@ -90,6 +94,11 @@ enum Op {
     PlaylistTracks(String),
     HistoryTracks(String),
     TrackDetail(String),
+    MediaResolve { kind: String, id: String, size: String },
+    CueSetHot(String, i64, i64),
+    CueAddMemory(String, i64),
+    CueDelete(String, String),
+    CueSetColor(String, String, Option<i64>),
     RemoveTracks(Vec<String>),
     PlaylistAdd(String, Vec<String>),
     PlaylistRemove(String, Vec<String>),
@@ -156,6 +165,26 @@ impl Run {
             Op::HistoryTracks(id) => json_of(&state.lib.history_track_ids(id).map_err(failure)?),
             Op::TrackDetail(id) => {
                 json_of(&es_index::detail::track_detail(&state.lib, &state.lib.share_dir(), id).map_err(failure)?)
+            }
+            Op::MediaResolve { kind, id, size } => {
+                let found = es_index::media::resolve_media(&state.lib, &state.lib.share_dir(), kind, id, size).map_err(failure)?;
+                json_of(&found)
+            }
+            Op::CueSetHot(id, kind, ms) => {
+                edit(state, |tx| tx.set_hot_cue(id, *kind, *ms))?;
+                cues_json(state, id)
+            }
+            Op::CueAddMemory(id, ms) => {
+                edit(state, |tx| tx.add_memory_cue(id, *ms))?;
+                cues_json(state, id)
+            }
+            Op::CueDelete(id, cue) => {
+                edit(state, |tx| tx.delete_cue(id, cue))?;
+                cues_json(state, id)
+            }
+            Op::CueSetColor(id, cue, color) => {
+                edit(state, |tx| tx.set_cue_color(id, cue, *color))?;
+                cues_json(state, id)
             }
             Op::RemoveTracks(ids) => {
                 let removed = edit(state, |tx| tx.remove_tracks(ids))?;
@@ -304,6 +333,31 @@ impl RekordboxLibrary {
     #[napi(ts_return_type = "Promise<string>")]
     pub fn track_detail(&self, id: String) -> AsyncTask<Run> {
         self.run(Op::TrackDetail(id))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn media_resolve(&self, kind: String, id: String, size: String) -> AsyncTask<Run> {
+        self.run(Op::MediaResolve { kind, id, size })
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn cue_set_hot(&self, id: String, kind: i64, ms: i64) -> AsyncTask<Run> {
+        self.run(Op::CueSetHot(id, kind, ms))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn cue_add_memory(&self, id: String, ms: i64) -> AsyncTask<Run> {
+        self.run(Op::CueAddMemory(id, ms))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn cue_delete(&self, id: String, cue_id: String) -> AsyncTask<Run> {
+        self.run(Op::CueDelete(id, cue_id))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn cue_set_color(&self, id: String, cue_id: String, color_index: Option<i64>) -> AsyncTask<Run> {
+        self.run(Op::CueSetColor(id, cue_id, color_index))
     }
 
     #[napi(ts_return_type = "Promise<string>")]

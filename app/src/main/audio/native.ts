@@ -94,6 +94,11 @@ export interface NativeLibrary {
   playlistTracks(id: string): Promise<string>
   historyTracks(id: string): Promise<string>
   trackDetail(id: string): Promise<string>
+  mediaResolve(kind: string, id: string, size: string): Promise<string>
+  cueSetHot(id: string, kind: number, ms: number): Promise<string>
+  cueAddMemory(id: string, ms: number): Promise<string>
+  cueDelete(id: string, cueId: string): Promise<string>
+  cueSetColor(id: string, cueId: string, colorIndex: number | null): Promise<string>
   setWritable(on: boolean): Promise<string>
   removeTracks(ids: string[]): Promise<string>
   playlistAdd(id: string, trackIds: string[]): Promise<string>
