@@ -93,6 +93,7 @@ export interface NativeLibrary {
   playlistMembers(): Promise<string>
   playlistTracks(id: string): Promise<string>
   historyTracks(id: string): Promise<string>
+  trackDetail(id: string): Promise<string>
   setWritable(on: boolean): Promise<string>
   removeTracks(ids: string[]): Promise<string>
   playlistAdd(id: string, trackIds: string[]): Promise<string>

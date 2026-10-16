@@ -17,7 +17,7 @@ use std::time::SystemTime;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
-pub use read::{HistoryNode, PlaylistKind, PlaylistNode, TagNode, Track};
+pub use read::{Cue, HistoryNode, PlaylistKind, PlaylistNode, TagNode, Track, TrackFiles};
 pub use write::Tx;
 
 #[derive(Debug, thiserror::Error)]

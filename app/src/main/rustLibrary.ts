@@ -14,7 +14,12 @@ const READS: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> 
   'library.myTags': (lib) => lib.myTags(),
   'library.playlistMembers': (lib) => lib.playlistMembers(),
   'playlist.tracks': (lib, p) => lib.playlistTracks(text(p?.id)),
-  'history.tracks': (lib, p) => lib.historyTracks(text(p?.id))
+  'history.tracks': (lib, p) => lib.historyTracks(text(p?.id)),
+  'track.detail': (lib, p) => {
+    // Tracks on a USB stick are read by the Python engine.
+    if (text(p?.id).startsWith('usb:')) return Promise.reject(new Error('device track'))
+    return lib.trackDetail(text(p?.id))
+  }
 }
 
 /** Edits the Rust library makes. A failed edit is reported, never retried in Python. */
@@ -39,7 +44,6 @@ const WRITES: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>>
 /** Python calls that cannot change the master library; any other call may, so the Rust snapshot is refreshed after it. */
 const PURE = new Set([
   'library.info',
-  'track.detail',
   'track.previews',
   'track.inspect',
   'track.findMissing',

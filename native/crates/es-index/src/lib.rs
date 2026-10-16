@@ -6,6 +6,8 @@ use std::path::Path;
 use es_db::{Library, PlaylistKind, Result};
 use serde::Serialize;
 
+pub mod detail;
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackRow {

@@ -89,6 +89,7 @@ enum Op {
     PlaylistMembers,
     PlaylistTracks(String),
     HistoryTracks(String),
+    TrackDetail(String),
     RemoveTracks(Vec<String>),
     PlaylistAdd(String, Vec<String>),
     PlaylistRemove(String, Vec<String>),
@@ -153,6 +154,9 @@ impl Run {
                 Err(e) => Err(failure(e)),
             },
             Op::HistoryTracks(id) => json_of(&state.lib.history_track_ids(id).map_err(failure)?),
+            Op::TrackDetail(id) => {
+                json_of(&es_index::detail::track_detail(&state.lib, &state.lib.share_dir(), id).map_err(failure)?)
+            }
             Op::RemoveTracks(ids) => {
                 let removed = edit(state, |tx| tx.remove_tracks(ids))?;
                 let share = state.lib.share_dir();
@@ -295,6 +299,11 @@ impl RekordboxLibrary {
     #[napi(ts_return_type = "Promise<string>")]
     pub fn history_tracks(&self, id: String) -> AsyncTask<Run> {
         self.run(Op::HistoryTracks(id))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn track_detail(&self, id: String) -> AsyncTask<Run> {
+        self.run(Op::TrackDetail(id))
     }
 
     #[napi(ts_return_type = "Promise<string>")]

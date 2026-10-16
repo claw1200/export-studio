@@ -81,6 +81,25 @@ const FOLDER: i64 = 1;
 const SMART: i64 = 4;
 const CHUNK: usize = 500;
 
+/// One stored cue of a track.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cue {
+    pub id: String,
+    pub kind: i64,
+    pub start_ms: i64,
+    pub end_ms: Option<i64>,
+    pub color: Option<i64>,
+    pub color_index: Option<i64>,
+    pub comment: String,
+}
+
+/// Where a track's audio and analysis live.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrackFiles {
+    pub folder_path: String,
+    pub analysis_path: Option<String>,
+}
+
 fn text(row: &Row<'_>, index: usize) -> rusqlite::Result<String> {
     Ok(row.get::<_, Option<String>>(index)?.unwrap_or_default())
 }
@@ -201,6 +220,40 @@ impl Library {
             }
         }
         Ok(out)
+    }
+
+    /// Where a track's files are, for a track in the library or removed from it. `None` for an unknown id.
+    pub fn track_files(&self, id: &str) -> Result<Option<TrackFiles>> {
+        let row = self.conn().query_row(
+            "SELECT FolderPath, AnalysisDataPath FROM djmdContent WHERE ID = ?1",
+            [id],
+            |row| Ok(TrackFiles { folder_path: text(row, 0)?, analysis_path: row.get::<_, Option<String>>(1)?.filter(|p| !p.is_empty()) }),
+        );
+        match row {
+            Ok(files) => Ok(Some(files)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// A track's live cues, in the order they were stored.
+    pub fn cues(&self, content_id: &str) -> Result<Vec<Cue>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT ID, Kind, InMsec, OutMsec, Color, ColorTableIndex, Comment FROM djmdCue \
+             WHERE ContentID = ?1 AND rb_local_deleted = 0 ORDER BY rowid",
+        )?;
+        let rows = stmt.query_map([content_id], |row| {
+            Ok(Cue {
+                id: row.get(0)?,
+                kind: number(row, 1)?,
+                start_ms: number(row, 2)?,
+                end_ms: row.get(3)?,
+                color: row.get(4)?,
+                color_index: row.get(5)?,
+                comment: text(row, 6)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     /// Cue kinds per track (0 is a memory cue, 1 and up are hot cues and loops), live cues on live tracks only.

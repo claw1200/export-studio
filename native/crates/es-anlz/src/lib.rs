@@ -5,6 +5,8 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 
+pub mod decode;
+
 pub const PHRASE_TAG: &str = "PSSI";
 
 const MAGIC: &[u8; 4] = b"PMAI";
