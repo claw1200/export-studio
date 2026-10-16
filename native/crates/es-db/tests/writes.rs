@@ -164,6 +164,63 @@ fn a_snapshot_cannot_write() {
 }
 
 #[test]
+fn a_snapshot_includes_committed_wal_data_and_stays_isolated() {
+    let s = scene();
+    let conn = fixture::connect(s.lib.path()).unwrap();
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;").unwrap();
+    conn.execute("UPDATE djmdContent SET Title = 'Before' WHERE ID = '1'", []).unwrap();
+
+    let snap = Library::open_snapshot(s.lib.path()).unwrap();
+    assert!(!snap.source_changed());
+    conn.execute("UPDATE djmdContent SET Title = 'After' WHERE ID = '1'", []).unwrap();
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+
+    let tracks = snap.tracks(Some(&["1".into()])).unwrap();
+    assert_eq!(tracks[0].title, "Before");
+    assert!(snap.source_changed());
+    assert_eq!(es_db::verify(snap.path()).unwrap().tracks, 3);
+}
+
+#[test]
+fn snapshots_stay_consistent_during_writes_and_checkpoints() {
+    let s = scene();
+    let conn = fixture::connect(s.lib.path()).unwrap();
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;").unwrap();
+    conn.execute("UPDATE djmdContent SET Title = '0'", []).unwrap();
+    let barrier = std::sync::Barrier::new(2);
+
+    std::thread::scope(|scope| {
+        let barrier = &barrier;
+        scope.spawn(move || {
+            for generation in 1..=8 {
+                barrier.wait();
+                conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+                conn.execute("UPDATE djmdContent SET Title = ?1", [generation.to_string()]).unwrap();
+                barrier.wait();
+            }
+        });
+        for _ in 1..=8 {
+            barrier.wait();
+            let snap = Library::open_snapshot(s.lib.path());
+            barrier.wait();
+            let snap = snap.unwrap();
+            let tracks = snap.tracks(None).unwrap();
+            assert_eq!(tracks.len(), 3);
+            assert!(tracks.iter().all(|track| track.title == tracks[0].title));
+            assert_eq!(es_db::verify(snap.path()).unwrap().tracks, 3);
+        }
+    });
+}
+
+#[test]
+fn a_snapshot_requires_an_existing_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("missing.db");
+    assert!(Library::open_snapshot(&path).is_err());
+    assert!(!path.exists());
+}
+
+#[test]
 fn every_table_pointing_at_a_track_is_classified() {
     let s = scene();
     let conn = fixture::connect(s.lib.path()).unwrap();

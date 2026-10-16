@@ -30,6 +30,9 @@ pub fn patch_tags(data: &[u8], replace: &[(&str, Vec<u8>)], drop: &[&str]) -> st
         return Err(bad("not an analysis file"));
     }
     let header = u32::from_be_bytes([data[4], data[5], data[6], data[7]]) as usize;
+    if header < 12 {
+        return Err(bad("header length is less than 12"));
+    }
     let mut out = data.get(..header).ok_or_else(|| bad("short header"))?.to_vec();
     let mut pending: Vec<(&str, &Vec<u8>)> = replace.iter().map(|(k, v)| (*k, v)).collect();
     let mut pos = header;
@@ -122,6 +125,41 @@ mod tests {
     fn adds_a_tag_the_file_lacks() {
         let patched = replace_tags(&file(&[other("PQTZ")]), &[("PPTH", path_tag("?/a.wav"))]).unwrap();
         assert!(Tags::parse(patched).unwrap().first("PPTH").is_some());
+    }
+
+    #[test]
+    fn rejects_invalid_pmai_header_lengths() {
+        for header in (0u32..12).chain([13, u32::MAX]) {
+            let mut data = b"PMAI".to_vec();
+            data.extend(header.to_be_bytes());
+            data.extend(12u32.to_be_bytes());
+            let error = patch_tags(&data, &[], &[]).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidData, "header length {header}");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_pmai_headers_with_replacement_tags() {
+        for header in 0u32..12 {
+            let mut data = b"PMAI".to_vec();
+            data.extend(header.to_be_bytes());
+            data.extend(12u32.to_be_bytes());
+            let error = replace_tags(&data, &[("PPTH", path_tag("?/a.wav"))]).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidData, "header length {header}");
+        }
+    }
+
+    #[test]
+    fn accepts_a_twelve_byte_pmai_header() {
+        let mut data = b"PMAI".to_vec();
+        data.extend(12u32.to_be_bytes());
+        data.extend(12u32.to_be_bytes());
+        assert_eq!(patch_tags(&data, &[], &[]).unwrap(), data);
+
+        let replacement = path_tag("?/a.wav");
+        let patched = replace_tags(&data, &[("PPTH", replacement.clone())]).unwrap();
+        assert_eq!(&patched[12..], replacement.as_slice());
+        assert_eq!(u32::from_be_bytes(patched[8..12].try_into().unwrap()) as usize, patched.len());
     }
 
     #[test]

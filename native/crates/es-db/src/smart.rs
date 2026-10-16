@@ -133,20 +133,21 @@ fn clause(cond: &Condition) -> Result<Option<(String, Vec<Value>)>> {
         }));
     }
     let left = value(kind, &cond.left)?;
-    let like = |pattern: String| (format!("{expr} LIKE ?"), vec![Value::Text(pattern)]);
+    let escaped = cond.left.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+    let like = |pattern: String| (format!("{expr} LIKE ? ESCAPE '\\'"), vec![Value::Text(pattern)]);
     Ok(Some(match cond.operator {
         1 => (format!("{expr} = ?"), vec![left]),
         2 => (format!("{expr} != ?"), vec![left]),
         3 => (format!("{expr} > ?"), vec![left]),
         4 => (format!("{expr} < ?"), vec![left]),
         5 => (format!("{expr} BETWEEN ? AND ?"), vec![left, value(kind, &cond.right)?]),
-        8 => like(format!("%{}%", cond.left)),
+        8 => like(format!("%{escaped}%")),
         9 => {
-            let (sql, params) = like(format!("%{}%", cond.left));
+            let (sql, params) = like(format!("%{escaped}%"));
             (format!("NOT ({sql})"), params)
         }
-        10 => like(format!("{}%", cond.left)),
-        11 => like(format!("%{}", cond.left)),
+        10 => like(format!("{escaped}%")),
+        11 => like(format!("%{escaped}")),
         other => return Err(Error::Refused(format!("unknown operator {other} in a smart playlist"))),
     }))
 }

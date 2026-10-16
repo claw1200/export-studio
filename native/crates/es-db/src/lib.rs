@@ -14,9 +14,9 @@ mod xml;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
-use rusqlite::Connection;
+use rusqlite::{backup::Backup, Connection, OpenFlags};
 use tempfile::TempDir;
 
 pub use read::{Cue, HistoryNode, PlaylistKind, PlaylistNode, TagNode, Track, TrackFiles};
@@ -97,22 +97,17 @@ impl Library {
         base.map(|dir| dir.join("master.db"))
     }
 
-    /// A private copy of the database, so reads never contend with rekordbox.
+    /// A consistent private copy, so subsequent reads never contend with rekordbox.
     pub fn open_snapshot(source: &Path) -> Result<Self> {
         let dir = tempfile::Builder::new().prefix("exportstudio-db-").tempdir()?;
         let name = source.file_name().ok_or_else(|| Error::Refused("not a database path".into()))?;
-        for suffix in ["", "-wal", "-shm"] {
-            let mut file = name.to_os_string();
-            file.push(suffix);
-            let from = source.with_file_name(&file);
-            if from.exists() {
-                std::fs::copy(&from, dir.path().join(&file))?;
-            }
-        }
+        let source_signature = signature(source);
+        let source_conn = unlock_with_flags(source, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         let path = dir.path().join(name);
-        let conn = unlock(&path)?;
+        let mut conn = unlock(&path)?;
+        Backup::new(&source_conn, &mut conn)?.run_to_completion(128, Duration::from_millis(5), None)?;
         conn.pragma_update(None, "query_only", true)?;
-        let snapshot = Snapshot { _dir: dir, source: source.to_path_buf(), signature: signature(source), taken: SystemTime::now() };
+        let snapshot = Snapshot { _dir: dir, source: source.to_path_buf(), signature: source_signature, taken: SystemTime::now() };
         Ok(Self { conn, path, mode: Mode::Snapshot, guard: Guard::RefuseWhileRunning, snapshot: Some(snapshot) })
     }
 
@@ -201,7 +196,11 @@ pub fn verify(path: &Path) -> Result<Counts> {
 }
 
 fn unlock(path: &Path) -> Result<Connection> {
-    let conn = Connection::open(path)?;
+    unlock_with_flags(path, OpenFlags::default())
+}
+
+fn unlock_with_flags(path: &Path, flags: OpenFlags) -> Result<Connection> {
+    let conn = Connection::open_with_flags(path, flags)?;
     conn.pragma_update(None, "key", key::master_key()?)?;
     conn.query_row("SELECT count(*) FROM sqlite_master", [], |row| row.get::<_, i64>(0))?;
     Ok(conn)

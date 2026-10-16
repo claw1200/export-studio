@@ -189,7 +189,10 @@
             bind:value={policy}
             disabled={locked}
             class="h-8 min-w-0 flex-1 rounded-md bg-raised px-2 text-[12.5px] text-fg disabled:opacity-40"
-            onchange={() => void load()}
+            onchange={(e) => {
+              policy = e.currentTarget.value as PlaylistPolicy
+              void load()
+            }}
           >
             {#each POLICIES as option (option.value)}
               <option value={option.value}>{option.label}</option>

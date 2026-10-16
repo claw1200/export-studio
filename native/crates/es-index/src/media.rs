@@ -32,6 +32,10 @@ fn art(share: &Path, relative: &str, size: &str) -> Option<PathBuf> {
         if sized.is_file() {
             return Some(sized);
         }
+        let jpeg = sized.with_extension("jpg");
+        if jpeg.is_file() {
+            return Some(jpeg);
+        }
     }
     path.is_file().then_some(path)
 }
@@ -39,6 +43,26 @@ fn art(share: &Path, relative: &str, size: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn png_artwork_uses_jpeg_thumbnails_before_the_original() {
+        let dir = tempfile::tempdir().unwrap();
+        let share = dir.path();
+        std::fs::create_dir_all(share.join("img")).unwrap();
+        let original = share.join("img/artwork.png");
+        std::fs::write(&original, b"png").unwrap();
+        assert_eq!(art(share, "/img/artwork.png", "s"), Some(original.clone()));
+        for size in ["s", "m"] {
+            let thumbnail = share.join(format!("img/artwork_{size}.jpg"));
+            std::fs::write(&thumbnail, b"jpeg").unwrap();
+            assert_eq!(art(share, "/img/artwork.png", size), Some(thumbnail));
+        }
+        assert_eq!(art(share, "/img/artwork.png", ""), Some(original));
+
+        let png_thumbnail = share.join("img/artwork_s.png");
+        std::fs::write(&png_thumbnail, b"png").unwrap();
+        assert_eq!(art(share, "/img/artwork.png", "s"), Some(png_thumbnail));
+    }
 
     #[test]
     fn prefers_the_sized_copy_and_stays_inside_the_share_folder() {

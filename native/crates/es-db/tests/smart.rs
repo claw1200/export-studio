@@ -39,6 +39,25 @@ fn any_condition_may_match() {
 }
 
 #[test]
+fn text_operators_treat_like_metacharacters_literally() {
+    let (_dir, lib) = lib_with("<NODE/>");
+    let conn = fixture::connect(lib.path()).unwrap();
+    conn.execute("UPDATE djmdContent SET Title = 'x middle x', FileNameL = 'x middle x' WHERE ID = '3'", []).unwrap();
+    for text in ["%", "_", "\\", "\\%", "\\_"] {
+        let title = format!("{text} middle {text}");
+        conn.execute("UPDATE djmdContent SET Title = ?1, FileNameL = ?1 WHERE ID = '1'", [&title]).unwrap();
+        for property in ["name", "fileName"] {
+            for operator in [8, 9, 10, 11] {
+                let xml = format!(r#"<NODE LogicalOperator="1">{}</NODE>"#, cond(property, operator, text));
+                conn.execute("UPDATE djmdPlaylist SET SmartList = ?1 WHERE ID = '10'", [&xml]).unwrap();
+                let expected = if operator == 9 { ["3"] } else { ["1"] };
+                assert_eq!(lib.playlist_track_ids("10").unwrap(), expected, "{property} operator {operator}, text {text:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn unreadable_conditions_are_an_error_not_every_track() {
     let (_dir, lib) = lib_with(&format!(r#"<NODE Id="1" LogicalOperator="1" AutomaticUpdate="0">{}</NODE>"#, cond("bpm", 3, "fast")));
     assert!(lib.playlist_track_ids("10").is_err());
