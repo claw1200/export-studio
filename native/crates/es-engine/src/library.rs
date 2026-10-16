@@ -4,8 +4,11 @@
 //! work with domain and read-model types rather than JSON text.
 
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use es_backup::Backups;
 use es_db::{Guard, Library as Database};
+use serde_json::{json, Value};
 
 use crate::Result;
 
@@ -17,12 +20,44 @@ pub struct LibrarySession {
     backed_up: bool,
 }
 
-#[derive(Default)]
 pub struct LibraryService {
     session: Option<LibrarySession>,
+    backups: Backups,
+}
+
+#[derive(Debug)]
+pub enum ServiceEvent {
+    BackupProgress(Value),
+    BackupChanged,
+    LibraryReloaded,
 }
 
 impl LibraryService {
+    #[must_use]
+    pub fn new() -> Self {
+        let root = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map_or_else(|| PathBuf::from("."), PathBuf::from)
+            .join(".exportstudio")
+            .join("backups");
+        Self::with_backup_root(root)
+    }
+
+    fn with_backup_root(root: PathBuf) -> Self {
+        let verify = |path: &Path| {
+            es_db::verify(path)
+                .map(|counts| es_backup::Counts {
+                    tracks: counts.tracks,
+                    playlists: counts.playlists,
+                })
+                .map_err(|error| es_backup::Error::Message(error.to_string()))
+        };
+        Self {
+            session: None,
+            backups: Backups::new(root, verify, es_db::rekordbox_running),
+        }
+    }
+
     pub fn open(&mut self, source: PathBuf, writable: bool, backed_up: bool) -> Result<()> {
         self.session = None;
         self.session = Some(LibrarySession::open(source, writable, backed_up)?);
@@ -55,6 +90,146 @@ impl LibraryService {
 
     pub fn session_mut(&mut self) -> Option<&mut LibrarySession> {
         self.session.as_mut()
+    }
+
+    fn backups(&self) -> &Backups {
+        &self.backups
+    }
+
+    fn source(&self) -> Option<PathBuf> {
+        self.session
+            .as_ref()
+            .map(|session| session.source().to_path_buf())
+            .or_else(Database::installed_path)
+    }
+
+    fn auto_due(&self) -> bool {
+        let interval = self.backups().settings()["interval"].as_i64().unwrap_or(12) as f64 * 3600.0;
+        match self
+            .backups()
+            .latest_automatic()
+            .and_then(|manifest| manifest["created"].as_f64())
+        {
+            None => true,
+            Some(created) => {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0.0, |duration| duration.as_secs_f64());
+                now - created >= interval
+            }
+        }
+    }
+
+    fn back_up(
+        &self,
+        source: &Path,
+        reason: &str,
+        emit: &impl Fn(ServiceEvent),
+    ) -> Result<Option<Value>> {
+        let made = self.backups().create(source, reason, &|progress| {
+            emit(ServiceEvent::BackupProgress(progress))
+        })?;
+        emit(ServiceEvent::BackupProgress(
+            json!({ "stage": "done", "reason": reason }),
+        ));
+        if made.is_some() {
+            emit(ServiceEvent::BackupChanged);
+        }
+        Ok(made)
+    }
+
+    pub fn backup_list(&self) -> Vec<Value> {
+        let source = self.source();
+        self.backups().list(source.as_deref())
+    }
+
+    #[must_use]
+    pub fn backup_settings(&self) -> Value {
+        self.backups().settings()
+    }
+
+    pub fn backup_set_settings(
+        &self,
+        auto: Option<bool>,
+        keep: Option<i64>,
+        interval: Option<i64>,
+    ) -> Result<Value> {
+        Ok(self.backups().set_settings(auto, keep, interval)?)
+    }
+
+    pub fn backup_create(&self, emit: &impl Fn(ServiceEvent)) -> Result<Option<Value>> {
+        let source = self.source().ok_or_else(|| {
+            crate::Error::Other("No rekordbox library found on this computer".into())
+        })?;
+        self.back_up(&source, "manual", emit)
+    }
+
+    pub fn backup_delete(&self, id: &str) -> Result<Vec<Value>> {
+        self.backups().delete(id)?;
+        Ok(self.backup_list())
+    }
+
+    pub fn backup_restore(&mut self, id: &str, emit: &impl Fn(ServiceEvent)) -> Result<Value> {
+        let source = self.source().ok_or_else(|| {
+            crate::Error::Other("No rekordbox library found on this computer".into())
+        })?;
+        let backed_up = self.session.as_ref().is_some_and(LibrarySession::backed_up);
+        self.close();
+        let restored = self.backups().restore(id, &source, &|progress| {
+            emit(ServiceEvent::BackupProgress(progress))
+        });
+        emit(ServiceEvent::BackupProgress(
+            json!({ "stage": "done", "reason": "restore" }),
+        ));
+        emit(ServiceEvent::BackupChanged);
+        let _ = self.open(source, false, backed_up);
+        emit(ServiceEvent::LibraryReloaded);
+        Ok(restored?)
+    }
+
+    pub fn daily_backup(&self, emit: &impl Fn(ServiceEvent)) -> Result<bool> {
+        let Some(session) = self.session.as_ref() else {
+            return Ok(false);
+        };
+        let due = self.backups().settings()["auto"].as_bool().unwrap_or(true) && self.auto_due();
+        if due && !es_db::rekordbox_running() {
+            self.back_up(session.source(), "daily", emit)?;
+        }
+        Ok(due)
+    }
+
+    pub fn set_writable(&mut self, writable: bool, emit: &impl Fn(ServiceEvent)) -> Result<()> {
+        let Some(session) = self.session.as_ref() else {
+            return Err(crate::Error::Other("Library not open".into()));
+        };
+        if writable
+            && !session.backed_up()
+            && self.backups().settings()["auto"].as_bool().unwrap_or(true)
+        {
+            if es_db::rekordbox_running() {
+                return Err(crate::Error::Other(
+                    "Close rekordbox before editing the library".into(),
+                ));
+            }
+            if self.auto_due() {
+                self.back_up(session.source(), "before-edit", emit)?;
+            }
+            self.session
+                .as_mut()
+                .expect("session checked above")
+                .mark_backed_up();
+        }
+        self.session
+            .as_mut()
+            .expect("session checked above")
+            .set_writable(writable);
+        Ok(())
+    }
+}
+
+impl Default for LibraryService {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -243,7 +418,7 @@ mod tests {
     fn service_reload_preserves_session_policy() {
         let directory = tempfile::tempdir().unwrap();
         let path = fixture::build(directory.path(), 1).unwrap();
-        let mut service = LibraryService::default();
+        let mut service = LibraryService::with_backup_root(directory.path().join("backups"));
 
         service.open(path.clone(), true, true).unwrap();
         service.reload().unwrap();
@@ -260,12 +435,21 @@ mod tests {
     fn failed_open_clears_the_previous_session() {
         let directory = tempfile::tempdir().unwrap();
         let path = fixture::build(directory.path(), 1).unwrap();
-        let mut service = LibraryService::default();
+        let mut service = LibraryService::with_backup_root(directory.path().join("backups"));
         service.open(path, false, false).unwrap();
 
         assert!(service
             .open(directory.path().join("missing.db"), false, false)
             .is_err());
         assert!(service.session().is_none());
+    }
+
+    #[test]
+    fn daily_backup_without_a_session_is_a_noop() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = LibraryService::with_backup_root(directory.path().join("backups"));
+
+        assert!(!service.daily_backup(&|_| {}).unwrap());
+        assert!(!directory.path().join("backups").exists());
     }
 }

@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 es-db.workspace = true
+es-backup.workspace = true
 es-index.workspace = true
 es-tags.workspace = true
 es-device.workspace = true

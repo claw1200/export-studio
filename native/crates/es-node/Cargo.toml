@@ -15,7 +15,6 @@ es-db.workspace = true
 es-index.workspace = true
 es-engine.workspace = true
 es-device.workspace = true
-es-backup.workspace = true
 es-anlz.workspace = true
 es-tags.workspace = true
 napi.workspace = true
@@ -23,6 +22,9 @@ napi-derive.workspace = true
 serde = "1"
 serde_json = "1"
 base64 = "0.22"
+
+[dev-dependencies]
+es-backup.workspace = true
 
 [build-dependencies]
 napi-build.workspace = true

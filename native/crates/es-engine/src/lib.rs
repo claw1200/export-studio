@@ -18,6 +18,8 @@ pub enum Error {
     Db(#[from] es_db::Error),
     #[error(transparent)]
     Device(#[from] es_device::Error),
+    #[error(transparent)]
+    Backup(#[from] es_backup::Error),
     #[error("{0}")]
     Other(String),
     /// The stick holds something the export would overwrite.

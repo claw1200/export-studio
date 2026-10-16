@@ -5,18 +5,15 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use es_backup::Backups;
 use crate::usb::UsbOp;
 use es_db::{Library, TrackEdit, Tx};
-use es_engine::library::{LibraryService, LibrarySession};
+use es_engine::library::{LibraryService, LibrarySession, ServiceEvent};
 use napi::bindgen_prelude::AsyncTask;
 use napi::threadsafe_function::{ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::{Env, JsFunction, Task};
 use napi_derive::napi;
 use serde::Serialize;
 use serde_json::{json, Value};
-
-const WRITE_BLOCKED: &str = "Close rekordbox before editing the library";
 
 pub(crate) type State = LibrarySession;
 
@@ -27,29 +24,14 @@ pub(crate) struct Core {
     pub(crate) devices: crate::usb::Devices,
     service: Mutex<LibraryService>,
     events: Mutex<Option<Events>>,
-    backups: Backups,
-}
-
-fn backup_folder() -> PathBuf {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map_or_else(|| PathBuf::from("."), PathBuf::from)
-        .join(".exportstudio")
-        .join("backups")
 }
 
 impl Core {
     fn new() -> Self {
-        let verify = |path: &std::path::Path| {
-            es_db::verify(path)
-                .map(|c| es_backup::Counts { tracks: c.tracks, playlists: c.playlists })
-                .map_err(|e| es_backup::Error::Message(e.to_string()))
-        };
         Self {
             devices: crate::usb::Devices::default(),
-            service: Mutex::new(LibraryService::default()),
+            service: Mutex::new(LibraryService::new()),
             events: Mutex::new(None),
-            backups: Backups::new(backup_folder(), verify, es_db::rekordbox_running),
         }
     }
 
@@ -61,26 +43,11 @@ impl Core {
         }
     }
 
-    /// Back up the library with progress events; automatic reasons skip when nothing changed.
-    fn back_up(&self, source: &std::path::Path, reason: &str) -> napi::Result<Option<Value>> {
-        let made = self.backups.create(source, reason, &|event| self.emit("backup.progress", &event));
-        self.emit("backup.progress", &json!({ "stage": "done", "reason": reason }));
-        let made = made.map_err(failure)?;
-        if made.is_some() {
-            self.emit("backup.changed", &json!({}));
-        }
-        Ok(made)
-    }
-
-    /// Whether the newest automatic backup is older than the chosen interval.
-    fn auto_due(&self) -> bool {
-        let interval = self.backups.settings()["interval"].as_i64().unwrap_or(12) as f64 * 3600.0;
-        match self.backups.latest_automatic().and_then(|m| m["created"].as_f64()) {
-            None => true,
-            Some(created) => {
-                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
-                now - created >= interval
-            }
+    pub(crate) fn emit_service_event(&self, event: ServiceEvent) {
+        match event {
+            ServiceEvent::BackupProgress(data) => self.emit("backup.progress", &data),
+            ServiceEvent::BackupChanged => self.emit("backup.changed", &json!({})),
+            ServiceEvent::LibraryReloaded => self.emit("library.reloaded", &json!({})),
         }
     }
 }
@@ -308,22 +275,20 @@ pub struct Run {
 
 impl Run {
     /// Backup calls that need nothing but the library's location.
-    fn backup_op(&self, open_source: Option<PathBuf>) -> napi::Result<String> {
-        let source = open_source.or_else(Library::installed_path);
-        let backups = &self.core.backups;
+    fn backup_op(&self, service: &LibraryService) -> napi::Result<String> {
+        let emit = |event| self.core.emit_service_event(event);
         match &self.op {
-            Op::BackupList => json_of(&backups.list(source.as_deref())),
-            Op::BackupSettings => json_of(&backups.settings()),
-            Op::BackupSetSettings { auto, keep, interval } => json_of(&backups.set_settings(*auto, *keep, *interval).map_err(failure)?),
+            Op::BackupList => json_of(&service.backup_list()),
+            Op::BackupSettings => json_of(&service.backup_settings()),
+            Op::BackupSetSettings { auto, keep, interval } => {
+                json_of(&service.backup_set_settings(*auto, *keep, *interval).map_err(failure)?)
+            }
             Op::BackupDelete(id) => {
-                backups.delete(id).map_err(failure)?;
+                let backups = service.backup_delete(id).map_err(failure)?;
                 self.core.emit("backup.changed", &json!({}));
-                json_of(&backups.list(source.as_deref()))
+                json_of(&backups)
             }
-            Op::BackupCreate => {
-                let source = source.ok_or_else(|| failure("No rekordbox library found on this computer"))?;
-                json_of(&self.core.back_up(&source, "manual")?)
-            }
+            Op::BackupCreate => json_of(&service.backup_create(&emit).map_err(failure)?),
             _ => unreachable!("not a backup call"),
         }
     }
@@ -346,30 +311,15 @@ impl Run {
                 return service.session().map(info).ok_or_else(|| failure("Library not open"));
             }
             Op::BackupList | Op::BackupCreate | Op::BackupDelete(_) | Op::BackupSettings | Op::BackupSetSettings { .. } => {
-                return self.backup_op(service.session().map(|s| s.source().to_path_buf()));
+                return self.backup_op(service);
             }
             Op::BackupRestore(id) => {
-                let source = service
-                    .session()
-                    .map(|s| s.source().to_path_buf())
-                    .or_else(Library::installed_path)
-                    .ok_or_else(|| failure("No rekordbox library found on this computer"))?;
-                let backed_up = service.session().is_some_and(State::backed_up);
-                service.close();
-                let restored = self.core.backups.restore(id, &source, &|event| self.core.emit("backup.progress", &event));
-                self.core.emit("backup.progress", &json!({ "stage": "done", "reason": "restore" }));
-                self.core.emit("backup.changed", &json!({}));
-                let _ = service.open(source, false, backed_up);
-                self.core.emit("library.reloaded", &json!({}));
-                return json_of(&restored.map_err(failure)?);
+                let emit = |event| self.core.emit_service_event(event);
+                return json_of(&service.backup_restore(id, &emit).map_err(failure)?);
             }
             Op::DailyBackup => {
-                let Some(state) = service.session() else { return Ok("false".into()) };
-                let due = self.core.backups.settings()["auto"].as_bool().unwrap_or(true) && self.core.auto_due();
-                if due && !es_db::rekordbox_running() {
-                    self.core.back_up(state.source(), "daily")?;
-                }
-                return Ok(due.to_string());
+                let emit = |event| self.core.emit_service_event(event);
+                return Ok(service.daily_backup(&emit).map_err(failure)?.to_string());
             }
             _ => {}
         }
@@ -382,17 +332,9 @@ impl Run {
         let state = service.session_mut().ok_or_else(|| failure("Library not open"))?;
         match &self.op {
             Op::SetWritable(on) => {
-                if *on && !state.backed_up() && self.core.backups.settings()["auto"].as_bool().unwrap_or(true) {
-                    if es_db::rekordbox_running() {
-                        return Err(failure(WRITE_BLOCKED));
-                    }
-                    if self.core.auto_due() {
-                        self.core.back_up(state.source(), "before-edit")?;
-                    }
-                    state.mark_backed_up();
-                }
-                state.set_writable(*on);
-                Ok(info(state))
+                let emit = |event| self.core.emit_service_event(event);
+                service.set_writable(*on, &emit).map_err(failure)?;
+                Ok(info(service.session().ok_or_else(|| failure("Library not open"))?))
             }
             Op::Info => Ok(info(state)),
             Op::Tracks => json_of(&reads(state).tracks().map_err(failure)?),
