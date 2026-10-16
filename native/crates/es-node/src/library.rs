@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use es_backup::Backups;
 use crate::usb::UsbOp;
-use es_db::{Guard, Library, TrackEdit, Tx};
+use es_db::{Library, TrackEdit, Tx};
 use napi::bindgen_prelude::AsyncTask;
 use napi::threadsafe_function::{ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::{Env, JsFunction, Task};
@@ -17,13 +17,7 @@ use serde_json::{json, Value};
 
 const WRITE_BLOCKED: &str = "Close rekordbox before editing the library";
 
-pub(crate) struct State {
-    pub(crate) lib: Library,
-    source: PathBuf,
-    writable: bool,
-    /// Whether this session has already taken (or found a recent) backup before the first edit.
-    backed_up: bool,
-}
+pub(crate) type State = es_engine::library::LibrarySession;
 
 type Events = ThreadsafeFunction<(String, String), ErrorStrategy::Fatal>;
 
@@ -95,8 +89,7 @@ pub(crate) fn failure(reason: impl std::fmt::Display) -> napi::Error {
 }
 
 fn open(source: PathBuf, writable: bool, backed_up: bool) -> napi::Result<State> {
-    let lib = Library::open_snapshot(&source).map_err(failure)?;
-    Ok(State { lib, source, writable, backed_up })
+    State::open(source, writable, backed_up).map_err(failure)
 }
 
 pub(crate) fn json_of(value: &impl Serialize) -> napi::Result<String> {
@@ -105,46 +98,45 @@ pub(crate) fn json_of(value: &impl Serialize) -> napi::Result<String> {
 
 fn info(state: &State) -> String {
     json!({
-        "dbPath": state.source,
-        "snapshotTime": state.lib.snapshot_time(),
+        "dbPath": state.source(),
+        "snapshotTime": state.database().snapshot_time(),
         "rekordboxRunning": es_db::rekordbox_running(),
-        "sourceChanged": state.lib.source_changed(),
-        "writable": state.writable,
+        "sourceChanged": state.database().source_changed(),
+        "writable": state.is_writable(),
     })
     .to_string()
 }
 
 /// Run something against the live database, then re-read the snapshot so later reads see it.
 pub(crate) fn with_live<T>(state: &mut State, work: impl FnOnce(&mut Library) -> napi::Result<T>) -> napi::Result<T> {
-    if !state.writable {
-        return Err(failure("Unlock editing to make changes to the library"));
-    }
-    let mut live = Library::open_live(&state.source, Guard::RefuseWhileRunning).map_err(failure)?;
-    let out = work(&mut live)?;
-    drop(live);
-    state.lib = Library::open_snapshot(&state.source).map_err(failure)?;
-    Ok(out)
+    state
+        .with_live(|live| work(live).map_err(|error| es_engine::Error::Other(error.to_string())))
+        .map_err(failure)
 }
 
 /// Run one edit in a single transaction.
 fn edit<T>(state: &mut State, change: impl FnOnce(&mut Tx<'_>) -> es_db::Result<T>) -> napi::Result<T> {
-    with_live(state, |live| live.write(change).map_err(failure))
+    state.with_live(|live| Ok(live.write(change)?)).map_err(failure)
 }
 
 fn track_ids(state: &State, playlist: &str) -> napi::Result<String> {
-    json_of(&state.lib.playlist_track_ids(playlist).map_err(failure)?)
+    json_of(&reads(state).playlist_tracks(playlist).map_err(failure)?)
 }
 
 fn playlists(state: &State) -> napi::Result<serde_json::Value> {
-    serde_json::to_value(es_index::playlist_nodes(&state.lib).map_err(failure)?).map_err(failure)
+    serde_json::to_value(reads(state).playlists().map_err(failure)?).map_err(failure)
 }
 
 fn tracks_of(state: &State, ids: &[String]) -> napi::Result<String> {
-    json_of(&es_index::track_rows(&state.lib, &state.lib.share_dir(), Some(ids)).map_err(failure)?)
+    json_of(&reads(state).tracks_by_id(ids).map_err(failure)?)
+}
+
+fn reads(state: &State) -> es_engine::library::LibraryRead<'_> {
+    es_engine::library::LibraryRead::new(state.database())
 }
 
 fn cues_json(state: &State, id: &str) -> napi::Result<String> {
-    json_of(&es_index::detail::cues_for(&state.lib, &state.lib.share_dir(), id).map_err(failure)?)
+    json_of(&reads(state).cues(id).map_err(failure)?)
 }
 
 fn clean_name(name: &str, folder: bool) -> String {
@@ -238,7 +230,7 @@ fn inspect_tracks(state: &State, items: &str) -> napi::Result<String> {
     let mut out = Vec::new();
     for item in list.iter().take(80) {
         let id = item.get("id").and_then(Value::as_str).filter(|i| !i.is_empty()).ok_or_else(|| failure("tracks must be a list of track ids"))?;
-        let files = state.lib.track_files(id).map_err(failure)?.ok_or_else(|| failure(format!("Unknown track {id}")))?;
+        let files = state.database().track_files(id).map_err(failure)?.ok_or_else(|| failure(format!("Unknown track {id}")))?;
         if !es_engine::relocate::is_local(&files.folder_path) {
             out.push(json!({ "id": id, "size": 0, "mtime": null, "same": false, "issues": [], "audio": null }));
             continue;
@@ -347,8 +339,8 @@ impl Run {
                     .map(PathBuf::from)
                     .or_else(Library::installed_path)
                     .ok_or_else(|| failure("No rekordbox library found on this computer"))?;
-                let writable = slot.as_ref().is_some_and(|s| s.writable && s.source == source);
-                let backed_up = slot.as_ref().is_some_and(|s| s.backed_up);
+                let writable = slot.as_ref().is_some_and(|s| s.is_writable() && s.source() == source.as_path());
+                let backed_up = slot.as_ref().is_some_and(State::backed_up);
                 *slot = None;
                 let state = open(source, writable, backed_up)?;
                 let out = info(&state);
@@ -358,7 +350,7 @@ impl Run {
             Op::Reload => {
                 let (source, writable, backed_up) = slot
                     .as_ref()
-                    .map(|s| (s.source.clone(), s.writable, s.backed_up))
+                    .map(|s| (s.source().to_path_buf(), s.is_writable(), s.backed_up()))
                     .ok_or_else(|| failure("Library not open"))?;
                 *slot = None;
                 let state = open(source, writable, backed_up)?;
@@ -367,15 +359,15 @@ impl Run {
                 return Ok(out);
             }
             Op::BackupList | Op::BackupCreate | Op::BackupDelete(_) | Op::BackupSettings | Op::BackupSetSettings { .. } => {
-                return self.backup_op(slot.as_ref().map(|s| s.source.clone()));
+                return self.backup_op(slot.as_ref().map(|s| s.source().to_path_buf()));
             }
             Op::BackupRestore(id) => {
                 let source = slot
                     .as_ref()
-                    .map(|s| s.source.clone())
+                    .map(|s| s.source().to_path_buf())
                     .or_else(Library::installed_path)
                     .ok_or_else(|| failure("No rekordbox library found on this computer"))?;
-                let backed_up = slot.as_ref().is_some_and(|s| s.backed_up);
+                let backed_up = slot.as_ref().is_some_and(State::backed_up);
                 *slot = None;
                 let restored = self.core.backups.restore(id, &source, &|event| self.core.emit("backup.progress", &event));
                 self.core.emit("backup.progress", &json!({ "stage": "done", "reason": "restore" }));
@@ -391,7 +383,7 @@ impl Run {
                 let Some(state) = slot.as_ref() else { return Ok("false".into()) };
                 let due = self.core.backups.settings()["auto"].as_bool().unwrap_or(true) && self.core.auto_due();
                 if due && !es_db::rekordbox_running() {
-                    self.core.back_up(&state.source, "daily")?;
+                    self.core.back_up(state.source(), "daily")?;
                 }
                 return Ok(due.to_string());
             }
@@ -406,33 +398,31 @@ impl Run {
         let state = slot.as_mut().ok_or_else(|| failure("Library not open"))?;
         match &self.op {
             Op::SetWritable(on) => {
-                if *on && !state.backed_up && self.core.backups.settings()["auto"].as_bool().unwrap_or(true) {
+                if *on && !state.backed_up() && self.core.backups.settings()["auto"].as_bool().unwrap_or(true) {
                     if es_db::rekordbox_running() {
                         return Err(failure(WRITE_BLOCKED));
                     }
                     if self.core.auto_due() {
-                        self.core.back_up(&state.source, "before-edit")?;
+                        self.core.back_up(state.source(), "before-edit")?;
                     }
-                    state.backed_up = true;
+                    state.mark_backed_up();
                 }
-                state.writable = *on;
+                state.set_writable(*on);
                 Ok(info(state))
             }
             Op::Info => Ok(info(state)),
-            Op::Tracks => json_of(&es_index::track_rows(&state.lib, &state.lib.share_dir(), None).map_err(failure)?),
-            Op::Playlists => json_of(&es_index::playlist_nodes(&state.lib).map_err(failure)?),
-            Op::Histories => json_of(&es_index::history_nodes(&state.lib).map_err(failure)?),
-            Op::MyTags => json_of(&es_index::tag_nodes(&state.lib).map_err(failure)?),
-            Op::PlaylistMembers => json_of(&state.lib.playlist_member_ids().map_err(failure)?),
-            Op::PlaylistTracks(id) => json_of(&state.lib.playlist_track_ids(id).map_err(failure)?),
-            Op::HistoryTracks(id) => json_of(&state.lib.history_track_ids(id).map_err(failure)?),
-            Op::TrackDetail(id) => {
-                json_of(&es_index::detail::track_detail(&state.lib, &state.lib.share_dir(), id).map_err(failure)?)
-            }
+            Op::Tracks => json_of(&reads(state).tracks().map_err(failure)?),
+            Op::Playlists => json_of(&reads(state).playlists().map_err(failure)?),
+            Op::Histories => json_of(&reads(state).histories().map_err(failure)?),
+            Op::MyTags => json_of(&reads(state).my_tags().map_err(failure)?),
+            Op::PlaylistMembers => json_of(&reads(state).playlist_members().map_err(failure)?),
+            Op::PlaylistTracks(id) => json_of(&reads(state).playlist_tracks(id).map_err(failure)?),
+            Op::HistoryTracks(id) => json_of(&reads(state).history_tracks(id).map_err(failure)?),
+            Op::TrackDetail(id) => json_of(&reads(state).track_detail(id).map_err(failure)?),
             Op::TrackPreviews(ids) => {
                 let (device, own): (Vec<String>, Vec<String>) = ids.iter().cloned().partition(|i| i.starts_with("usb:"));
                 let mut by_id: std::collections::HashMap<String, es_index::detail::Preview> = std::collections::HashMap::new();
-                for row in es_index::detail::previews(&state.lib, &state.lib.share_dir(), &own).map_err(failure)? {
+                for row in reads(state).previews(&own).map_err(failure)? {
                     by_id.insert(row.id.clone(), row);
                 }
                 let devices = &self.core.devices;
@@ -447,12 +437,12 @@ impl Run {
                 let parsed: serde_json::Map<String, serde_json::Value> = serde_json::from_str(moves).map_err(failure)?;
                 let moves: Vec<(String, String)> =
                     parsed.into_iter().map(|(id, path)| (id, path.as_str().unwrap_or_default().to_owned())).collect();
-                let share = state.lib.share_dir();
+                let share = state.database().share_dir();
                 let ids = with_live(state, |live| es_engine::relocate::relocate(live, &share, &moves).map_err(failure))?;
                 tracks_of(state, &ids)
             }
             Op::TrackFindMissing(ids, directory) => {
-                let found = es_engine::relocate::find_missing(&state.lib, ids, std::path::Path::new(directory)).map_err(failure)?;
+                let found = reads(state).find_missing(ids, std::path::Path::new(directory)).map_err(failure)?;
                 json_of(&json!({
                     "matches": found.matches.iter().map(|m| json!({ "id": m.id, "path": m.path })).collect::<Vec<_>>(),
                     "scanned": found.scanned,
@@ -485,18 +475,19 @@ impl Run {
                             .collect()
                     })
                     .unwrap_or_default();
-                let share = state.lib.share_dir();
+                let share = state.database().share_dir();
                 let bpm = with_live(state, |live| es_engine::analysis::set_beatgrid(live, &share, id, &grid, &moves).map_err(failure))?;
+                let reads = reads(state);
                 json_of(&json!({
-                    "beatgrid": es_index::detail::beatgrid_for(&state.lib, &share, id).map_err(failure)?,
-                    "cues": es_index::detail::cues_for(&state.lib, &share, id).map_err(failure)?,
+                    "beatgrid": reads.beatgrid(id).map_err(failure)?,
+                    "cues": reads.cues(id).map_err(failure)?,
                     "bpm": bpm,
                 }))
             }
             Op::Convert { ids, preset, mode } => {
                 let mode = es_engine::convert::Mode::parse(mode).map_err(failure)?;
                 let preset = es_engine::convert::clean_preset(&serde_json::from_str(preset).map_err(failure)?).map_err(failure)?;
-                let share = state.lib.share_dir();
+                let share = state.database().share_dir();
                 let core = &self.core;
                 let outcome = with_live(state, |live| {
                     Ok(es_engine::convert::convert_tracks(live, &share, ids, &preset, mode, &|done, total, id| {
@@ -548,13 +539,13 @@ impl Run {
                 };
                 let flag = |name: &str, default: bool| options.get(name).map_or(default, |v| v.as_bool().unwrap_or(false));
                 let chosen = es_engine::analysis::Options { overwrite: flag("overwrite", false), grid: flag("grid", true), key: flag("key", true) };
-                let share = state.lib.share_dir();
+                let share = state.database().share_dir();
                 with_live(state, |live| es_engine::analysis::apply_analysis(live, &share, id, &analysis, chosen).map_err(failure))?;
                 let rows: Vec<Value> = serde_json::from_str(&tracks_of(state, std::slice::from_ref(id))?).map_err(failure)?;
                 json_of(&rows.into_iter().next().unwrap_or(Value::Null))
             }
             Op::MediaResolve { kind, id, size } => {
-                let found = es_index::media::resolve_media(&state.lib, &state.lib.share_dir(), kind, id, size).map_err(failure)?;
+                let found = reads(state).resolve_media(kind, id, size).map_err(failure)?;
                 json_of(&found)
             }
             Op::CueSetHot(id, kind, ms) => {
@@ -575,7 +566,7 @@ impl Run {
             }
             Op::RemoveTracks(ids) => {
                 let removed = edit(state, |tx| tx.remove_tracks(ids))?;
-                let share = state.lib.share_dir();
+                let share = state.database().share_dir();
                 for item in &removed {
                     if let Some(path) = &item.analysis_path {
                         if let Err(e) = es_anlz::discard(&es_anlz::files(&share, path)) {
@@ -638,7 +629,7 @@ impl Run {
                     if file_edit != es_tags::Edit::default() {
                         let mut sizes = Vec::new();
                         for id in &unique {
-                            let Some(files) = state.lib.track_files(id).map_err(failure)? else { continue };
+                            let Some(files) = state.database().track_files(id).map_err(failure)? else { continue };
                             let path = std::path::Path::new(&files.folder_path);
                             match es_tags::write(path, &file_edit) {
                                 Ok(()) => {
@@ -660,7 +651,7 @@ impl Run {
                 Ok(format!(r#"{{"tracks":{},"tagErrors":{}}}"#, tracks_of(state, &unique)?, json_of(&errors)?))
             }
             Op::TrackImport { paths, playlist, artwork } => {
-                let share = state.lib.share_dir();
+                let share = state.database().share_dir();
                 let options = es_engine::import::Options { artwork: *artwork, playlist: playlist.clone() };
                 let outcome = with_live(state, |live| es_engine::import::import_files(live, &share, paths, &options).map_err(failure))?;
                 let failed: Vec<_> = outcome.failed.iter().map(|f| json!({ "path": f.path, "error": f.error })).collect();

@@ -1,5 +1,7 @@
 # Native audio
 
+For the library engine's layer boundaries and refactoring direction, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 The deck plays through a Rust engine loaded into Electron's main process as a Node addon. The renderer never touches audio: it sends commands and draws from position ticks.
 
 ```

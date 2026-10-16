@@ -141,8 +141,8 @@ pub(crate) fn perform(core: &Core, slot: &mut Option<State>, op: &UsbOp) -> napi
         }
         UsbOp::Selection(volume) => {
             let state = slot.as_ref().ok_or_else(|| failure("Library not open"))?;
-            let ids: Vec<String> = state.lib.playlists().map_err(failure)?.into_iter().map(|n| n.id).collect();
-            let db_id = u64::try_from(state.lib.db_id().map_err(failure)?).unwrap_or(0);
+            let ids: Vec<String> = state.database().playlists().map_err(failure)?.into_iter().map(|n| n.id).collect();
+            let db_id = u64::try_from(state.database().db_id().map_err(failure)?).unwrap_or(0);
             json_of(&json!({ "playlistIds": es_device::selection::recorded_playlist_ids(&mounted(volume)?, &ids, db_id) }))
         }
         UsbOp::Tracks(volume, playlist) => {
@@ -171,7 +171,7 @@ pub(crate) fn perform(core: &Core, slot: &mut Option<State>, op: &UsbOp) -> napi
             let state = slot.as_ref().ok_or_else(|| failure("Library not open"))?;
             let volume = listed(volume)?;
             let device = require(core.devices.load(&volume)?)?;
-            let plan = device_import::preview(&state.lib, &volume, &device, &import_options(folder, policy)?).map_err(failure)?;
+            let plan = device_import::preview(state.database(), &volume, &device, &import_options(folder, policy)?).map_err(failure)?;
             let status = |s: TrackStatus| match s {
                 TrackStatus::Reuse => "reuse",
                 TrackStatus::Copy => "copy",
@@ -199,7 +199,7 @@ pub(crate) fn perform(core: &Core, slot: &mut Option<State>, op: &UsbOp) -> napi
             let volume = listed(volume)?;
             let device = require(core.devices.load(&volume)?)?;
             let options = import_options(folder, policy)?;
-            let share = state.lib.share_dir();
+            let share = state.database().share_dir();
             let outcome = with_live(state, |live| {
                 device_import::import_device(live, &share, &volume, &device, &options, &|p| {
                     core.emit("usb.progress", &json!({ "phase": "import", "done": p.done, "total": p.total, "name": p.name }));
@@ -218,7 +218,7 @@ pub(crate) fn perform(core: &Core, slot: &mut Option<State>, op: &UsbOp) -> napi
         UsbOp::Sync { volume, playlists, overwrite } => {
             let state = slot.as_ref().ok_or_else(|| failure("Library not open"))?;
             let volume = listed(volume)?;
-            let result = sync::sync_volume(&state.lib, &volume, playlists, *overwrite, &|event| {
+            let result = sync::sync_volume(state.database(), &volume, playlists, *overwrite, &|event| {
                 core.emit(
                     "usb.progress",
                     &match event {

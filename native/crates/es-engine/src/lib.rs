@@ -7,6 +7,7 @@ pub mod convert;
 pub mod device_import;
 pub mod import;
 pub mod inspect;
+pub mod library;
 pub mod relocate;
 pub mod place;
 pub mod sync;
