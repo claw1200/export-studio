@@ -66,10 +66,11 @@ The Rust application service owns the open library session and decides when a wo
 
 ### Library Session
 
-- A service instance represents one selected library and owns its source path, read snapshot, writable state, and session-scoped caches.
+- A service instance represents one selected library and owns its source path, read snapshot, optional writable live connection, writable state, and session-scoped caches.
 - Snapshot reads do not mutate the source database.
-- A write workflow checks the writable policy and Rekordbox process guard, opens live access for the duration of the operation, commits through `es-db`, and refreshes the snapshot before returning data that reflects the write.
-- A failed operation must not leave the service claiming a refreshed state when the snapshot refresh failed. Define and test the recovery behavior for a committed write followed by refresh failure.
+- Unlocking checks backup policy and the Rekordbox process guard, then opens one guarded live connection for the writable session. While unlocked, service reads use that connection and writes commit through `es-db` transactions without rebuilding the full snapshot after each operation.
+- Locking editing closes the live connection and refreshes one read snapshot. `sourceChanged` compares the source to that snapshot only while read-only, so the app does not report its own writes as an external change while unlocked.
+- A failed snapshot refresh during relock must leave writable/read-only state explicit and recoverable.
 - Switching or restoring a library invalidates session caches and produces one well-defined reload event.
 
 ### Database Writes

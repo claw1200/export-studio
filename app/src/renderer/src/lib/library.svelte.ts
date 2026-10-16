@@ -61,6 +61,12 @@ function dropCaches(): void {
 const READ_ONLY = 'Unlock editing to change the library'
 const NOTICE_MS = 6000
 
+function profileStage(name: string, started: number): void {
+  if (import.meta.env.DEV) {
+    console.info(`[library-profile] renderer ${name} ${(performance.now() - started).toFixed(1)}ms`)
+  }
+}
+
 export type NoticeLevel = 'info' | 'warning' | 'error'
 
 export class Library {
@@ -281,17 +287,26 @@ export class Library {
   }
 
   async load(reload = false): Promise<void> {
+    const totalStarted = performance.now()
     this.status = 'loading'
     this.error = null
     if (reload) dropCaches()
     try {
+      let stageStarted = performance.now()
       this.info = reload ? await api.reload() : await api.open()
+      profileStage(reload ? 'library.reload' : 'library.open', stageStarted)
+      stageStarted = performance.now()
       await this.refreshContents()
+      profileStage('library.refreshContents', stageStarted)
+      stageStarted = performance.now()
       await this.refreshDevices()
+      profileStage('library.refreshDevices', stageStarted)
       this.status = 'ready'
+      profileStage('library.load.total', totalStarted)
     } catch (e) {
       this.error = (e as Error).message
       this.status = 'error'
+      profileStage('library.load.failed', totalStarted)
     }
   }
 
@@ -808,6 +823,7 @@ export class Library {
   }
 
   private async refreshContents(): Promise<void> {
+    const started = performance.now()
     const [tracks, playlists, histories, myTags, members] = await Promise.all([
       api.tracks(),
       api.playlists(),
@@ -822,6 +838,7 @@ export class Library {
     this.playlistMembers = new Set(members)
     this.changed = false
     await this.setSource(this.source)
+    profileStage('library.contentHydration', started)
   }
 
   async ejectDevice(volumeId: string): Promise<void> {

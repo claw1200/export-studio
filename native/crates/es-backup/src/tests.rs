@@ -53,6 +53,42 @@ fn an_automatic_backup_is_skipped_until_something_changes() {
 }
 
 #[test]
+fn latest_automatic_ignores_newer_manual_backups() {
+    let s = scene();
+    let db = s.db_dir.join("master.db");
+    let automatic = s.backups.create(&db, "daily", &quiet()).unwrap().unwrap();
+    s.backups.create(&db, "manual", &quiet()).unwrap();
+
+    let latest = s.backups.latest_automatic().unwrap();
+
+    assert_eq!(latest["id"], automatic["id"]);
+}
+
+#[test]
+fn latest_automatic_created_uses_filename_without_opening_the_archive() {
+    let s = scene();
+    fs::create_dir_all(&s.backups.root).unwrap();
+    let path = s.backups.root.join("exportstudio-20261016-130303-daily.zip");
+    fs::write(&path, b"archive contents are deliberately unreadable here").unwrap();
+
+    let created = s.backups.latest_automatic_created().unwrap();
+
+    assert!(created > 0.0);
+}
+
+#[test]
+fn latest_automatic_created_does_not_fall_back_to_legacy_names() {
+    let s = scene();
+    let db = s.db_dir.join("master.db");
+    let automatic = s.backups.create(&db, "daily", &quiet()).unwrap().unwrap();
+    let archive = PathBuf::from(automatic["path"].as_str().unwrap());
+    fs::rename(archive, s.backups.root.join("legacy-daily.zip")).unwrap();
+
+    assert!(s.backups.latest_automatic().is_some());
+    assert_eq!(s.backups.latest_automatic_created(), None);
+}
+
+#[test]
 fn only_the_newest_automatic_backups_are_kept() {
     let s = scene();
     let db = s.db_dir.join("master.db");

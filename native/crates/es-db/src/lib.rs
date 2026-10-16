@@ -14,7 +14,7 @@ mod xml;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use rusqlite::{backup::Backup, Connection, OpenFlags};
 use tempfile::TempDir;
@@ -99,14 +99,47 @@ impl Library {
 
     /// A consistent private copy, so subsequent reads never contend with rekordbox.
     pub fn open_snapshot(source: &Path) -> Result<Self> {
+        let profile = std::env::var_os("EXPORTSTUDIO_PROFILE_LIBRARY_OPEN").is_some();
+        let total = Instant::now();
+        let stage = Instant::now();
         let dir = tempfile::Builder::new().prefix("exportstudio-db-").tempdir()?;
+        let tempdir_ms = stage.elapsed().as_secs_f64() * 1000.0;
         let name = source.file_name().ok_or_else(|| Error::Refused("not a database path".into()))?;
+        let stage = Instant::now();
         let source_signature = signature(source);
+        let signature_ms = stage.elapsed().as_secs_f64() * 1000.0;
+        let stage = Instant::now();
         let source_conn = unlock_with_flags(source, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let source_open_ms = stage.elapsed().as_secs_f64() * 1000.0;
         let path = dir.path().join(name);
+        let stage = Instant::now();
         let mut conn = unlock(&path)?;
+        let destination_open_ms = stage.elapsed().as_secs_f64() * 1000.0;
+        let stage = Instant::now();
         Backup::new(&source_conn, &mut conn)?.run_to_completion(128, Duration::from_millis(5), None)?;
+        let backup_ms = stage.elapsed().as_secs_f64() * 1000.0;
+        let page_count = if profile {
+            Some(conn.query_row("PRAGMA page_count", [], |row| row.get::<_, i64>(0))?)
+        } else {
+            None
+        };
+        let stage = Instant::now();
         conn.pragma_update(None, "query_only", true)?;
+        let setup_ms = stage.elapsed().as_secs_f64() * 1000.0;
+        if profile {
+            eprintln!(
+                "[library-profile] snapshot source={} total_ms={:.1} tempdir_ms={:.1} signature_ms={:.1} source_open_ms={:.1} destination_open_ms={:.1} backup_ms={:.1} setup_ms={:.1} pages={}",
+                source.display(),
+                total.elapsed().as_secs_f64() * 1000.0,
+                tempdir_ms,
+                signature_ms,
+                source_open_ms,
+                destination_open_ms,
+                backup_ms,
+                setup_ms,
+                page_count.unwrap_or_default(),
+            );
+        }
         let snapshot = Snapshot { _dir: dir, source: source.to_path_buf(), signature: source_signature, taken: SystemTime::now() };
         Ok(Self { conn, path, mode: Mode::Snapshot, guard: Guard::RefuseWhileRunning, snapshot: Some(snapshot) })
     }

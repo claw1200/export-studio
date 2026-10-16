@@ -105,3 +105,42 @@ Select multiple tracks to edit their metadata in bulk.
 You can also change your preferences to write the changes to the actual file as well as the database.
 
 <img src="preview/images/editing_metadata.webp" alt="Editing a track's title, artist, rating, and colour." height="480">
+
+## Development
+
+### Prerequisites
+
+- Node.js and npm
+- Rust stable and Cargo (`rustup toolchain install stable`)
+- Xcode Command Line Tools on macOS (`xcode-select --install`)
+
+### Setup
+
+From the repository root:
+
+```sh
+cd app
+npm install
+npm run dev
+```
+
+`npm run dev` builds the Rust Node addon and USB exporter, copies them into `app/resources/native`, then starts Electron. To run just the Rust tests, use `npm run test:native` from `app`.
+
+### Build Options
+
+- `npm run build:native` builds release native binaries.
+- `npm run build:native:debug` builds debug native binaries.
+- `ES_NATIVE_TARGET=<rust-target> npm run build:native` cross-compiles for the specified Rust target. The target must be installed with `rustup target add <rust-target>`.
+
+### Environment Variables
+
+| Variable | Effect |
+| --- | --- |
+| `EXPORTSTUDIO_PROFILE_LIBRARY_OPEN=1` | Logs database snapshot stages, native service lock wait/operation time, and renderer startup stages. Use with `npm run dev`; native timings go to the terminal and renderer timings to DevTools. |
+| `EXPORTSTUDIO_USB_EXPORT=/path/to/es-usb` | Uses a specific USB exporter binary instead of the app's default. |
+| `EXPORTSTUDIO_FFMPEG=/path/to/ffmpeg` | Uses a specific FFmpeg binary for conversion. |
+| `ES_DB_TEST=1` | Safety guard: refuses test writes to the installed Rekordbox library. |
+
+```bash
+EXPORTSTUDIO_PROFILE_LIBRARY_OPEN=1 npm run dev
+```
