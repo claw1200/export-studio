@@ -78,6 +78,13 @@ const WRITES: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>>
   'playlist.delete': (lib, p) => lib.playlistDelete(text(p?.id)),
   'tag.add': (lib, p) => lib.tagAdd(text(p?.id), list(p?.trackIds)),
   'tag.remove': (lib, p) => lib.tagRemove(text(p?.id), list(p?.trackIds)),
+  'beatgrid.set': (lib, p) =>
+    lib.beatgridSet(
+      text(p?.id),
+      JSON.stringify({ times: p?.times, beats: p?.beats, bpms: p?.bpms, cues: p?.cues ?? [] })
+    ),
+  'track.applyAnalysis': (lib, p) =>
+    lib.trackApplyAnalysis(text(p?.id), JSON.stringify({ result: p?.result, options: p?.options })),
   'track.relocate': (lib, p) => lib.trackRelocate(JSON.stringify(p?.moves ?? {})),
   'usb.eject': (lib, p) => lib.usbEject(text(p?.volumeId)),
   'usb.format': (lib, p) => lib.usbFormat(text(p?.volumeId)),

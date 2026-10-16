@@ -24,7 +24,7 @@ fn anlz_backup_dir() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".exportstudio").join("anlz-backup"))
 }
 
-fn back_up_once(content_id: &str, paths: &[PathBuf]) -> std::io::Result<()> {
+pub(crate) fn back_up_once(content_id: &str, paths: &[PathBuf]) -> std::io::Result<()> {
     let Some(base) = anlz_backup_dir() else { return Ok(()) };
     let folder = base.join(content_id);
     std::fs::create_dir_all(&folder)?;

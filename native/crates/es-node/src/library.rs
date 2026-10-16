@@ -266,6 +266,8 @@ enum Op {
     TrackFindMissing(Vec<String>, String),
     TrackInspect(String),
     FilesRead(Vec<String>),
+    BeatgridSet(String, String),
+    ApplyAnalysis(String, String),
     MediaResolve { kind: String, id: String, size: String },
     CueSetHot(String, i64, i64),
     CueAddMemory(String, i64),
@@ -445,6 +447,76 @@ impl Run {
             }
             Op::TrackInspect(items) => inspect_tracks(state, items),
             Op::FilesRead(_) => unreachable!("handled above"),
+            Op::BeatgridSet(id, body) => {
+                let input: Value = serde_json::from_str(body).map_err(failure)?;
+                let numbers = |key: &str| -> napi::Result<Vec<f64>> {
+                    input.get(key).and_then(Value::as_array).map(|a| a.iter().map(|v| v.as_f64().unwrap_or(f64::NAN)).collect()).ok_or_else(|| failure(format!("{key} must be a list")))
+                };
+                let grid = es_engine::analysis::Grid {
+                    times: numbers("times")?.iter().map(|t| t.round_ties_even() as i64).collect(),
+                    beats: numbers("beats")?.iter().map(|b| *b as i64).collect(),
+                    bpms: numbers("bpms")?,
+                };
+                let moves: Vec<es_db::CueMove> = input
+                    .get("cues")
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|m| {
+                                Some(es_db::CueMove {
+                                    id: m.get("id").map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_owned))?,
+                                    start_ms: m.get("start")?.as_f64()?.round_ties_even() as i64,
+                                    end_ms: m.get("end").and_then(Value::as_f64).map(|e| e.round_ties_even() as i64),
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let share = state.lib.share_dir();
+                let bpm = with_live(state, |live| es_engine::analysis::set_beatgrid(live, &share, id, &grid, &moves).map_err(failure))?;
+                json_of(&json!({
+                    "beatgrid": es_index::detail::beatgrid_for(&state.lib, &share, id).map_err(failure)?,
+                    "cues": es_index::detail::cues_for(&state.lib, &share, id).map_err(failure)?,
+                    "bpm": bpm,
+                }))
+            }
+            Op::ApplyAnalysis(id, body) => {
+                use base64::Engine as _;
+                let input: Value = serde_json::from_str(body).map_err(failure)?;
+                let result = input.get("result").cloned().unwrap_or(Value::Null);
+                let options = input.get("options").cloned().unwrap_or(Value::Null);
+                let beats = result
+                    .get("beats")
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .map(|b| {
+                                let at = |i: usize| b.get(i).and_then(Value::as_i64).unwrap_or(0);
+                                (at(0) as u16, at(1) as u16, at(2) as u32)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let waveform = base64::engine::general_purpose::STANDARD
+                    .decode(result.get("waveform").and_then(Value::as_str).unwrap_or(""))
+                    .map_err(failure)?;
+                let key = result.get("key").filter(|k| !k.is_null()).map(|k| {
+                    (k.get("tonic").and_then(Value::as_i64).unwrap_or(0), k.get("minor").and_then(Value::as_bool).unwrap_or(false))
+                });
+                let analysis = es_engine::analysis::Analysis {
+                    beats,
+                    waveform,
+                    key,
+                    bpm: result.get("bpm").and_then(Value::as_f64).unwrap_or(0.0),
+                    duration: result.get("duration").and_then(Value::as_f64).unwrap_or(0.0),
+                };
+                let flag = |name: &str, default: bool| options.get(name).map_or(default, |v| v.as_bool().unwrap_or(false));
+                let chosen = es_engine::analysis::Options { overwrite: flag("overwrite", false), grid: flag("grid", true), key: flag("key", true) };
+                let share = state.lib.share_dir();
+                with_live(state, |live| es_engine::analysis::apply_analysis(live, &share, id, &analysis, chosen).map_err(failure))?;
+                let rows: Vec<Value> = serde_json::from_str(&tracks_of(state, std::slice::from_ref(id))?).map_err(failure)?;
+                json_of(&rows.into_iter().next().unwrap_or(Value::Null))
+            }
             Op::MediaResolve { kind, id, size } => {
                 let found = es_index::media::resolve_media(&state.lib, &state.lib.share_dir(), kind, id, size).map_err(failure)?;
                 json_of(&found)
@@ -658,6 +730,16 @@ impl RekordboxLibrary {
     #[napi(ts_return_type = "Promise<string>")]
     pub fn files_read(&self, paths: Vec<String>) -> AsyncTask<Run> {
         self.run(Op::FilesRead(paths))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn beatgrid_set(&self, id: String, body: String) -> AsyncTask<Run> {
+        self.run(Op::BeatgridSet(id, body))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn track_apply_analysis(&self, id: String, body: String) -> AsyncTask<Run> {
+        self.run(Op::ApplyAnalysis(id, body))
     }
 
     #[napi(ts_return_type = "Promise<string>")]

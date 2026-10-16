@@ -20,6 +20,11 @@ pub fn path_tag(name: &str) -> Vec<u8> {
 /// `data` with the tags of the given kinds swapped in place, or added at the end when the file has none.
 /// Every other tag is kept byte for byte.
 pub fn replace_tags(data: &[u8], replace: &[(&str, Vec<u8>)]) -> std::io::Result<Vec<u8>> {
+    patch_tags(data, replace, &[])
+}
+
+/// Like [`replace_tags`], and the tags of the `drop` kinds are removed.
+pub fn patch_tags(data: &[u8], replace: &[(&str, Vec<u8>)], drop: &[&str]) -> std::io::Result<Vec<u8>> {
     let bad = |why: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, why.to_owned());
     if data.len() < 12 || &data[..4] != b"PMAI" {
         return Err(bad("not an analysis file"));
@@ -36,7 +41,7 @@ pub fn replace_tags(data: &[u8], replace: &[(&str, Vec<u8>)]) -> std::io::Result
         let kind = &data[pos..pos + 4];
         if let Some(at) = pending.iter().position(|(k, _)| k.as_bytes() == kind) {
             out.extend(pending.remove(at).1);
-        } else if !replace.iter().any(|(k, _)| k.as_bytes() == kind) {
+        } else if !replace.iter().any(|(k, _)| k.as_bytes() == kind) && !drop.iter().any(|k| k.as_bytes() == kind) {
             out.extend(&data[pos..pos + len]);
         }
         pos += len;
@@ -47,6 +52,37 @@ pub fn replace_tags(data: &[u8], replace: &[(&str, Vec<u8>)]) -> std::io::Result
     let total = u32::try_from(out.len()).map_err(|_| bad("file too large"))?;
     out[8..12].copy_from_slice(&total.to_be_bytes());
     Ok(out)
+}
+
+/// A `PQTZ` tag with the given beats, keeping the header of `tag`.
+#[must_use]
+pub fn build_beatgrid(tag: &[u8], times: &[u32], beats: &[u16], bpms: &[f64]) -> Vec<u8> {
+    let len_header = u32::from_be_bytes([tag[4], tag[5], tag[6], tag[7]]) as usize;
+    let mut header = tag[..len_header].to_vec();
+    let body: Vec<u8> = times
+        .iter()
+        .zip(beats)
+        .zip(bpms)
+        .flat_map(|((time, beat), bpm)| {
+            let tempo = (bpm * 100.0).round_ties_even() as u16;
+            [beat.to_be_bytes().as_slice(), &tempo.to_be_bytes(), &time.to_be_bytes()].concat()
+        })
+        .collect();
+    let total = u32::try_from(len_header + body.len()).unwrap_or(0);
+    header[8..12].copy_from_slice(&total.to_be_bytes());
+    header[20..24].copy_from_slice(&u32::try_from(times.len()).unwrap_or(0).to_be_bytes());
+    header.extend(body);
+    header
+}
+
+/// An empty `PQT2`, as rekordbox writes for many tracks. Its per-beat data can't be rebuilt, so players fall back to `PQTZ`.
+#[must_use]
+pub fn clear_extended_beatgrid(tag: &[u8]) -> Vec<u8> {
+    let len_header = u32::from_be_bytes([tag[4], tag[5], tag[6], tag[7]]) as usize;
+    let mut header = tag[..len_header].to_vec();
+    header[24..].fill(0);
+    header[8..12].copy_from_slice(&u32::try_from(len_header).unwrap_or(0).to_be_bytes());
+    header
 }
 
 #[cfg(test)]

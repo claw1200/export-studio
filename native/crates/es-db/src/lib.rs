@@ -19,7 +19,7 @@ use rusqlite::Connection;
 use tempfile::TempDir;
 
 pub use read::{Cue, HistoryNode, PlaylistKind, PlaylistNode, TagNode, Track, TrackFiles};
-pub use write::{DeviceData, FileFacts, NewCue, NewTrack, Removed, Stream, TrackEdit, Tx};
+pub use write::{AnalysisWrite, CueMove, DeviceData, FileFacts, NewCue, NewTrack, Removed, Stream, TrackEdit, Tx};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

@@ -112,6 +112,8 @@ export interface NativeLibrary {
   setWritable(on: boolean): Promise<string>
   trackPreviews(ids: string[]): Promise<string>
   filesRead(paths: string[]): Promise<string>
+  beatgridSet(id: string, body: string): Promise<string>
+  trackApplyAnalysis(id: string, body: string): Promise<string>
   trackRelocate(moves: string): Promise<string>
   trackFindMissing(ids: string[], directory: string): Promise<string>
   trackInspect(tracks: string): Promise<string>

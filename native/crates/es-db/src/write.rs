@@ -907,3 +907,158 @@ impl Tx<'_> {
         Ok(removed)
     }
 }
+
+/// A cue moved by a new beat grid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CueMove {
+    pub id: String,
+    pub start_ms: i64,
+    pub end_ms: Option<i64>,
+}
+
+/// What an analysis run changes in the library row.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnalysisWrite<'a> {
+    pub relative_path: &'a str,
+    pub bpm_x100: Option<i64>,
+    /// Tonic 0 (C) to 11 and whether the key is minor.
+    pub key: Option<(i64, bool)>,
+    /// Replace a key the track already has.
+    pub overwrite_key: bool,
+    pub duration_secs: i64,
+}
+
+const TONICS: [&str; 12] = ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+
+/// Names a key may be stored under: Camelot first, then the classic name and its enharmonic.
+fn key_names(tonic: i64, minor: bool) -> Vec<String> {
+    let tonic = usize::try_from(tonic.rem_euclid(12)).unwrap_or(0);
+    let root = if minor { (tonic + 3) % 12 } else { tonic };
+    let camelot = format!("{}{}", (7 * root + 7) % 12 + 1, if minor { 'A' } else { 'B' });
+    let suffix = if minor { "m" } else { "" };
+    let mut names = vec![camelot, format!("{}{suffix}", TONICS[tonic])];
+    let enharmonic = match TONICS[tonic] {
+        "Db" => Some("C#"),
+        "Eb" => Some("D#"),
+        "F#" => Some("Gb"),
+        "Ab" => Some("G#"),
+        "Bb" => Some("A#"),
+        _ => None,
+    };
+    if let Some(other) = enharmonic {
+        names.push(format!("{other}{suffix}"));
+    }
+    names
+}
+
+fn is_camelot(name: &str) -> bool {
+    let digits: String = name.chars().take_while(char::is_ascii_digit).collect();
+    let rest = &name[digits.len()..];
+    matches!(digits.parse::<u32>(), Ok(1..=12)) && (rest == "A" || rest == "B")
+}
+
+impl Tx<'_> {
+    /// The key row for a key, in whichever notation the library already uses, added when missing.
+    fn key_id(&mut self, tonic: i64, minor: bool) -> Result<String> {
+        let mut stmt = self.tx.prepare("SELECT ID, ScaleName FROM djmdKey ORDER BY rowid")?;
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?.unwrap_or_default())))?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(stmt);
+        let names = key_names(tonic, minor);
+        if let Some((id, _)) = rows.iter().find(|(_, scale)| names.contains(scale)) {
+            return Ok(id.clone());
+        }
+        let camelot = rows.iter().filter(|(_, scale)| is_camelot(scale)).count();
+        let name = if camelot * 2 >= rows.len() { &names[0] } else { &names[1] };
+        let id = unused_id(&self.tx, "djmdKey")?;
+        self.tx.execute(
+            &format!(
+                "INSERT INTO djmdKey (ID, ScaleName, Seq, UUID, rb_data_status, rb_local_data_status, rb_local_deleted, \
+                 rb_local_synced, usn, rb_local_usn, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, 0, 0, 0, 0, NULL, ?5, {NOW}, {NOW})"
+            ),
+            params![id, name, i64::try_from(rows.len() + 1).unwrap_or(0), Uuid::new_v4().to_string(), self.usn],
+        )?;
+        self.touched = true;
+        Ok(id)
+    }
+
+    /// Set a new beat grid's effect: the track's tempo, when the grid has one tempo, and the moved cues.
+    pub fn apply_beatgrid(&mut self, content_id: &str, bpm_x100: Option<i64>, moves: &[CueMove]) -> Result<()> {
+        let (_, length) = self.cue_context(content_id)?;
+        let mut changed = false;
+        if let Some(bpm) = bpm_x100 {
+            changed |= self.set_content(content_id, "BPM", Value::Integer(bpm))?;
+        }
+        for item in moves {
+            let live: Option<Option<i64>> = Self::first_or_none(self.tx.query_row(
+                "SELECT OutMsec FROM djmdCue WHERE ID = ?1 AND ContentID = ?2 AND rb_local_deleted = 0",
+                params![item.id, content_id],
+                |row| row.get::<_, Option<i64>>(0),
+            ))?;
+            let Some(out) = live else { continue };
+            let start = clamp_msec(item.start_ms, length);
+            self.tx.execute(
+                "UPDATE djmdCue SET InMsec = ?1, InFrame = ?2, InMpegFrame = 0, InMpegAbs = 0 WHERE ID = ?3",
+                params![start, start * CUE_FRAMES_PER_SECOND / 1000, item.id],
+            )?;
+            if let (Some(end), Some(old)) = (item.end_ms, out) {
+                if old >= 0 {
+                    let end = start.max(clamp_msec(end, length));
+                    self.tx.execute(
+                        "UPDATE djmdCue SET OutMsec = ?1, OutFrame = ?2, OutMpegFrame = 0, OutMpegAbs = 0 WHERE ID = ?3",
+                        params![end, end * CUE_FRAMES_PER_SECOND / 1000, item.id],
+                    )?;
+                }
+            }
+            changed = true;
+        }
+        if changed {
+            self.stamp("djmdContent", content_id)?;
+        }
+        Ok(())
+    }
+
+    /// Record an analysis written by the analyser: tempo, key, the analysis file location and the analysed flag.
+    pub fn apply_analysis(&mut self, content_id: &str, write: &AnalysisWrite<'_>) -> Result<()> {
+        if self.content_state(content_id)? != Some(false) {
+            return Err(Error::NotFound(format!("live track {content_id}")));
+        }
+        if let Some(bpm) = write.bpm_x100 {
+            self.set_content(content_id, "BPM", Value::Integer(bpm))?;
+        }
+        if let Some((tonic, minor)) = write.key {
+            let have: Option<String> = self.tx.query_row("SELECT KeyID FROM djmdContent WHERE ID = ?1", [content_id], |row| row.get(0))?;
+            if write.overwrite_key || have.is_none_or(|k| k.is_empty()) {
+                let key = self.key_id(tonic, minor)?;
+                self.set_content(content_id, "KeyID", Value::Text(key))?;
+            }
+        }
+        self.set_content(content_id, "AnalysisDataPath", Value::Text(write.relative_path.to_owned()))?;
+        self.set_content(content_id, "Analysed", Value::Integer(ANALYSED))?;
+        let length: Option<i64> = self.tx.query_row("SELECT Length FROM djmdContent WHERE ID = ?1", [content_id], |row| row.get(0))?;
+        if write.duration_secs != 0 && length.unwrap_or(0) == 0 {
+            self.set_content(content_id, "Length", Value::Integer(write.duration_secs))?;
+        }
+        let updated: Option<String> = self
+            .tx
+            .query_row("SELECT CAST(AnalysisUpdated AS TEXT) FROM djmdContent WHERE ID = ?1", [content_id], |row| row.get(0))?;
+        let next = updated.and_then(|u| u.parse::<i64>().ok()).map_or(1, |u| u + 1);
+        self.tx.execute("UPDATE djmdContent SET AnalysisUpdated = ?1 WHERE ID = ?2", params![next, content_id])?;
+        self.stamp("djmdContent", content_id)
+    }
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::*;
+
+    #[test]
+    fn keys_have_camelot_classic_and_enharmonic_names() {
+        assert_eq!(key_names(0, false), ["8B", "C"]);
+        assert_eq!(key_names(9, true), ["8A", "Am"]);
+        assert_eq!(key_names(1, false), ["3B", "Db", "C#"]);
+        assert!(is_camelot("12A") && !is_camelot("13A") && !is_camelot("Am"));
+    }
+}

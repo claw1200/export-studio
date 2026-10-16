@@ -142,6 +142,13 @@ pub fn track_detail(lib: &Library, share: &Path, id: &str) -> Result<Detail> {
     })
 }
 
+/// A track's beat grid as its analysis file holds it.
+pub fn beatgrid_for(lib: &Library, share: &Path, id: &str) -> Result<Option<Grid>> {
+    let files = lib.track_files(id)?.ok_or_else(|| Error::NotFound(format!("track {id}")))?;
+    let dat = tags(share, files.analysis_path.as_deref(), "DAT");
+    Ok(dat.as_ref().and_then(decode::beatgrid).map(|g| Grid { times: g.times, beats: g.beats, bpms: g.bpms }))
+}
+
 /// A short waveform for a browser row.
 #[derive(Debug, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
