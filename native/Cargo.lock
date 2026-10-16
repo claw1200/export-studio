@@ -639,7 +639,6 @@ dependencies = [
  "es-device",
  "es-engine",
  "es-index",
- "es-tags",
  "es-wave",
  "napi",
  "napi-build",

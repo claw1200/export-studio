@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::usb::UsbOp;
-use es_db::{Library, TrackEdit, Tx};
+use es_db::{Library, TrackEdit};
 use es_engine::library::{LibraryService, LibrarySession, ServiceEvent};
 use napi::bindgen_prelude::AsyncTask;
 use napi::threadsafe_function::{ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode};
@@ -67,15 +67,6 @@ pub(crate) fn with_live<T>(state: &mut State, work: impl FnOnce(&mut Library) ->
         .map_err(failure)
 }
 
-/// Run one edit in a single transaction.
-fn edit<T>(state: &mut State, change: impl FnOnce(&mut Tx<'_>) -> es_db::Result<T>) -> napi::Result<T> {
-    state.with_live(|live| Ok(live.write(change)?)).map_err(failure)
-}
-
-fn track_ids(state: &State, playlist: &str) -> napi::Result<String> {
-    json_of(&reads(state).playlist_tracks(playlist).map_err(failure)?)
-}
-
 fn tracks_of(state: &State, ids: &[String]) -> napi::Result<String> {
     json_of(&reads(state).tracks_by_id(ids).map_err(failure)?)
 }
@@ -99,23 +90,6 @@ fn whole(value: &serde_json::Value, label: &str, limit: i64) -> napi::Result<i64
         Ok(number)
     } else {
         Err(failure(format!("{label} must be between 0 and {limit}")))
-    }
-}
-
-/// The edited fields a file's own tags can hold; rating and colour live only in the library.
-fn file_tag_edit(change: &TrackEdit) -> es_tags::Edit {
-    es_tags::Edit {
-        title: change.title.clone(),
-        artist: change.artist.clone(),
-        album: change.album.clone(),
-        genre: change.genre.clone(),
-        label: change.label.clone(),
-        remixer: change.remixer.clone(),
-        original_artist: change.original_artist.clone(),
-        composer: change.composer.clone(),
-        comment: change.comment.clone(),
-        year: change.year.map(|y| u32::try_from(y).unwrap_or(0)),
-        track_no: change.track_no.map(|n| u32::try_from(n).unwrap_or(0)),
     }
 }
 
@@ -342,6 +316,13 @@ impl Run {
             Op::MediaResolve { kind, id, size } => {
                 return json_of(&service.resolve_media(kind, id, size).map_err(failure)?);
             }
+            Op::TrackUpdate(ids, fields, write_tags) => {
+                let change = parse_edit(fields)?;
+                return json_of(&service.track_update(ids, &change, *write_tags).map_err(failure)?);
+            }
+            Op::TrackImport { paths, playlist, artwork } => {
+                return json_of(&service.track_import(paths, playlist.clone(), *artwork).map_err(failure)?);
+            }
             _ => {}
         }
         match &self.op {
@@ -493,58 +474,7 @@ impl Run {
             | Op::PlaylistDelete(_)
             | Op::TagAdd(_, _)
             | Op::TagRemove(_, _) => unreachable!("handled above"),
-            Op::TrackUpdate(ids, fields, write_tags) => {
-                let change = parse_edit(fields)?;
-                let mut unique = ids.clone();
-                unique.dedup();
-                if change != TrackEdit::default() && !unique.is_empty() {
-                    edit(state, |tx| tx.update_tracks(&unique, &change))?;
-                }
-                let mut errors: Vec<String> = Vec::new();
-                if *write_tags && !unique.is_empty() {
-                    let file_edit = file_tag_edit(&change);
-                    if file_edit != es_tags::Edit::default() {
-                        let mut sizes = Vec::new();
-                        for id in &unique {
-                            let Some(files) = state.database().track_files(id).map_err(failure)? else { continue };
-                            let path = std::path::Path::new(&files.folder_path);
-                            match es_tags::write(path, &file_edit) {
-                                Ok(()) => {
-                                    if let Ok(meta) = path.metadata() {
-                                        sizes.push((id.clone(), i64::try_from(meta.len()).unwrap_or(0)));
-                                    }
-                                }
-                                Err(e) => {
-                                    let name = path.file_name().map_or_else(|| files.folder_path.clone(), |n| n.to_string_lossy().into_owned());
-                                    errors.push(format!("{name}: {e}"));
-                                }
-                            }
-                        }
-                        if !sizes.is_empty() {
-                            edit(state, |tx| sizes.iter().try_for_each(|(id, size)| tx.set_file_size(id, *size)))?;
-                        }
-                    }
-                }
-                Ok(format!(r#"{{"tracks":{},"tagErrors":{}}}"#, tracks_of(state, &unique)?, json_of(&errors)?))
-            }
-            Op::TrackImport { paths, playlist, artwork } => {
-                let share = state.database().share_dir();
-                let options = es_engine::import::Options { artwork: *artwork, playlist: playlist.clone() };
-                let outcome = with_live(state, |live| es_engine::import::import_files(live, &share, paths, &options).map_err(failure))?;
-                let failed: Vec<_> = outcome.failed.iter().map(|f| json!({ "path": f.path, "error": f.error })).collect();
-                let playlist_ids = match playlist {
-                    Some(id) => serde_json::from_str(&track_ids(state, id)?).map_err(failure)?,
-                    None => serde_json::Value::Null,
-                };
-                Ok(format!(
-                    r#"{{"tracks":{},"ids":{},"skipped":{},"failed":{},"playlist":{}}}"#,
-                    if outcome.added.is_empty() { "[]".to_owned() } else { tracks_of(state, &outcome.added)? },
-                    json_of(&outcome.ids)?,
-                    outcome.skipped,
-                    json_of(&failed)?,
-                    playlist_ids
-                ))
-            }
+            Op::TrackUpdate(_, _, _) | Op::TrackImport { .. } => unreachable!("handled above"),
             Op::Usb(_) => unreachable!("handled above"),
             Op::Open(_)
             | Op::Reload

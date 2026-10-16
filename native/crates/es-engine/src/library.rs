@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use es_backup::Backups;
-use es_db::{Guard, Library as Database, Tx};
+use es_db::{Guard, Library as Database, TrackEdit, Tx};
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -19,6 +19,7 @@ pub struct LibrarySession {
     source: PathBuf,
     writable: bool,
     backed_up: bool,
+    guard: Guard,
 }
 
 pub struct LibraryService {
@@ -47,6 +48,46 @@ pub struct LibraryInfo {
 pub struct RemovedTracks {
     pub ids: Vec<String>,
     pub playlists: Vec<es_index::Node>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackUpdateResult {
+    pub tracks: Vec<es_index::TrackRow>,
+    pub tag_errors: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TrackImportFailure {
+    pub path: String,
+    pub error: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TrackImportResult {
+    pub tracks: Vec<es_index::TrackRow>,
+    pub ids: Vec<String>,
+    pub skipped: usize,
+    pub failed: Vec<TrackImportFailure>,
+    pub playlist: Option<Vec<String>>,
+}
+
+fn tag_edit(change: &TrackEdit) -> es_tags::Edit {
+    es_tags::Edit {
+        title: change.title.clone(),
+        artist: change.artist.clone(),
+        album: change.album.clone(),
+        genre: change.genre.clone(),
+        label: change.label.clone(),
+        remixer: change.remixer.clone(),
+        original_artist: change.original_artist.clone(),
+        composer: change.composer.clone(),
+        comment: change.comment.clone(),
+        year: change.year.map(|year| u32::try_from(year).unwrap_or(0)),
+        track_no: change
+            .track_no
+            .map(|number| u32::try_from(number).unwrap_or(0)),
+    }
 }
 
 impl LibraryService {
@@ -322,6 +363,104 @@ impl LibraryService {
         })
     }
 
+    pub fn track_update(
+        &mut self,
+        ids: &[String],
+        change: &TrackEdit,
+        write_tags: bool,
+    ) -> Result<TrackUpdateResult> {
+        let mut unique = ids.to_vec();
+        unique.dedup();
+        if change != &TrackEdit::default() && !unique.is_empty() {
+            self.edit(|tx| tx.update_tracks(&unique, change))?;
+        }
+
+        let mut tag_errors = Vec::new();
+        if write_tags && !unique.is_empty() {
+            let file_edit = tag_edit(change);
+            if file_edit != es_tags::Edit::default() {
+                let mut sizes = Vec::new();
+                for id in &unique {
+                    let Some(files) = self
+                        .session
+                        .as_ref()
+                        .ok_or_else(|| crate::Error::Other("Library not open".into()))?
+                        .database()
+                        .track_files(id)?
+                    else {
+                        continue;
+                    };
+                    let path = Path::new(&files.folder_path);
+                    match es_tags::write(path, &file_edit) {
+                        Ok(()) => {
+                            if let Ok(metadata) = path.metadata() {
+                                sizes
+                                    .push((id.clone(), i64::try_from(metadata.len()).unwrap_or(0)));
+                            }
+                        }
+                        Err(error) => {
+                            let name = path.file_name().map_or_else(
+                                || files.folder_path.clone(),
+                                |name| name.to_string_lossy().into_owned(),
+                            );
+                            tag_errors.push(format!("{name}: {error}"));
+                        }
+                    }
+                }
+                if !sizes.is_empty() {
+                    self.edit(|tx| {
+                        sizes
+                            .iter()
+                            .try_for_each(|(id, size)| tx.set_file_size(id, *size))
+                    })?;
+                }
+            }
+        }
+
+        Ok(TrackUpdateResult {
+            tracks: self.tracks_by_id(&unique)?,
+            tag_errors,
+        })
+    }
+
+    pub fn track_import(
+        &mut self,
+        paths: &[String],
+        playlist: Option<String>,
+        artwork: bool,
+    ) -> Result<TrackImportResult> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        let share = session.database().share_dir();
+        let options = crate::import::Options {
+            artwork,
+            playlist: playlist.clone(),
+        };
+        let outcome = self
+            .session
+            .as_mut()
+            .ok_or_else(|| crate::Error::Other("Library not open".into()))?
+            .with_live(|database| crate::import::import_files(database, &share, paths, &options))?;
+        let playlist = playlist.map(|id| self.playlist_tracks(&id)).transpose()?;
+        let failed = outcome
+            .failed
+            .into_iter()
+            .map(|failure| TrackImportFailure {
+                path: failure.path,
+                error: failure.error,
+            })
+            .collect();
+        Ok(TrackImportResult {
+            tracks: self.tracks_by_id(&outcome.added)?,
+            ids: outcome.ids,
+            skipped: outcome.skipped,
+            failed,
+            playlist,
+        })
+    }
+
     fn backups(&self) -> &Backups {
         &self.backups
     }
@@ -471,6 +610,7 @@ impl LibrarySession {
             source,
             writable,
             backed_up,
+            guard: Guard::RefuseWhileRunning,
         })
     }
 
@@ -509,7 +649,7 @@ impl LibrarySession {
                 "Unlock editing to make changes to the library".into(),
             ));
         }
-        let mut live = Database::open_live(&self.source, Guard::RefuseWhileRunning)?;
+        let mut live = Database::open_live(&self.source, self.guard)?;
         let out = work(&mut live)?;
         drop(live);
         self.database = Database::open_snapshot(&self.source)?;
@@ -607,6 +747,18 @@ mod tests {
     use super::*;
     use es_db::fixture::{self, Rows};
 
+    fn writable_fixture_service(directory: &Path, path: &Path) -> LibraryService {
+        let mut service = LibraryService::with_backup_root(directory.join("backups"));
+        service.session = Some(LibrarySession {
+            database: Database::open_snapshot(path).unwrap(),
+            source: path.to_path_buf(),
+            writable: true,
+            backed_up: true,
+            guard: Guard::Off,
+        });
+        service
+    }
+
     #[test]
     fn reads_return_typed_library_projections() {
         let directory = tempfile::tempdir().unwrap();
@@ -684,5 +836,48 @@ mod tests {
 
         assert!(!service.daily_backup(&|_| {}).unwrap());
         assert!(!directory.path().join("backups").exists());
+    }
+
+    #[test]
+    fn playlist_service_write_commits_and_refreshes_its_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = fixture::build(directory.path(), 1).unwrap();
+        {
+            let connection = fixture::connect(&path).unwrap();
+            Rows(&connection).track("track-1", "Test track").unwrap();
+            Rows(&connection)
+                .playlist("playlist-1", "Test playlist", 0)
+                .unwrap();
+        }
+        let mut service = writable_fixture_service(directory.path(), &path);
+
+        let ids = service
+            .playlist_add("playlist-1", &["track-1".into()])
+            .unwrap();
+
+        assert_eq!(ids, ["track-1"]);
+        assert_eq!(service.playlist_tracks("playlist-1").unwrap(), ["track-1"]);
+    }
+
+    #[test]
+    fn track_update_service_returns_the_refreshed_row() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = fixture::build(directory.path(), 1).unwrap();
+        {
+            let connection = fixture::connect(&path).unwrap();
+            Rows(&connection).track("track-1", "Original").unwrap();
+        }
+        let mut service = writable_fixture_service(directory.path(), &path);
+        let change = TrackEdit {
+            title: Some("Updated".into()),
+            ..TrackEdit::default()
+        };
+
+        let result = service
+            .track_update(&["track-1".into()], &change, false)
+            .unwrap();
+
+        assert_eq!(result.tracks[0].title, "Updated");
+        assert!(result.tag_errors.is_empty());
     }
 }

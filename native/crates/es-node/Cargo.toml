@@ -16,7 +16,6 @@ es-index.workspace = true
 es-engine.workspace = true
 es-device.workspace = true
 es-anlz.workspace = true
-es-tags.workspace = true
 napi.workspace = true
 napi-derive.workspace = true
 serde = "1"
