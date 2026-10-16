@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use es_backup::Backups;
 use es_db::{Guard, Library as Database};
+use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::Result;
@@ -30,6 +31,16 @@ pub enum ServiceEvent {
     BackupProgress(Value),
     BackupChanged,
     LibraryReloaded,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryInfo {
+    pub db_path: String,
+    pub snapshot_time: f64,
+    pub rekordbox_running: bool,
+    pub source_changed: bool,
+    pub writable: bool,
 }
 
 impl LibraryService {
@@ -90,6 +101,85 @@ impl LibraryService {
 
     pub fn session_mut(&mut self) -> Option<&mut LibrarySession> {
         self.session.as_mut()
+    }
+
+    fn read_model(&self) -> Result<LibraryRead<'_>> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        Ok(LibraryRead::new(session.database()))
+    }
+
+    pub fn info(&self) -> Result<LibraryInfo> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        let database = session.database();
+        Ok(LibraryInfo {
+            db_path: session.source().to_string_lossy().into_owned(),
+            snapshot_time: database.snapshot_time(),
+            rekordbox_running: es_db::rekordbox_running(),
+            source_changed: database.source_changed(),
+            writable: session.is_writable(),
+        })
+    }
+
+    pub fn tracks(&self) -> Result<Vec<es_index::TrackRow>> {
+        self.read_model()?.tracks()
+    }
+
+    pub fn tracks_by_id(&self, ids: &[String]) -> Result<Vec<es_index::TrackRow>> {
+        self.read_model()?.tracks_by_id(ids)
+    }
+
+    pub fn playlists(&self) -> Result<Vec<es_index::Node>> {
+        self.read_model()?.playlists()
+    }
+
+    pub fn histories(&self) -> Result<Vec<es_index::Node>> {
+        self.read_model()?.histories()
+    }
+
+    pub fn my_tags(&self) -> Result<Vec<es_index::Node>> {
+        self.read_model()?.my_tags()
+    }
+
+    pub fn playlist_members(&self) -> Result<Vec<String>> {
+        self.read_model()?.playlist_members()
+    }
+
+    pub fn playlist_tracks(&self, playlist_id: &str) -> Result<Vec<String>> {
+        self.read_model()?.playlist_tracks(playlist_id)
+    }
+
+    pub fn history_tracks(&self, history_id: &str) -> Result<Vec<String>> {
+        self.read_model()?.history_tracks(history_id)
+    }
+
+    pub fn track_detail(&self, id: &str) -> Result<es_index::detail::Detail> {
+        self.read_model()?.track_detail(id)
+    }
+
+    pub fn cues(&self, id: &str) -> Result<Vec<es_index::detail::Cue>> {
+        self.read_model()?.cues(id)
+    }
+
+    pub fn beatgrid(&self, id: &str) -> Result<Option<es_index::detail::Grid>> {
+        self.read_model()?.beatgrid(id)
+    }
+
+    pub fn previews(&self, ids: &[String]) -> Result<Vec<es_index::detail::Preview>> {
+        self.read_model()?.previews(ids)
+    }
+
+    pub fn resolve_media(&self, kind: &str, id: &str, size: &str) -> Result<Option<PathBuf>> {
+        self.read_model()?.resolve_media(kind, id, size)
+    }
+
+    pub fn find_missing(&self, ids: &[String], directory: &Path) -> Result<crate::relocate::Found> {
+        self.read_model()?.find_missing(ids, directory)
     }
 
     fn backups(&self) -> &Backups {
@@ -389,15 +479,18 @@ mod tests {
                 .unwrap();
         }
 
-        let session = LibrarySession::open(path, false, false).unwrap();
-        let reads = LibraryRead::new(session.database());
-        let tracks = reads.tracks().unwrap();
-        let playlists = reads.playlists().unwrap();
+        let mut service = LibraryService::with_backup_root(directory.path().join("backups"));
+        service.open(path.clone(), false, false).unwrap();
+        let tracks = service.tracks().unwrap();
+        let playlists = service.playlists().unwrap();
+        let info = service.info().unwrap();
 
         assert_eq!(tracks.len(), 1);
         assert_eq!(tracks[0].title, "Test track");
         assert_eq!(playlists.len(), 1);
         assert_eq!(playlists[0].name, "Test playlist");
+        assert_eq!(info.db_path, path.to_string_lossy());
+        assert!(!info.writable);
     }
 
     #[test]

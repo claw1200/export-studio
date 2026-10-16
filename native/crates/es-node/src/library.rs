@@ -60,17 +60,6 @@ pub(crate) fn json_of(value: &impl Serialize) -> napi::Result<String> {
     serde_json::to_string(value).map_err(failure)
 }
 
-fn info(state: &State) -> String {
-    json!({
-        "dbPath": state.source(),
-        "snapshotTime": state.database().snapshot_time(),
-        "rekordboxRunning": es_db::rekordbox_running(),
-        "sourceChanged": state.database().source_changed(),
-        "writable": state.is_writable(),
-    })
-    .to_string()
-}
-
 /// Run something against the live database, then re-read the snapshot so later reads see it.
 pub(crate) fn with_live<T>(state: &mut State, work: impl FnOnce(&mut Library) -> napi::Result<T>) -> napi::Result<T> {
     state
@@ -304,11 +293,11 @@ impl Run {
                 let writable = service.session().is_some_and(|s| s.is_writable() && s.source() == source.as_path());
                 let backed_up = service.session().is_some_and(State::backed_up);
                 service.open(source, writable, backed_up).map_err(failure)?;
-                return service.session().map(info).ok_or_else(|| failure("Library not open"));
+                return json_of(&service.info().map_err(failure)?);
             }
             Op::Reload => {
                 service.reload().map_err(failure)?;
-                return service.session().map(info).ok_or_else(|| failure("Library not open"));
+                return json_of(&service.info().map_err(failure)?);
             }
             Op::BackupList | Op::BackupCreate | Op::BackupDelete(_) | Op::BackupSettings | Op::BackupSetSettings { .. } => {
                 return self.backup_op(service);
@@ -329,36 +318,53 @@ impl Run {
         if let Op::Usb(op) = &self.op {
             return crate::usb::perform(&self.core, service, op);
         }
-        let state = service.session_mut().ok_or_else(|| failure("Library not open"))?;
         match &self.op {
-            Op::SetWritable(on) => {
+            Op::SetWritable(writable) => {
                 let emit = |event| self.core.emit_service_event(event);
-                service.set_writable(*on, &emit).map_err(failure)?;
-                Ok(info(service.session().ok_or_else(|| failure("Library not open"))?))
+                service.set_writable(*writable, &emit).map_err(failure)?;
+                return json_of(&service.info().map_err(failure)?);
             }
-            Op::Info => Ok(info(state)),
-            Op::Tracks => json_of(&reads(state).tracks().map_err(failure)?),
-            Op::Playlists => json_of(&reads(state).playlists().map_err(failure)?),
-            Op::Histories => json_of(&reads(state).histories().map_err(failure)?),
-            Op::MyTags => json_of(&reads(state).my_tags().map_err(failure)?),
-            Op::PlaylistMembers => json_of(&reads(state).playlist_members().map_err(failure)?),
-            Op::PlaylistTracks(id) => json_of(&reads(state).playlist_tracks(id).map_err(failure)?),
-            Op::HistoryTracks(id) => json_of(&reads(state).history_tracks(id).map_err(failure)?),
-            Op::TrackDetail(id) => json_of(&reads(state).track_detail(id).map_err(failure)?),
+            Op::Info => return json_of(&service.info().map_err(failure)?),
+            Op::Tracks => return json_of(&service.tracks().map_err(failure)?),
+            Op::Playlists => return json_of(&service.playlists().map_err(failure)?),
+            Op::Histories => return json_of(&service.histories().map_err(failure)?),
+            Op::MyTags => return json_of(&service.my_tags().map_err(failure)?),
+            Op::PlaylistMembers => return json_of(&service.playlist_members().map_err(failure)?),
+            Op::PlaylistTracks(id) => return json_of(&service.playlist_tracks(id).map_err(failure)?),
+            Op::HistoryTracks(id) => return json_of(&service.history_tracks(id).map_err(failure)?),
+            Op::TrackDetail(id) => return json_of(&service.track_detail(id).map_err(failure)?),
             Op::TrackPreviews(ids) => {
-                let (device, own): (Vec<String>, Vec<String>) = ids.iter().cloned().partition(|i| i.starts_with("usb:"));
-                let mut by_id: std::collections::HashMap<String, es_index::detail::Preview> = std::collections::HashMap::new();
-                for row in reads(state).previews(&own).map_err(failure)? {
-                    by_id.insert(row.id.clone(), row);
-                }
+                let (device, own): (Vec<String>, Vec<String>) = ids.iter().cloned().partition(|id| id.starts_with("usb:"));
+                let mut by_id: std::collections::HashMap<String, es_index::detail::Preview> = service
+                    .previews(&own)
+                    .map_err(failure)?
+                    .into_iter()
+                    .map(|row| (row.id.clone(), row))
+                    .collect();
                 let devices = &self.core.devices;
                 for row in es_index::device::previews(&mut |volume| devices.load(volume).ok().flatten(), &device) {
                     by_id.insert(row.id.clone(), row);
                 }
                 let mut seen = std::collections::HashSet::new();
-                let ordered: Vec<_> = ids.iter().filter(|i| seen.insert(i.as_str())).take(80).filter_map(|i| by_id.remove(i)).collect();
-                json_of(&ordered)
+                let ordered: Vec<_> = ids.iter().filter(|id| seen.insert(id.as_str())).take(80).filter_map(|id| by_id.remove(id)).collect();
+                return json_of(&ordered);
             }
+            Op::TrackFindMissing(ids, directory) => {
+                let found = service.find_missing(ids, std::path::Path::new(directory)).map_err(failure)?;
+                return json_of(&json!({
+                    "matches": found.matches.iter().map(|item| json!({ "id": item.id, "path": item.path })).collect::<Vec<_>>(),
+                    "scanned": found.scanned,
+                }));
+            }
+            Op::MediaResolve { kind, id, size } => {
+                return json_of(&service.resolve_media(kind, id, size).map_err(failure)?);
+            }
+            _ => {}
+        }
+        let state = service.session_mut().ok_or_else(|| failure("Library not open"))?;
+        match &self.op {
+            Op::SetWritable(_) | Op::Info | Op::Tracks | Op::Playlists | Op::Histories | Op::MyTags | Op::PlaylistMembers
+            | Op::PlaylistTracks(_) | Op::HistoryTracks(_) | Op::TrackDetail(_) | Op::TrackPreviews(_) => unreachable!("handled above"),
             Op::TrackRelocate(moves) => {
                 let parsed: serde_json::Map<String, serde_json::Value> = serde_json::from_str(moves).map_err(failure)?;
                 let moves: Vec<(String, String)> =
@@ -367,13 +373,7 @@ impl Run {
                 let ids = with_live(state, |live| es_engine::relocate::relocate(live, &share, &moves).map_err(failure))?;
                 tracks_of(state, &ids)
             }
-            Op::TrackFindMissing(ids, directory) => {
-                let found = reads(state).find_missing(ids, std::path::Path::new(directory)).map_err(failure)?;
-                json_of(&json!({
-                    "matches": found.matches.iter().map(|m| json!({ "id": m.id, "path": m.path })).collect::<Vec<_>>(),
-                    "scanned": found.scanned,
-                }))
-            }
+            Op::TrackFindMissing(_, _) => unreachable!("handled above"),
             Op::TrackInspect(items) => inspect_tracks(state, items),
             Op::FilesRead(_) => unreachable!("handled above"),
             Op::BeatgridSet(id, body) => {
@@ -470,10 +470,7 @@ impl Run {
                 let rows: Vec<Value> = serde_json::from_str(&tracks_of(state, std::slice::from_ref(id))?).map_err(failure)?;
                 json_of(&rows.into_iter().next().unwrap_or(Value::Null))
             }
-            Op::MediaResolve { kind, id, size } => {
-                let found = reads(state).resolve_media(kind, id, size).map_err(failure)?;
-                json_of(&found)
-            }
+            Op::MediaResolve { .. } => unreachable!("handled above"),
             Op::CueSetHot(id, kind, ms) => {
                 edit(state, |tx| tx.set_hot_cue(id, *kind, *ms))?;
                 cues_json(state, id)
