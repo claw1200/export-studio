@@ -136,8 +136,7 @@ impl Library {
         for node in ordered {
             let members = match node.kind {
                 PlaylistKind::Folder => Vec::new(),
-                PlaylistKind::Playlist => self.playlist_track_ids(&node.id)?,
-                PlaylistKind::Smart => return Err(Error::Unsupported("syncing smart playlists")),
+                PlaylistKind::Playlist | PlaylistKind::Smart => self.playlist_track_ids(&node.id)?,
             };
             for id in &members {
                 if known.insert(id.clone()) {

@@ -14,7 +14,7 @@ renderer  Deck (deck.svelte.ts)  ──window.audio.send──▶  preload  ─�
 | `es-decode` | Streams any file symphonia reads, resampled with rubato to the device rate. Seeks are frame-accurate. |
 | `es-deck` | One decode thread per deck fills a lock-free ring (rtrb) of 512-frame blocks. The cpal callback only copies, fades and mixes. |
 | `es-wave` | The waveform scan, ported from the renderer and run in parallel with rayon. Parity tests check it against fixtures the TypeScript scan produced. |
-| `es-analyse` | Track analysis for import: tempo, beatgrid (normal or dynamic), downbeats, key, and per-band loudness for the waveform tags. Our own algorithm, not rekordbox's. `examples/golden.rs` scores it against rekordbox's analysis of a real library (export one with `python -m exportstudio_engine.golden`). |
+| `es-analyse` | Track analysis for import: tempo, beatgrid (normal or dynamic), downbeats, key, and per-band loudness for the waveform tags. Our own algorithm, not rekordbox's. |
 | `es-node` | The napi-rs bindings: `open`, `command`, `snapshot`, `scrub*`, and async `analyse` and `analyseTrack`. |
 
 ## How the deck stays tight

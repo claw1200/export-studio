@@ -424,12 +424,7 @@ impl Run {
             Op::Histories => json_of(&es_index::history_nodes(&state.lib).map_err(failure)?),
             Op::MyTags => json_of(&es_index::tag_nodes(&state.lib).map_err(failure)?),
             Op::PlaylistMembers => json_of(&state.lib.playlist_member_ids().map_err(failure)?),
-            Op::PlaylistTracks(id) => match state.lib.playlist_track_ids(id) {
-                Ok(ids) => json_of(&ids),
-                // Smart playlists are not evaluated yet; the caller falls back to the Python engine.
-                Err(e @ es_db::Error::Unsupported(_)) => Err(failure(format!("unsupported: {e}"))),
-                Err(e) => Err(failure(e)),
-            },
+            Op::PlaylistTracks(id) => json_of(&state.lib.playlist_track_ids(id).map_err(failure)?),
             Op::HistoryTracks(id) => json_of(&state.lib.history_track_ids(id).map_err(failure)?),
             Op::TrackDetail(id) => {
                 json_of(&es_index::detail::track_detail(&state.lib, &state.lib.share_dir(), id).map_err(failure)?)

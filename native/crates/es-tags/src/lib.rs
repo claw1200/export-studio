@@ -1,6 +1,4 @@
-//! Reading the tags inside audio files, as the fields rekordbox tracks carry. Writing is still done by
-//! the Python engine: lofty does not yet write the year and original artist everywhere, and its WAV
-//! handling duplicates an existing `id3 ` chunk.
+//! Reading and writing the tags inside audio files, as the fields rekordbox tracks carry.
 
 use std::path::Path;
 

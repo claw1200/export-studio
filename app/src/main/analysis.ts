@@ -1,7 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import type { AnalysisFinished, AnalysisJob, AnalysisProgress } from '../preload/analysis'
 import type { NativeModule } from './audio/native'
-import type { Engine } from './engine'
+import type { Library } from './library'
 
 const MAX_CONCURRENCY = 4
 
@@ -18,7 +18,7 @@ export class AnalysisQueue {
   private concurrency = 2
 
   constructor(
-    private library: Engine,
+    private library: Library,
     private native: () => NativeModule | null
   ) {}
 

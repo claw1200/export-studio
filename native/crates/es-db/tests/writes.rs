@@ -145,13 +145,12 @@ fn adding_a_removed_track_to_a_playlist_is_refused() {
 }
 
 #[test]
-fn smart_playlists_are_not_listed_as_empty_normal_ones() {
+fn tracks_cannot_be_added_to_a_smart_playlist() {
     let mut s = scene();
     {
         let conn = fixture::connect(s.lib.path()).unwrap();
         Rows(&conn).playlist("12", "Smart", 4).unwrap();
     }
-    assert!(matches!(s.lib.playlist_track_ids("12"), Err(Error::Unsupported(_))));
     let result = s.lib.write(|tx| tx.add_to_playlist("12", &["1".into()]));
     assert!(matches!(result, Err(Error::Refused(_))));
 }

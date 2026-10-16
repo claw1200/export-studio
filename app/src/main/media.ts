@@ -3,10 +3,10 @@ import { stat } from 'fs/promises'
 import { extname } from 'path'
 import { Readable } from 'stream'
 import { protocol } from 'electron'
-import type { Engine } from './engine'
+import type { Library } from './library'
 
-/** What the media protocol needs from the engine: resolving files and hearing when the library reloads. */
-type Caller = Pick<Engine, 'call' | 'onEvent'>
+/** What the media protocol needs from the library: resolving files and hearing when the library reloads. */
+type Caller = Pick<Library, 'call' | 'onEvent'>
 
 const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg',

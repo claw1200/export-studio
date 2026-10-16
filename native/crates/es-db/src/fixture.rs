@@ -22,7 +22,7 @@ const TABLES: &[(&str, &str)] = &[
     ("djmdHistory", "`ID` VARCHAR(255) PRIMARY KEY, `Seq` INTEGER, `Name` VARCHAR(255), `Attribute` INTEGER, `ParentID` VARCHAR(255), `DateCreated` VARCHAR(255)"),
     ("djmdMyTag", "`ID` VARCHAR(255) PRIMARY KEY, `Seq` INTEGER, `Name` VARCHAR(255), `Attribute` INTEGER, `ParentID` VARCHAR(255)"),
     ("djmdArtist", "`ID` VARCHAR(255) PRIMARY KEY, `Name` VARCHAR(255)"),
-    ("djmdAlbum", "`ID` VARCHAR(255) PRIMARY KEY, `Name` VARCHAR(255)"),
+    ("djmdAlbum", "`ID` VARCHAR(255) PRIMARY KEY, `Name` VARCHAR(255), `AlbumArtistID` VARCHAR(255)"),
     ("djmdGenre", "`ID` VARCHAR(255) PRIMARY KEY, `Name` VARCHAR(255)"),
     ("djmdKey", "`ID` VARCHAR(255) PRIMARY KEY, `ScaleName` VARCHAR(255), `Seq` INTEGER"),
     ("djmdPlaylist", "`ID` VARCHAR(255) PRIMARY KEY, `Seq` INTEGER, `Name` VARCHAR(255), `Attribute` INTEGER, `ParentID` VARCHAR(255), `SmartList` TEXT"),

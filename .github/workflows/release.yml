@@ -118,17 +118,6 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
 
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          python-version: "3.12"
-          enable-cache: true
-          cache-dependency-glob: engine/uv.lock
-
-      - name: Install Python
-        working-directory: engine
-        run: uv python install 3.12
-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -198,17 +187,6 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: app/package-lock.json
-
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          python-version: "3.12"
-          enable-cache: true
-          cache-dependency-glob: engine/uv.lock
-
-      - name: Install Python
-        working-directory: engine
-        run: uv python install 3.12
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

@@ -5,41 +5,18 @@ import icon from '../../resources/icon.png?asset'
 import macIcon from '../../resources/icon-mac.png?asset'
 import { AnalysisQueue } from './analysis'
 import { AudioBridge } from './audio/bridge'
-import { Engine, ffmpegBinary, usbExport } from './engine'
 import { buildMenu, registerFiles } from './files'
 import { handleMediaProtocol, registerMediaScheme } from './media'
-import { RustLibrary } from './rustLibrary'
+import { ffmpegBinary, Library, usbExport } from './library'
 import { flushSettings, loadSettings, registerSettings } from './settings'
 
 const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'aac', 'mp4', 'flac', 'wav', 'aif', 'aiff', 'ogg', 'alac']
 
-const engine = new Engine()
-const audio = new AudioBridge(engine)
-const analysis = new AnalysisQueue(engine, () => audio.addon())
-// The Rust library launches the USB export program itself.
 process.env.EXPORTSTUDIO_USB_EXPORT ??= usbExport()
 process.env.EXPORTSTUDIO_FFMPEG ??= ffmpegBinary()
-const rustLibrary = new RustLibrary(
-  () => audio.addon(),
-  () => engine.call('library.reload')
-)
-
-/** A library call, answered by the Rust addon where it can and by the Python engine otherwise. */
-async function libraryCall<T = unknown>(method: string, params?: unknown): Promise<T> {
-  const args = params as Record<string, unknown> | undefined
-  const kind = rustLibrary.kind(method, args)
-  if (kind === 'write') return (await rustLibrary.call(method, args)) as T
-  if (kind === 'read') {
-    try {
-      return (await rustLibrary.call(method, args)) as T
-    } catch (err) {
-      console.warn(`[rust-library] ${method} fell back to the Python engine:`, (err as Error).message)
-    }
-  }
-  const result = await engine.call<T>(method, params)
-  await rustLibrary.after(method, args, result)
-  return result
-}
+const library = new Library(() => audio.addon())
+const audio = new AudioBridge(library)
+const analysis = new AnalysisQueue(library, () => audio.addon())
 registerMediaScheme()
 
 function createWindow(): BrowserWindow {
@@ -73,15 +50,8 @@ function createWindow(): BrowserWindow {
   const forward = (event: string, data: unknown): void => {
     if (!win.isDestroyed()) win.webContents.send('engine:event', event, data)
   }
-  const unsubscribeRust = rustLibrary.onEvent(forward)
-  const unsubscribe = engine.onEvent((event, data) => {
-    if (event === 'library.locked') void rustLibrary.locked()
-    forward(event, data)
-  })
-  win.on('closed', () => {
-    unsubscribe()
-    unsubscribeRust()
-  })
+  const unsubscribe = library.onEvent(forward)
+  win.on('closed', unsubscribe)
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     win.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -100,8 +70,8 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window, { zoom: true })
   })
 
-  engine.start().catch((err) => console.error('[engine] failed to start', err))
-  handleMediaProtocol({ call: libraryCall, onEvent: (listener) => engine.onEvent(listener) })
+  library.start()
+  handleMediaProtocol(library)
   audio.register()
   analysis.register()
   buildMenu()
@@ -111,7 +81,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('engine:call', async (_e, method: string, params?: unknown) => {
     try {
-      return { ok: true, result: await libraryCall(method, params) }
+      return { ok: true, result: await library.call(method, params) }
     } catch (err) {
       const e = err as Error & { type?: string }
       return { ok: false, error: { message: e.message, type: e.type ?? 'Error' } }
@@ -151,5 +121,5 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   flushSettings()
   audio.stop()
-  engine.stop()
+  library.stop()
 })

@@ -8,6 +8,7 @@ pub mod export;
 pub mod fixture;
 pub mod live;
 pub mod read;
+mod smart;
 pub mod write;
 mod xml;
 

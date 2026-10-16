@@ -1,12 +1,14 @@
+import { app } from 'electron'
+import { is } from '@electron-toolkit/utils'
+import { join, resolve } from 'path'
 import type { NativeLibrary, NativeModule } from './audio/native'
 
 type Params = Record<string, unknown> | undefined
-type Kind = 'read' | 'write'
 
 const text = (value: unknown): string => String(value ?? '')
 const list = (value: unknown): string[] => (Array.isArray(value) ? value.map(String) : [])
 
-/** Reads the Rust library answers; they may fall back to the Python engine on error. */
+/** Calls that only read the library. */
 const READS: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> = {
   'library.tracks': (lib) => lib.tracks(),
   'library.playlists': (lib) => lib.playlists(),
@@ -33,8 +35,7 @@ const READS: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> 
   'usb.playlists': (lib, p) => lib.usbPlaylists(text(p?.volumeId)),
   'usb.libraries': (lib, p) => lib.usbLibraries(text(p?.volumeId)),
   'usb.selection': (lib, p) => lib.usbSelection(text(p?.volumeId)),
-  'usb.tracks': (lib, p) =>
-    lib.usbTracks(text(p?.volumeId), p?.playlistId == null ? null : text(p.playlistId)),
+  'usb.tracks': (lib, p) => lib.usbTracks(text(p?.volumeId), p?.playlistId == null ? null : text(p.playlistId)),
   'usb.detail': (lib, p) => lib.usbDetail(text(p?.id)),
   'usb.importPreview': (lib, p) =>
     lib.usbImportPreview(
@@ -44,7 +45,7 @@ const READS: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> 
     )
 }
 
-/** Edits the Rust library makes. A failed edit is reported, never retried in Python. */
+/** Calls that change the library, or other things on disk. */
 const WRITES: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> = {
   'backup.create': (lib) => lib.backupCreate(),
   'backup.delete': (lib, p) => lib.backupDelete(text(p?.id)),
@@ -98,75 +99,68 @@ const WRITES: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>>
     )
 }
 
-/** Edits that leave the master library alone, so the Python engine has nothing to reload after them. */
-const KEEPS_DATABASE = new Set([
-  'backup.create',
-  'backup.delete',
-  'backup.setSettings',
-  'usb.eject',
-  'usb.format',
-  'usb.sync'
-])
+const LIFECYCLE: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> = {
+  'library.info': (lib) => lib.info(),
+  'library.setWritable': (lib, p) => lib.setWritable(Boolean(p?.writable))
+}
 
 const DAILY_CHECK_MS = 10 * 60 * 1000
+const WATCH_MS = 2000
 
 type Listener = (event: string, data: unknown) => void
 
-/** Python calls that cannot change the master library; any other call may, so the Rust snapshot is refreshed after it. */
-const PURE = new Set([
-  'library.info',
-  'track.previews',
-  'track.inspect',
-  'track.findMissing',
-  'files.read',
-  'usb.list',
-  'usb.eject',
-  'usb.playlists',
-  'usb.libraries',
-  'usb.selection',
-  'usb.tracks',
-  'usb.detail',
-  'usb.sync',
-  'usb.format',
-  'usb.importPreview',
-  'backup.list',
-  'backup.settings',
-  'backup.setSettings'
-])
+export class LibraryError extends Error {
+  constructor(
+    message: string,
+    public type = 'Error'
+  ) {
+    super(message)
+  }
+}
 
-/**
- * Serves the library calls it can from the Rust addon when `EXPORTSTUDIO_RUST_LIBRARY=1`; the rest
- * stay with the Python engine. The two engines share one database, so each is told when the other
- * may have changed it: the Rust snapshot reloads before a read that follows a Python call that might
- * have written, and the Python engine reloads after every Rust edit.
- */
-export class RustLibrary {
+/** The USB export program next to the app, or in the vendored build tree in development. */
+export function usbExport(): string {
+  const name = process.platform === 'win32' ? 'es-usb.exe' : 'es-usb'
+  if (is.dev) return resolve(app.getAppPath(), '..', 'vendor', 'usb-sync', 'target', 'release', name)
+  return join(process.resourcesPath, 'engine', name)
+}
+
+export function ffmpegBinary(): string {
+  const name = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
+  if (is.dev) return resolve(app.getAppPath(), 'resources', 'native', name)
+  return join(process.resourcesPath, 'engine', name)
+}
+
+interface Info {
+  rekordboxRunning: boolean
+  sourceChanged: boolean
+  writable: boolean
+}
+
+interface Volume {
+  id: string
+  hasLibrary: boolean
+  rootName: string | null
+  ejectable: boolean
+}
+
+/** The rekordbox library, answered by the native addon, and the events that follow it: backups, USB volumes, rekordbox starting. */
+export class Library {
   private lib: NativeLibrary | null = null
-  private dirty = false
   private opened = false
   private daily: ReturnType<typeof setInterval> | null = null
+  private watcher: ReturnType<typeof setInterval> | null = null
+  private volumes = ''
+  private running: boolean | null = null
+  private notified = false
   private readonly listeners = new Set<Listener>()
 
-  constructor(
-    private readonly addon: () => NativeModule | null,
-    private readonly refreshPython: () => Promise<unknown>
-  ) {}
-
-  get enabled(): boolean {
-    return process.env.EXPORTSTUDIO_RUST_LIBRARY === '1'
-  }
-
-  kind(method: string, params?: Params): Kind | null {
-    if (!this.enabled || !this.opened) return null
-    if (method in READS) return 'read'
-    if (method in WRITES) return 'write'
-    return null
-  }
+  constructor(private readonly addon: () => NativeModule | null) {}
 
   private library(): NativeLibrary {
     if (!this.lib) {
       const native = this.addon()
-      if (!native?.RekordboxLibrary) throw new Error('The native library is not available')
+      if (!native?.RekordboxLibrary) throw new LibraryError('The native library is not available')
       this.lib = new native.RekordboxLibrary()
       this.lib.onEvent((event, data) => {
         let parsed: unknown = {}
@@ -175,21 +169,56 @@ export class RustLibrary {
         } catch {
           // An event without a readable payload is still worth passing on.
         }
-        for (const listener of this.listeners) listener(event, parsed)
+        this.emit(event, parsed)
       })
     }
     return this.lib
   }
 
-  /** Events from the Rust side: backup progress and changes, and library reloads. */
+  private emit(event: string, data: unknown): void {
+    for (const listener of this.listeners) listener(event, data)
+  }
+
+  /** Events from the library: backup progress and changes, library reloads, USB volumes and progress. */
   onEvent(listener: Listener): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
 
-  /** Rekordbox started and the Python engine left write mode, so editing is locked here too. */
-  async locked(): Promise<void> {
-    if (this.opened) await this.library().setWritable(false)
+  /** Starts watching USB volumes and rekordbox; safe to call twice. */
+  start(): void {
+    if (this.watcher) return
+    this.watcher = setInterval(() => void this.watch(), WATCH_MS)
+    this.watcher.unref()
+  }
+
+  stop(): void {
+    if (this.watcher) clearInterval(this.watcher)
+    if (this.daily) clearInterval(this.daily)
+    this.watcher = this.daily = null
+  }
+
+  private async watch(): Promise<void> {
+    try {
+      const lib = this.library()
+      const volumes = JSON.parse(await lib.usbList()) as Volume[]
+      const key = JSON.stringify(volumes.map((v) => [v.id, v.hasLibrary, v.rootName, v.ejectable]))
+      if (this.volumes && key !== this.volumes) this.emit('usb.volumes', { volumes })
+      this.volumes = key
+      if (!this.opened) return
+      const info = JSON.parse(await lib.info()) as Info
+      if (info.writable && info.rekordboxRunning) {
+        this.emit('library.locked', JSON.parse(await lib.setWritable(false)))
+        this.notified = false
+      } else if (this.running !== null && info.rekordboxRunning !== this.running) {
+        this.emit('library.rekordbox', { running: info.rekordboxRunning })
+      }
+      this.running = info.rekordboxRunning
+      if (info.sourceChanged && !this.notified) this.emit('library.changed', {})
+      this.notified = info.sourceChanged
+    } catch (e) {
+      console.error('[library] watch failed', e)
+    }
   }
 
   private startDaily(): void {
@@ -197,45 +226,35 @@ export class RustLibrary {
     const check = (): void => {
       this.library()
         .dailyBackup()
-        .catch((e) => console.error('[rust-library] daily backup failed', e))
+        .catch((e) => console.error('[library] daily backup failed', e))
     }
     this.daily = setInterval(check, DAILY_CHECK_MS)
     this.daily.unref()
     check()
   }
 
-  /** Called after the Python engine answers, so the Rust side can follow what it did. */
-  async after(method: string, params: Params, result: unknown): Promise<void> {
-    if (!this.enabled) return
-    if (method === 'library.open') {
-      try {
-        await this.library().open(text(params?.dbPath) || null)
+  async call<T = unknown>(method: string, params?: unknown): Promise<T> {
+    const p = params as Params
+    try {
+      if (method === 'library.open') {
+        const info = await this.library().open(text(p?.dbPath) || null)
         this.opened = true
-        this.dirty = false
+        this.running = null
+        this.notified = false
         this.startDaily()
-      } catch (e) {
-        console.error('[rust-library] open failed, using the Python engine', e)
-        this.opened = false
+        return JSON.parse(info) as T
       }
-      return
+      if (method === 'library.reload') {
+        const info = await this.library().reload()
+        this.emit('library.reloaded', {})
+        return JSON.parse(info) as T
+      }
+      const run = READS[method] ?? WRITES[method] ?? LIFECYCLE[method]
+      if (!run) throw new LibraryError(`Unknown method: ${method}`)
+      return JSON.parse(await run(this.library(), p)) as T
+    } catch (e) {
+      if (e instanceof LibraryError) throw e
+      throw new LibraryError((e as Error).message)
     }
-    if (method === 'library.setWritable' && this.opened) {
-      await this.library().setWritable(Boolean((result as { writable?: boolean } | null)?.writable))
-      return
-    }
-    if (method in READS || method in WRITES || PURE.has(method)) return
-    this.dirty = true
-  }
-
-  async call(method: string, params: Params): Promise<unknown> {
-    const lib = this.library()
-    if (this.dirty) {
-      await lib.reload()
-      this.dirty = false
-    }
-    const run = READS[method] ?? WRITES[method]
-    const out = JSON.parse(await run(lib, params))
-    if (method in WRITES && !KEEPS_DATABASE.has(method)) await this.refreshPython()
-    return out
   }
 }

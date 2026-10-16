@@ -385,7 +385,7 @@ impl Library {
             Err(rusqlite::Error::QueryReturnedNoRows) => return Err(Error::NotFound(format!("playlist {playlist_id}"))),
             Err(e) => return Err(e.into()),
             Ok(Some(FOLDER)) => return Ok(Vec::new()),
-            Ok(Some(SMART)) => return Err(Error::Unsupported("smart playlists")),
+            Ok(Some(SMART)) => return self.smart_track_ids(playlist_id),
             Ok(_) => {}
         }
         let mut stmt = self.conn().prepare(&format!(

@@ -52,7 +52,6 @@
     return chosen.filter((id) => present.has(id))
   })
   const volumeId = $derived(selectedIds[0] ?? '')
-  const volume = $derived(library.devices.find((item) => item.id === volumeId) ?? null)
   const pending = $derived(volumeId !== '' && loadedFor !== volumeId)
   const locked = $derived(library.syncing || batch)
   const canEject = $derived(selectedIds.some((id) => library.devices.some((item) => item.id === id && item.ejectable)))
