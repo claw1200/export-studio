@@ -7,7 +7,6 @@ use std::time::SystemTime;
 
 use es_device::{paths::pioneer_dir, volumes, Device, LibraryKind};
 use es_engine::device_import::{self, PlaylistPolicy, TrackStatus};
-use es_engine::sync::{self, Progress as SyncProgress};
 use serde_json::json;
 
 use crate::library::{failure, json_of, Core};
@@ -209,19 +208,9 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
             }))
         }
         UsbOp::Sync { volume, playlists, overwrite } => {
-            let state = service.session().ok_or_else(|| failure("Library not open"))?;
             let volume = listed(volume)?;
-            let result = sync::sync_volume(state.database(), &volume, playlists, *overwrite, &|event| {
-                core.emit(
-                    "usb.progress",
-                    &match event {
-                        SyncProgress::Step { phase, done, total, name } => {
-                            json!({ "phase": phase, "done": done, "total": total, "name": name })
-                        }
-                        SyncProgress::Done { tracks, playlists } => json!({ "phase": "done", "tracks": tracks, "playlists": playlists }),
-                    },
-                );
-            });
+            let emit = |event| core.emit_service_event(event);
+            let result = service.usb_sync(&volume, playlists, *overwrite, &emit);
             core.devices.forget(&volume);
             let result = result.map_err(failure)?;
             publish_volumes(core);

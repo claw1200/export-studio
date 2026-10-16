@@ -42,6 +42,7 @@ pub enum ServiceEvent {
         total: usize,
         name: String,
     },
+    UsbSyncProgress(crate::sync::Progress),
 }
 
 #[derive(Debug, Serialize)]
@@ -699,6 +700,23 @@ impl LibraryService {
                     });
                 },
             )
+        })
+    }
+
+    pub fn usb_sync(
+        &self,
+        volume: &Path,
+        playlist_ids: &[String],
+        overwrite: bool,
+        emit: &impl Fn(ServiceEvent),
+    ) -> Result<crate::sync::Outcome> {
+        let database = self
+            .session
+            .as_ref()
+            .ok_or_else(|| crate::Error::Other("Library not open".into()))?
+            .database();
+        crate::sync::sync_volume(database, volume, playlist_ids, overwrite, &|progress| {
+            emit(ServiceEvent::UsbSyncProgress(progress));
         })
     }
 

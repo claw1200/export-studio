@@ -57,6 +57,17 @@ impl Core {
                 "usb.progress",
                 &json!({ "phase": "import", "done": done, "total": total, "name": name }),
             ),
+            ServiceEvent::UsbSyncProgress(progress) => {
+                let data = match progress {
+                    es_engine::sync::Progress::Step { phase, done, total, name } => {
+                        json!({ "phase": phase, "done": done, "total": total, "name": name })
+                    }
+                    es_engine::sync::Progress::Done { tracks, playlists } => {
+                        json!({ "phase": "done", "tracks": tracks, "playlists": playlists })
+                    }
+                };
+                self.emit("usb.progress", &data);
+            }
         }
     }
 }
