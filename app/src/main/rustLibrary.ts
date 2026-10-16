@@ -56,7 +56,7 @@ const WRITES: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>>
       p?.interval == null ? null : Number(p.interval)
     ),
   'track.removeFromCollection': (lib, p) => lib.removeTracks(list(p?.ids)),
-  'track.update': (lib, p) => lib.trackUpdate(list(p?.ids), JSON.stringify(p?.fields ?? {})),
+  'track.update': (lib, p) => lib.trackUpdate(list(p?.ids), JSON.stringify(p?.fields ?? {}), Boolean(p?.writeTags)),
   'track.import': (lib, p) =>
     lib.trackImport(list(p?.paths), p?.playlistId == null ? null : text(p.playlistId), p?.artwork !== false),
   'cue.setHot': (lib, p) => lib.cueSetHot(text(p?.id), Number(p?.kind), Number(p?.ms)),
@@ -158,8 +158,6 @@ export class RustLibrary {
 
   kind(method: string, params?: Params): Kind | null {
     if (!this.enabled || !this.opened) return null
-    // Writing tags into audio files is still done by the Python engine.
-    if (method === 'track.update' && params?.writeTags) return null
     if (method in READS) return 'read'
     if (method in WRITES) return 'write'
     return null

@@ -107,7 +107,7 @@ export interface NativeLibrary {
   backupSettings(): Promise<string>
   backupSetSettings(auto: boolean | null, keep: number | null, interval: number | null): Promise<string>
   dailyBackup(): Promise<string>
-  trackUpdate(ids: string[], fields: string): Promise<string>
+  trackUpdate(ids: string[], fields: string, writeTags?: boolean): Promise<string>
   trackImport(paths: string[], playlistId: string | null, artwork: boolean): Promise<string>
   setWritable(on: boolean): Promise<string>
   trackPreviews(ids: string[]): Promise<string>

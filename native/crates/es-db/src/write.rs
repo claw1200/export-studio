@@ -633,6 +633,14 @@ impl Tx<'_> {
         Ok(())
     }
 
+    /// Record a track's file size after its tags were rewritten.
+    pub fn set_file_size(&mut self, id: &str, size: i64) -> Result<()> {
+        if self.set_content(id, "FileSize", Value::Integer(size))? {
+            self.stamp("djmdContent", id)?;
+        }
+        Ok(())
+    }
+
     /// Ids and removed flags of every row with this stored path.
     pub fn tracks_at(&self, path: &str) -> Result<Vec<(String, bool)>> {
         let mut stmt = self.tx.prepare("SELECT ID, rb_local_deleted FROM djmdContent WHERE FolderPath = ?1 ORDER BY ID")?;

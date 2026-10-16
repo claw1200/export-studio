@@ -174,6 +174,23 @@ fn whole(value: &serde_json::Value, label: &str, limit: i64) -> napi::Result<i64
     }
 }
 
+/// The edited fields a file's own tags can hold; rating and colour live only in the library.
+fn file_tag_edit(change: &TrackEdit) -> es_tags::Edit {
+    es_tags::Edit {
+        title: change.title.clone(),
+        artist: change.artist.clone(),
+        album: change.album.clone(),
+        genre: change.genre.clone(),
+        label: change.label.clone(),
+        remixer: change.remixer.clone(),
+        original_artist: change.original_artist.clone(),
+        composer: change.composer.clone(),
+        comment: change.comment.clone(),
+        year: change.year.map(|y| u32::try_from(y).unwrap_or(0)),
+        track_no: change.track_no.map(|n| u32::try_from(n).unwrap_or(0)),
+    }
+}
+
 fn parse_edit(fields: &str) -> napi::Result<TrackEdit> {
     let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(fields).map_err(failure)?;
     let known = [
@@ -274,7 +291,7 @@ enum Op {
     CueAddMemory(String, i64),
     CueDelete(String, String),
     CueSetColor(String, String, Option<i64>),
-    TrackUpdate(Vec<String>, String),
+    TrackUpdate(Vec<String>, String, bool),
     TrackImport { paths: Vec<String>, playlist: Option<String>, artwork: bool },
     BackupList,
     BackupCreate,
@@ -613,14 +630,39 @@ impl Run {
                 edit(state, |tx| tx.remove_tag(tag, ids))?;
                 tracks_of(state, ids)
             }
-            Op::TrackUpdate(ids, fields) => {
+            Op::TrackUpdate(ids, fields, write_tags) => {
                 let change = parse_edit(fields)?;
                 let mut unique = ids.clone();
                 unique.dedup();
                 if change != TrackEdit::default() && !unique.is_empty() {
                     edit(state, |tx| tx.update_tracks(&unique, &change))?;
                 }
-                Ok(format!(r#"{{"tracks":{},"tagErrors":[]}}"#, tracks_of(state, &unique)?))
+                let mut errors: Vec<String> = Vec::new();
+                if *write_tags && !unique.is_empty() {
+                    let file_edit = file_tag_edit(&change);
+                    if file_edit != es_tags::Edit::default() {
+                        let mut sizes = Vec::new();
+                        for id in &unique {
+                            let Some(files) = state.lib.track_files(id).map_err(failure)? else { continue };
+                            let path = std::path::Path::new(&files.folder_path);
+                            match es_tags::write(path, &file_edit) {
+                                Ok(()) => {
+                                    if let Ok(meta) = path.metadata() {
+                                        sizes.push((id.clone(), i64::try_from(meta.len()).unwrap_or(0)));
+                                    }
+                                }
+                                Err(e) => {
+                                    let name = path.file_name().map_or_else(|| files.folder_path.clone(), |n| n.to_string_lossy().into_owned());
+                                    errors.push(format!("{name}: {e}"));
+                                }
+                            }
+                        }
+                        if !sizes.is_empty() {
+                            edit(state, |tx| sizes.iter().try_for_each(|(id, size)| tx.set_file_size(id, *size)))?;
+                        }
+                    }
+                }
+                Ok(format!(r#"{{"tracks":{},"tagErrors":{}}}"#, tracks_of(state, &unique)?, json_of(&errors)?))
             }
             Op::TrackImport { paths, playlist, artwork } => {
                 let share = state.lib.share_dir();
@@ -812,8 +854,8 @@ impl RekordboxLibrary {
     }
 
     #[napi(ts_return_type = "Promise<string>")]
-    pub fn track_update(&self, ids: Vec<String>, fields: String) -> AsyncTask<Run> {
-        self.run(Op::TrackUpdate(ids, fields))
+    pub fn track_update(&self, ids: Vec<String>, fields: String, write_tags: Option<bool>) -> AsyncTask<Run> {
+        self.run(Op::TrackUpdate(ids, fields, write_tags.unwrap_or(false)))
     }
 
     /// Where backup progress and library events go: `(event, json)`.

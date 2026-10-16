@@ -9,7 +9,7 @@ use lofty::file::{AudioFile, TaggedFile, TaggedFileExt};
 use lofty::picture::PictureType;
 use lofty::prelude::{Accessor, ItemKey};
 use lofty::probe::Probe;
-use lofty::tag::{Tag, TagType};
+use lofty::tag::{ItemValue, Tag, TagItem, TagType};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -132,6 +132,108 @@ fn flac_bitrate(path: &Path, duration_secs: f64) -> Option<i64> {
     }
     let audio = file.metadata().ok()?.len().checked_sub(file.stream_position().ok()?)?;
     Some((audio as f64 * 8.0 / duration_secs / 1000.0).round_ties_even() as i64)
+}
+
+/// Fields to write into a file's own tags. `None` leaves a field alone; empty text or 0 removes it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Edit {
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub genre: Option<String>,
+    pub label: Option<String>,
+    pub remixer: Option<String>,
+    pub original_artist: Option<String>,
+    pub composer: Option<String>,
+    pub comment: Option<String>,
+    pub year: Option<u32>,
+    pub track_no: Option<u32>,
+}
+
+/// Name rekordbox and other tools use for a field the format has no standard place for.
+fn set_text(tag: &mut Tag, key: ItemKey, unknown: &[&str], text: &str) {
+    let text = text.trim();
+    tag.remove_key(&key);
+    for name in unknown {
+        tag.remove_key(&ItemKey::Unknown((*name).to_owned()));
+    }
+    if text.is_empty() {
+        return;
+    }
+    if !tag.insert_text(key, text.to_owned()) {
+        for name in unknown {
+            tag.insert_unchecked(TagItem::new(ItemKey::Unknown((*name).to_owned()), ItemValue::Text(text.to_owned())));
+        }
+    }
+}
+
+/// Write the given fields into the audio file's own tags: ID3v2.3 for MP3, WAV and AIFF, Vorbis comments for
+/// FLAC and iTunes atoms for M4A.
+pub fn write(path: &Path, edit: &Edit) -> Result<()> {
+    use lofty::config::WriteOptions;
+    if !path.is_file() {
+        return Err(Error::Missing(path.display().to_string()));
+    }
+    let probe = Probe::open(path)?;
+    if probe.file_type().is_none() {
+        return Err(Error::Unsupported(path.extension().map_or_else(String::new, |e| format!(".{}", e.to_string_lossy()))));
+    }
+    let mut file = probe.read()?;
+    let kind = if file.tag(TagType::Id3v2).is_some() { TagType::Id3v2 } else { file.primary_tag_type() };
+    if file.tag(kind).is_none() {
+        file.insert_tag(Tag::new(kind));
+    }
+    let tag = file.tag_mut(kind).ok_or_else(|| Error::Unsupported("tags".into()))?;
+    let vorbis = kind == TagType::VorbisComments;
+    let mp4 = kind == TagType::Mp4Ilst;
+    let freeform = |name: &str| format!("----:com.apple.iTunes:{name}");
+    let fields: [(&Option<String>, ItemKey, Vec<String>); 9] = [
+        (&edit.title, ItemKey::TrackTitle, vec![]),
+        (&edit.artist, ItemKey::TrackArtist, vec![]),
+        (&edit.album, ItemKey::AlbumTitle, vec![]),
+        (&edit.genre, ItemKey::Genre, vec![]),
+        (&edit.composer, ItemKey::Composer, vec![]),
+        (&edit.comment, ItemKey::Comment, vec![]),
+        (&edit.label, ItemKey::Label, if mp4 { vec![freeform("LABEL")] } else if vorbis { vec!["LABEL".into()] } else { vec![] }),
+        (&edit.remixer, ItemKey::Remixer, if mp4 { vec![freeform("REMIXER")] } else if vorbis { vec!["REMIXER".into()] } else { vec![] }),
+        (
+            &edit.original_artist,
+            ItemKey::OriginalArtist,
+            if mp4 { vec![freeform("ORIGINAL ARTIST")] } else if vorbis { vec!["ORIGINALARTIST".into()] } else { vec![] },
+        ),
+    ];
+    for (value, key, unknown) in fields {
+        if let Some(text) = value {
+            let names: Vec<&str> = unknown.iter().map(String::as_str).collect();
+            set_text(tag, key, &names, text);
+        }
+    }
+    if let Some(year) = edit.year {
+        tag.remove_key(&ItemKey::Year);
+        tag.remove_key(&ItemKey::RecordingDate);
+        if year > 0 {
+            let text = year.to_string();
+            let unchecked = |tag: &mut Tag, name: &str| {
+                tag.insert_unchecked(TagItem::new(ItemKey::Unknown(name.to_owned()), ItemValue::Text(text.clone())));
+            };
+            match tag.tag_type() {
+                TagType::Id3v2 => unchecked(tag, "TYER"),
+                TagType::VorbisComments => unchecked(tag, "DATE"),
+                _ => {
+                    tag.insert_text(ItemKey::RecordingDate, text.clone());
+                }
+            }
+        }
+    }
+    if let Some(number) = edit.track_no {
+        if number > 0 {
+            tag.set_track(number);
+        } else {
+            tag.remove_track();
+        }
+    }
+    file.save_to_path(path, WriteOptions::default().use_id3v23(true))?;
+    Ok(())
 }
 
 pub fn read(path: &Path) -> Result<Info> {
