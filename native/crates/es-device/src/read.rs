@@ -72,6 +72,9 @@ fn from_onelibrary(conn: &Connection, root_name: &str) -> rusqlite::Result<Devic
     let genres = names(conn, "genre", "genre_id")?;
     let labels = names(conn, "label", "label_id")?;
     let keys = names(conn, "key", "key_id")?;
+    let mut stmt = conn.prepare("SELECT image_id, path FROM image")?;
+    let images = stmt.query_map([], |row| Ok((number(row, "image_id")?, text(row, "path")?)))?
+        .collect::<rusqlite::Result<HashMap<i64, String>>>()?;
 
     let mut cues: HashMap<i64, Vec<Cue>> = HashMap::new();
     let mut stmt = conn.prepare("SELECT * FROM cue ORDER BY cue_id")?;
@@ -117,6 +120,7 @@ fn from_onelibrary(conn: &Connection, root_name: &str) -> rusqlite::Result<Devic
             path: text(row, "path")?,
             filename: text(row, "fileName")?,
             analysis: text(row, "analysisDataFilePath")?,
+            artwork: images.get(&number(row, "image_id")?).cloned().unwrap_or_default(),
             comment: text(row, "djComment")?,
             bpm_x100: number(row, "bpmx100")?,
             duration: number(row, "length")?,
@@ -208,6 +212,7 @@ fn from_pdb(bytes: &[u8], root_name: &str) -> Result<Device> {
     };
     let (artists, albums, genres, labels, keys) =
         (named(PageType::Artists), named(PageType::Albums), named(PageType::Genres), named(PageType::Labels), named(PageType::Keys));
+    let images = named(PageType::Artwork);
     let pick = |map: &HashMap<u32, String>, id: u32| map.get(&id).cloned().unwrap_or_default();
     let tracks = pdb
         .table(PageType::Tracks)
@@ -228,6 +233,7 @@ fn from_pdb(bytes: &[u8], root_name: &str) -> Result<Device> {
             path: row.file_path,
             filename: row.filename,
             analysis: row.analyze_path,
+            artwork: pick(&images, row.artwork_id),
             comment: row.comment,
             bpm_x100: i64::from(row.tempo_x100),
             duration: i64::from(row.duration_sec),

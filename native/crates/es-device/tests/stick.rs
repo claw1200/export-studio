@@ -32,6 +32,8 @@ fn stick() -> Option<(tempfile::TempDir, PathBuf)> {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("source");
     std::fs::create_dir_all(&source).unwrap();
+    let artwork = source.join("cover.jpg");
+    std::fs::write(&artwork, b"artwork fixture").unwrap();
     let volume = dir.path().join("STICK");
     std::fs::create_dir_all(&volume).unwrap();
     let mut tracks = Vec::new();
@@ -42,6 +44,7 @@ fn stick() -> Option<(tempfile::TempDir, PathBuf)> {
             "id": id, "sourcePath": file, "title": title, "artist": artist, "album": "Album", "genre": "House",
             "bpmX100": 12800, "durationSec": 1, "rating": 3, "year": 2020, "bitrate": 512, "sampleRate": 16000,
             "fileSize": 32044, "metadata": { "trackNumber": 2, "bitDepth": 16, "analysed": 105 },
+            "artwork": if id == 101 { Some(&artwork) } else { None },
             "cues": [
                 { "kind": 0, "timeMs": 500 },
                 { "kind": 1, "timeMs": 100, "colorCode": 10, "comment": "drop" }
@@ -49,7 +52,7 @@ fn stick() -> Option<(tempfile::TempDir, PathBuf)> {
         }));
     }
     let job = json!({
-        "destination": volume, "dbId": 4242, "tracks": tracks,
+        "schemaVersion": 1, "destination": volume, "dbId": 4242, "tracks": tracks,
         "playlists": [
             { "id": 1, "name": "Folder", "parentId": 0, "folder": true, "trackIds": [] },
             { "id": 2, "name": "Set", "parentId": 1, "folder": false, "trackIds": [102, 101] },
@@ -106,4 +109,18 @@ fn the_older_database_reads_the_same_library() {
     let names: Vec<_> = set.track_ids.iter().map(|id| old.track(*id).unwrap().title.as_str()).collect();
     assert_eq!(names, ["Second", "First"]);
     assert_eq!(old.tracks[0].master_id, Some(101).or(old.tracks[0].master_id));
+}
+
+#[test]
+fn both_device_libraries_keep_their_artwork_paths() {
+    let Some((_dir, volume)) = stick() else { return };
+    for kind in [LibraryKind::OneLibrary, LibraryKind::DeviceLibrary] {
+        let device = read_kind(&volume, kind).unwrap().unwrap();
+        let first = device.tracks.iter().find(|track| track.title == "First").unwrap();
+        assert!(!first.artwork.is_empty(), "missing artwork in {kind:?}");
+        let path = es_device::paths::volume_path(&first.artwork, &volume).unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), b"artwork fixture");
+        let second = device.tracks.iter().find(|track| track.title == "Second").unwrap();
+        assert!(second.artwork.is_empty());
+    }
 }

@@ -25,8 +25,8 @@ const READS: CommandHandlers = {
   'track.detail': (lib, p) =>
     text(p?.id).startsWith('usb:') ? lib.usbDetail(text(p?.id)) : lib.trackDetail(text(p?.id)),
   'media.resolve': (lib, p) => {
-    if (text(p?.id).startsWith('usb:')) {
-      return text(p?.kind) === 'audio' ? lib.usbMedia(text(p?.id)) : Promise.resolve(null)
+    if (text(p?.id).startsWith('usb:') && text(p?.kind) === 'audio') {
+      return lib.usbMedia(text(p?.id))
     }
     return lib.mediaResolve(text(p?.kind), text(p?.id), text(p?.size))
   },

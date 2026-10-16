@@ -312,6 +312,18 @@ impl Run {
                 return json_of(&service.inspect_tracks(&requests).map_err(failure)?);
             }
             Op::MediaResolve { kind, id, size } => {
+                if let Some((volume, export_id)) = es_index::device::parse_track_key(id) {
+                    let volume = PathBuf::from(volume);
+                    let found = self.core.devices.load(&volume)?.and_then(|device| {
+                        let track = device.track(export_id)?;
+                        match kind.as_str() {
+                            "art" => es_index::device::artwork_file(&volume, track, size),
+                            "audio" => es_index::device::audio_file(&volume, track).map(PathBuf::from),
+                            _ => None,
+                        }
+                    });
+                    return json_of(&found);
+                }
                 return json_of(&service.resolve_media(kind, id, size).map_err(failure)?);
             }
             Op::TrackUpdate(ids, fields, write_tags) => {

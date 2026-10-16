@@ -37,6 +37,7 @@ pub struct Track {
     pub path: String,
     pub filename: String,
     pub analysis: String,
+    pub artwork: String,
     pub comment: String,
     pub bpm_x100: i64,
     pub duration: i64,

@@ -103,7 +103,7 @@ pub fn track_row(volume: &Path, track: &Track) -> TrackRow {
         streaming: false,
         path,
         file_size: track.file_size,
-        has_artwork: false,
+        has_artwork: artwork_file(volume, track, "").is_some(),
         track_no: track.track_no,
         analysed: !track.analysis.is_empty(),
         my_tags: Vec::new(),
@@ -219,6 +219,13 @@ pub fn audio_file(volume: &Path, track: &Track) -> Option<String> {
     audio_path(volume, track).filter(|p| p.is_file()).map(|p| p.to_string_lossy().into_owned())
 }
 
+pub fn artwork_file(volume: &Path, track: &Track, size: &str) -> Option<std::path::PathBuf> {
+    let relative = track.artwork.replace('\\', "/");
+    volume_path(&relative, volume).ok()?;
+    let path = crate::media::art(volume, &relative, size)?;
+    volume_path(path.strip_prefix(volume).ok()?.to_str()?, volume).ok()
+}
+
 /// Previews for stick tracks; each key's stick is read once.
 pub fn previews(read: &mut dyn FnMut(&Path) -> Option<std::sync::Arc<Device>>, keys: &[String]) -> Vec<Preview> {
     let mut seen: Vec<&String> = Vec::new();
@@ -244,6 +251,37 @@ pub fn previews(read: &mut dyn FnMut(&Path) -> Option<std::sync::Arc<Device>>, k
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_artwork_is_available_to_the_interface() {
+        let dir = tempfile::tempdir().unwrap();
+        let relative = "/PIONEER/Artwork/cover.jpg";
+        let original = dir.path().join("PIONEER/Artwork/cover.jpg");
+        std::fs::create_dir_all(original.parent().unwrap()).unwrap();
+        std::fs::write(&original, b"jpeg").unwrap();
+        let track = Track { artwork: relative.into(), ..Track::default() };
+        assert!(track_row(dir.path(), &track).has_artwork);
+        assert_eq!(artwork_file(dir.path(), &track, "m"), Some(original.clone()));
+        let thumbnail = original.with_file_name("cover_m.jpg");
+        std::fs::write(&thumbnail, b"thumbnail").unwrap();
+        assert_eq!(artwork_file(dir.path(), &track, "m"), Some(thumbnail));
+        assert_eq!(artwork_file(dir.path(), &track, ""), Some(original.clone()));
+        let windows_path = Track { artwork: relative.replace('/', "\\"), ..Track::default() };
+        assert_eq!(artwork_file(dir.path(), &windows_path, ""), Some(original.clone()));
+        std::fs::remove_file(original).unwrap();
+        assert!(!track_row(dir.path(), &track).has_artwork);
+        assert_eq!(artwork_file(dir.path(), &track, ""), None);
+    }
+
+    #[test]
+    fn device_artwork_stays_inside_the_volume() {
+        let dir = tempfile::tempdir().unwrap();
+        for relative in ["", "/../cover.jpg", "/PIONEER/../../cover.jpg"] {
+            let track = Track { artwork: relative.into(), ..Track::default() };
+            assert!(!track_row(dir.path(), &track).has_artwork);
+            assert_eq!(artwork_file(dir.path(), &track, "m"), None);
+        }
+    }
 
     #[test]
     fn track_keys_round_trip_with_awkward_volume_names() {

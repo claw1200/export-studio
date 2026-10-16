@@ -16,7 +16,7 @@ pub fn resolve_media(lib: &Library, share: &Path, kind: &str, id: &str, size: &s
     Ok(found)
 }
 
-fn art(share: &Path, relative: &str, size: &str) -> Option<PathBuf> {
+pub(crate) fn art(share: &Path, relative: &str, size: &str) -> Option<PathBuf> {
     let trimmed = relative.trim_start_matches(['/', '\\']);
     if Path::new(trimmed).components().any(|c| !matches!(c, Component::Normal(_))) {
         return None;
