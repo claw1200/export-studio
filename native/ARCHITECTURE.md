@@ -8,6 +8,8 @@ The Rust port is intended to improve more than implementation language. It shoul
 
 The current workspace already has useful domain crates and use-case modules. The main refactoring target is the orchestration around them: `es-node` currently owns library state, command dispatch, backups, device access, event delivery, and workflow coordination, while the Electron `Library` also routes commands and owns library-related timers.
 
+The refactor has since moved library session ownership, backup policy, and library workflows into `es-engine::LibraryService`. N-API serializes typed service results directly to JavaScript values; Electron retains a compatibility command map, now typed by the shared preload command/parameter contract. USB publication remains a subprocess, behind a versioned job contract and a `UsbPublisher` port.
+
 ## Design Goals
 
 - Give each policy and resource one authoritative owner.
@@ -102,8 +104,9 @@ The renderer may continue receiving its existing JSON-shaped API during migratio
 
 - Treat library writes as single-writer operations.
 - Keep the live database handle scoped to a write operation; never share it with independent background work.
-- Do not hold a global session lock around unrelated filesystem work, conversion, device publication, or callbacks unless a documented consistency invariant requires it.
-- First define which snapshot reads may run concurrently and how refresh invalidates cached results. Then add concurrency; do not infer safety from the use of `AsyncTask` or a mutex alone.
+- The current implementation serializes service calls behind one N-API-owned mutex. This is a deliberate correctness boundary around one mutable session, not a claim that all workflows are short or contention-free.
+- Do not relax that lock based only on the fact that work runs through `AsyncTask`. First measure command latency/queue wait and define a user-visible budget.
+- If measurements justify concurrency, keep live writes single-writer and move slow work out of the lock only where the workflow can operate on owned data or an independent snapshot. Specify refresh/cache invalidation and test read/write races before enabling concurrent reads.
 - Progress callbacks must not re-enter the service while a write lock is held.
 
 ## Proposed Module Placement
@@ -166,7 +169,7 @@ For each slice, move orchestration into the service, preserve renderer behavior 
 6. USB import and sync.
 7. Backup restore and recovery behavior.
 
-**Exit:** the old operation dispatcher has no remaining business workflow and can be deleted.
+**Exit:** the operation dispatcher contains only protocol adaptation and result serialization; workflow policy and sequencing live in the service.
 
 ### Phase 4: Make external boundaries explicit
 
@@ -176,13 +179,13 @@ For each slice, move orchestration into the service, preserve renderer behavior 
 
 **Exit:** process boundaries have named owners, contracts, and failure semantics.
 
-### Phase 5: Improve concurrency from measured needs
+### Phase 5: Keep concurrency evidence-driven
 
-- Measure command latency and contention after the service extraction.
-- Separate slow file/device work from the short-lived live DB transaction where correctness permits.
-- Add concurrent snapshot reads only after connection and refresh semantics are tested.
+- Retain serialized service access until profiling demonstrates a user-visible contention problem.
+- Record a baseline for queue wait and operation duration before changing lock scope.
+- If concurrency is warranted, separate slow file/device work from short-lived live DB transactions where correctness permits, then test snapshot refresh and write races.
 
-**Exit:** writes remain serialized, safe reads can proceed independently, and tests cover refresh/write races.
+**Exit:** the serialization policy and the evidence required to change it are explicit. Concurrent reads are a follow-up only when measurements justify their added consistency complexity.
 
 ## Architecture Review Checklist
 
@@ -205,5 +208,6 @@ The redesign is complete when:
 - Electron main owns desktop lifecycle and scheduling, but does not duplicate library command or backup policy.
 - `es-engine` owns library-session policy and application workflows through typed APIs.
 - Database access, projections, device parsing, backups, and file formats have single, enforced owners.
+- The service concurrency policy is explicit, and any expansion beyond serialized access is backed by measurements and race tests.
 - Rust unit/integration tests cover service workflows and `es-db` invariants; boundary tests cover N-API and Electron adapters.
 - Real-library smoke checks are documented and run against disposable copies, including opening Rust-written copies in Rekordbox.
