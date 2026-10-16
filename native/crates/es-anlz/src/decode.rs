@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-const HEADER: usize = 12;
+pub(crate) const TAG_HEADER: usize = 12;
 const BEAT_COUNT_AT: usize = 20;
 
 /// The tags of one analysis file, in file order.
@@ -24,9 +24,9 @@ impl Tags {
         }
         let mut pos = be32(&data, 4).ok_or_else(|| bad("short header"))? as usize;
         let mut spans = Vec::new();
-        while pos + HEADER <= data.len() {
+        while pos + TAG_HEADER <= data.len() {
             let len = be32(&data, pos + 8).unwrap_or(0) as usize;
-            if len < HEADER || pos + len > data.len() {
+            if len < TAG_HEADER || pos + len > data.len() {
                 break;
             }
             let mut kind = [0u8; 4];
@@ -150,10 +150,23 @@ pub fn beatgrid(dat: &Tags) -> Option<Grid> {
     Some(grid)
 }
 
-/// The colour of each hot cue, keyed by slot and start time, from the extended cue list (`PCO2`).
+/// One entry of the extended cue list (`PCO2`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtendedCue {
+    /// 0 for a memory cue, otherwise the hot cue slot (1 is A).
+    pub slot: u32,
+    pub is_loop: bool,
+    pub start_ms: u32,
+    pub loop_end_ms: Option<u32>,
+    pub color_id: u8,
+    pub comment: String,
+    pub rgb: [u8; 3],
+}
+
+/// Every cue of the extended cue lists (`PCO2`), hot and memory.
 #[must_use]
-pub fn hot_cue_colors(ext: &Tags) -> HashMap<(u32, u32), String> {
-    let mut out = HashMap::new();
+pub fn extended_cues(ext: &Tags) -> Vec<ExtendedCue> {
+    let mut out = Vec::new();
     for tag in ext.all("PCO2") {
         let (Some(header), Some(count)) = (be32(tag, 4), be16(tag, 16)) else { continue };
         let mut at = header as usize;
@@ -161,17 +174,31 @@ pub fn hot_cue_colors(ext: &Tags) -> HashMap<(u32, u32), String> {
             if tag.get(at..at + 4) != Some(b"PCP2") {
                 break;
             }
-            let (Some(entry), Some(slot), Some(time), Some(comment)) =
-                (be32(tag, at + 8), be32(tag, at + 12), be32(tag, at + 20), be32(tag, at + 40))
+            let (Some(entry), Some(slot), Some(start), Some(end), Some(comment_len)) =
+                (be32(tag, at + 8), be32(tag, at + 12), be32(tag, at + 20), be32(tag, at + 24), be32(tag, at + 40))
             else {
                 break;
             };
-            let rgb_at = at + 44 + comment as usize;
-            if slot != 0 {
-                if let Some(&[_, r, g, b]) = tag.get(rgb_at..rgb_at + 4).map(|s| <&[u8; 4]>::try_from(s).unwrap()) {
-                    out.insert((slot, time), format!("#{r:02x}{g:02x}{b:02x}"));
-                }
-            }
+            let comment_at = at + 44;
+            let comment_end = comment_at + comment_len as usize;
+            let units: Vec<u16> = tag
+                .get(comment_at..comment_end)
+                .unwrap_or_default()
+                .chunks(2)
+                .filter(|c| c.len() == 2)
+                .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                .take_while(|u| *u != 0)
+                .collect();
+            let rgb = tag.get(comment_end + 1..comment_end + 4).map_or([0; 3], |s| [s[0], s[1], s[2]]);
+            out.push(ExtendedCue {
+                slot,
+                is_loop: tag.get(at + 16) == Some(&2),
+                start_ms: start,
+                loop_end_ms: (end != u32::MAX).then_some(end),
+                color_id: tag.get(at + 28).copied().unwrap_or(0),
+                comment: String::from_utf16_lossy(&units),
+                rgb,
+            });
             if entry == 0 {
                 break;
             }
@@ -179,6 +206,16 @@ pub fn hot_cue_colors(ext: &Tags) -> HashMap<(u32, u32), String> {
         }
     }
     out
+}
+
+/// The colour of each hot cue, keyed by slot and start time, from the extended cue list (`PCO2`).
+#[must_use]
+pub fn hot_cue_colors(ext: &Tags) -> HashMap<(u32, u32), String> {
+    extended_cues(ext)
+        .into_iter()
+        .filter(|cue| cue.slot != 0)
+        .map(|cue| ((cue.slot, cue.start_ms), format!("#{:02x}{:02x}{:02x}", cue.rgb[0], cue.rgb[1], cue.rgb[2])))
+        .collect()
 }
 
 #[cfg(test)]

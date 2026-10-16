@@ -14,8 +14,9 @@ const SYNC_COLUMNS: &str = "`UUID` VARCHAR(255) DEFAULT NULL, `rb_data_status` I
     `updated_at` DATETIME NOT NULL DEFAULT '2020-01-01 00:00:00.000 +00:00'";
 
 const TABLES: &[(&str, &str)] = &[
-    ("djmdContent", "`ID` VARCHAR(255) PRIMARY KEY, `FolderPath` VARCHAR(255), `Title` VARCHAR(255), `ArtistID` VARCHAR(255), `AlbumID` VARCHAR(255), `GenreID` VARCHAR(255), `KeyID` VARCHAR(255), `BPM` INTEGER, `Length` INTEGER, `Rating` INTEGER, `FileType` INTEGER, `AnalysisDataPath` VARCHAR(255), `Analysed` INTEGER, `StockDate` VARCHAR(255), `LabelID` VARCHAR(255), `RemixerID` VARCHAR(255), `OrgArtistID` VARCHAR(255), `ComposerID` VARCHAR(255), `ColorID` VARCHAR(255), `Commnt` TEXT, `ReleaseYear` INTEGER, `DateCreated` VARCHAR(255), `DJPlayCount` INTEGER, `BitRate` INTEGER, `SampleRate` INTEGER, `BitDepth` INTEGER, `FileSize` INTEGER, `ImagePath` VARCHAR(255), `TrackNo` INTEGER, `ContentLink` INTEGER, `DeviceID` VARCHAR(255), `MasterDBID` VARCHAR(255), `MasterSongID` VARCHAR(255), `HotCueAutoLoad` VARCHAR(255), `FileNameL` VARCHAR(255), `rb_file_id` VARCHAR(255)"),
+    ("djmdContent", "`ID` VARCHAR(255) PRIMARY KEY, `FolderPath` VARCHAR(255), `Title` VARCHAR(255), `ArtistID` VARCHAR(255), `AlbumID` VARCHAR(255), `GenreID` VARCHAR(255), `KeyID` VARCHAR(255), `BPM` INTEGER, `Length` INTEGER, `Rating` INTEGER, `FileType` INTEGER, `AnalysisDataPath` VARCHAR(255), `Analysed` INTEGER, `StockDate` VARCHAR(255), `LabelID` VARCHAR(255), `RemixerID` VARCHAR(255), `OrgArtistID` VARCHAR(255), `ComposerID` VARCHAR(255), `ColorID` VARCHAR(255), `Commnt` TEXT, `ReleaseYear` INTEGER, `DateCreated` VARCHAR(255), `DJPlayCount` INTEGER, `BitRate` INTEGER, `SampleRate` INTEGER, `BitDepth` INTEGER, `FileSize` INTEGER, `ImagePath` VARCHAR(255), `TrackNo` INTEGER, `ContentLink` INTEGER, `DeviceID` VARCHAR(255), `MasterDBID` VARCHAR(255), `MasterSongID` VARCHAR(255), `HotCueAutoLoad` VARCHAR(255), `FileNameL` VARCHAR(255), `rb_file_id` VARCHAR(255), `ReleaseDate` VARCHAR(255), `DiscNo` INTEGER, `ISRC` VARCHAR(255)"),
     ("djmdDevice", "`ID` VARCHAR(255) PRIMARY KEY, `MasterDBID` VARCHAR(255)"),
+    ("djmdProperty", "`DBID` VARCHAR(255) PRIMARY KEY"),
     ("djmdMenuItems", "`ID` VARCHAR(255) PRIMARY KEY, `Name` VARCHAR(255)"),
     ("djmdLabel", "`ID` VARCHAR(255) PRIMARY KEY, `Name` VARCHAR(255)"),
     ("djmdHistory", "`ID` VARCHAR(255) PRIMARY KEY, `Seq` INTEGER, `Name` VARCHAR(255), `Attribute` INTEGER, `ParentID` VARCHAR(255), `DateCreated` VARCHAR(255)"),
@@ -55,6 +56,7 @@ pub fn build(dir: &Path, usn: i64) -> Result<PathBuf> {
     )?;
     conn.execute("INSERT INTO agentRegistry (registry_id, int_1) VALUES ('localUpdateCount', ?1)", [usn])?;
     conn.execute("INSERT INTO djmdDevice (ID, MasterDBID) VALUES ('dev1', 'master-1')", [])?;
+    conn.execute("INSERT INTO djmdProperty (DBID) VALUES ('4242')", [])?;
     conn.execute("INSERT INTO djmdMenuItems (ID, Name, rb_local_usn) VALUES ('m1', 'TRACK', 77)", [])?;
     Ok(path)
 }

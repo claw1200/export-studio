@@ -4,6 +4,7 @@
 //! are refused while rekordbox runs, and all live in [`write`].
 
 mod key;
+pub mod export;
 pub mod fixture;
 pub mod live;
 pub mod read;
@@ -18,7 +19,7 @@ use rusqlite::Connection;
 use tempfile::TempDir;
 
 pub use read::{Cue, HistoryNode, PlaylistKind, PlaylistNode, TagNode, Track, TrackFiles};
-pub use write::{FileFacts, NewTrack, Removed, Stream, TrackEdit, Tx};
+pub use write::{DeviceData, FileFacts, NewCue, NewTrack, Removed, Stream, TrackEdit, Tx};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

@@ -8,6 +8,7 @@ publish.workspace = true
 [dependencies]
 es-db.workspace = true
 es-anlz.workspace = true
+es-device.workspace = true
 serde = { version = "1", features = ["derive"] }
 base64 = "0.22"
 

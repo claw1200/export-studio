@@ -108,6 +108,34 @@ pub struct NewTrack {
     pub image_path: Option<String>,
 }
 
+/// A cue to place on a track.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct NewCue {
+    /// 0 is a memory cue, 1 and up are hot cues and loops.
+    pub kind: i64,
+    pub start_ms: i64,
+    pub end_ms: Option<i64>,
+    pub color_index: Option<i64>,
+    pub comment: String,
+    pub active_loop: bool,
+}
+
+/// What a track had on a device that a library copy of it should get.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DeviceData {
+    /// Where the track's analysis files now are, relative to the share folder, when they were copied.
+    pub analysis_path: Option<String>,
+    pub bpm_x100: i64,
+    /// A key name as the library writes it; ignored when the library has no such key.
+    pub key: String,
+    pub rating: i64,
+    pub color: i64,
+    pub cues: Vec<NewCue>,
+}
+
+/// The `Analysed` value rekordbox writes once a track has been analysed.
+const ANALYSED: i64 = 105;
+
 /// Artist-like columns share the artist table.
 const NAMED: [(&str, &str); 7] = [
     ("ArtistID", "djmdArtist"),
@@ -683,7 +711,7 @@ impl Tx<'_> {
         }
     }
 
-    fn insert_cue(&mut self, content_id: &str, uuid: Option<&str>, kind: i64, msec: i64) -> Result<()> {
+    fn insert_cue(&mut self, content_id: &str, uuid: Option<&str>, kind: i64, msec: i64) -> Result<String> {
         let id = unused_id(&self.tx, "djmdCue")?;
         self.tx.execute(
             &format!(
@@ -695,7 +723,50 @@ impl Tx<'_> {
             params![id, content_id, uuid, kind, msec, msec * CUE_FRAMES_PER_SECOND / 1000, Uuid::new_v4().to_string(), self.usn],
         )?;
         self.touched = true;
-        Ok(())
+        Ok(id)
+    }
+
+    /// Give a freshly imported track the analysis, cues and numbers it had on a device.
+    pub fn apply_device_data(&mut self, content_id: &str, data: &DeviceData) -> Result<()> {
+        let (uuid, length) = self.cue_context(content_id)?;
+        if let Some(path) = &data.analysis_path {
+            self.set_content(content_id, "AnalysisDataPath", Value::Text(path.clone()))?;
+            self.set_content(content_id, "Analysed", Value::Integer(ANALYSED))?;
+        }
+        for (column, value) in [("BPM", data.bpm_x100), ("Rating", data.rating)] {
+            if value > 0 {
+                self.set_content(content_id, column, Value::Integer(value))?;
+            }
+        }
+        if data.color > 0 {
+            self.set_content(content_id, "ColorID", Value::Text(data.color.to_string()))?;
+        }
+        if !data.key.is_empty() {
+            let key = Self::first_or_none(self.tx.query_row(
+                "SELECT ID FROM djmdKey WHERE ScaleName = ?1 AND rb_local_deleted = 0 LIMIT 1",
+                [&data.key],
+                |row| row.get::<_, String>(0),
+            ))?;
+            if let Some(key) = key {
+                self.set_content(content_id, "KeyID", Value::Text(key))?;
+            }
+        }
+        for cue in &data.cues {
+            let start = clamp_msec(cue.start_ms, length);
+            let id = self.insert_cue(content_id, uuid.as_deref(), cue.kind, start)?;
+            if let Some(end) = cue.end_ms.filter(|e| *e >= 0) {
+                let end = clamp_msec(end, length);
+                self.tx.execute(
+                    "UPDATE djmdCue SET OutMsec = ?1, OutFrame = ?2 WHERE ID = ?3",
+                    params![end, end * CUE_FRAMES_PER_SECOND / 1000, id],
+                )?;
+            }
+            self.tx.execute(
+                "UPDATE djmdCue SET ColorTableIndex = ?1, Comment = ?2, ActiveLoop = ?3 WHERE ID = ?4",
+                params![cue.color_index.filter(|c| *c > 0), cue.comment, i64::from(cue.active_loop), id],
+            )?;
+        }
+        self.stamp("djmdContent", content_id)
     }
 
     /// Place a hot cue in slot `kind`, replacing the one already there.
@@ -709,7 +780,7 @@ impl Tx<'_> {
             "DELETE FROM djmdCue WHERE ContentID = ?1 AND Kind = ?2 AND rb_local_deleted = 0",
             params![content_id, kind],
         )?;
-        self.insert_cue(content_id, uuid.as_deref(), kind, msec)
+        self.insert_cue(content_id, uuid.as_deref(), kind, msec).map(|_| ())
     }
 
     /// Add a memory cue unless one already sits at that time.

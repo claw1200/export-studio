@@ -223,6 +223,26 @@ impl Library {
         Ok(out)
     }
 
+    /// The library's own id (`DBID`), which a device records beside the ids it copied from this library. 0 when unknown.
+    pub fn db_id(&self) -> Result<i64> {
+        let found = self.conn().query_row("SELECT DBID FROM djmdProperty LIMIT 1", [], |row| loose(row, 0));
+        match found {
+            Ok(text) => Ok(text.trim().parse::<i64>().ok().filter(|n| *n > 0).unwrap_or(0)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// A track's UUID, which names its analysis folder.
+    pub fn track_uuid(&self, id: &str) -> Result<Option<String>> {
+        let found = self.conn().query_row("SELECT UUID FROM djmdContent WHERE ID = ?1", [id], |row| row.get::<_, Option<String>>(0));
+        match found {
+            Ok(uuid) => Ok(uuid),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Ids and removed flags of every row stored at `path`.
     pub fn tracks_at(&self, path: &str) -> Result<Vec<(String, bool)>> {
         let mut stmt =
