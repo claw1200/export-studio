@@ -2,10 +2,14 @@
 //! way rekordbox stamps its own: a new local update count, written to each touched row.
 
 use std::collections::BTreeSet;
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, Transaction, TransactionBehavior};
 use uuid::Uuid;
 
+use crate::live::HIDDEN_PLAYLIST;
+use crate::xml::{self, XmlOp};
 use crate::{Error, Result};
 
 const NOW: &str = "strftime('%Y-%m-%d %H:%M:%f +00:00','now')";
@@ -44,16 +48,24 @@ pub struct Tx<'a> {
     tx: Transaction<'a>,
     usn: i64,
     touched: bool,
+    xml: Vec<XmlOp>,
 }
 
-pub(crate) fn run<T>(conn: &mut Connection, edit: impl FnOnce(&mut Tx<'_>) -> Result<T>) -> Result<T> {
+/// A track taken out of the collection, with the analysis files it had so the caller can delete them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Removed {
+    pub id: String,
+    pub analysis_path: Option<String>,
+}
+
+pub(crate) fn run<T>(conn: &mut Connection, xml_path: &Path, edit: impl FnOnce(&mut Tx<'_>) -> Result<T>) -> Result<T> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let counter: i64 = tx.query_row(
         "SELECT COALESCE(int_1, 0) FROM agentRegistry WHERE registry_id = 'localUpdateCount'",
         [],
         |row| row.get(0),
     )?;
-    let mut scope = Tx { tx, usn: counter + 1, touched: false };
+    let mut scope = Tx { tx, usn: counter + 1, touched: false, xml: Vec::new() };
     let out = edit(&mut scope)?;
     if scope.touched {
         scope.tx.execute(
@@ -61,13 +73,39 @@ pub(crate) fn run<T>(conn: &mut Connection, edit: impl FnOnce(&mut Tx<'_>) -> Re
             [scope.usn],
         )?;
     }
+    let xml_ops = std::mem::take(&mut scope.xml);
     scope.tx.commit()?;
+    if !xml_ops.is_empty() && xml_path.is_file() {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis());
+        let text = std::fs::read_to_string(xml_path)?;
+        let updated = xml::apply(&text, &xml_ops, now);
+        let tmp = xml_path.with_extension("xml.tmp");
+        std::fs::write(&tmp, updated)?;
+        std::fs::rename(&tmp, xml_path)?;
+    }
     Ok(out)
+}
+
+fn unused_id(tx: &Transaction<'_>, table: &str) -> Result<String> {
+    for _ in 0..1000 {
+        let id = i64::try_from(Uuid::new_v4().as_u128() >> 100).unwrap_or(0);
+        if id < 100 {
+            continue;
+        }
+        let used: i64 = tx.query_row(&format!("SELECT count(*) FROM {table} WHERE ID = ?1"), [id.to_string()], |r| r.get(0))?;
+        if used == 0 {
+            return Ok(id.to_string());
+        }
+    }
+    Err(Error::Refused("could not find an unused id".into()))
 }
 
 impl Tx<'_> {
     fn stamp(&mut self, table: &str, id: &str) -> Result<()> {
         self.touched = true;
+        if table == "djmdPlaylist" {
+            self.xml.push(XmlOp::Touch(id.to_owned()));
+        }
         self.tx.execute(
             &format!("UPDATE {table} SET rb_local_usn = ?1, updated_at = {NOW} WHERE ID = ?2"),
             params![self.usn, id],
@@ -126,18 +164,26 @@ impl Tx<'_> {
         Ok(())
     }
 
-    /// Remove tracks from the collection. Unknown or already removed ids are ignored; returns how many were removed.
-    pub fn remove_tracks(&mut self, ids: &[String]) -> Result<usize> {
+    /// Remove tracks from the collection. Unknown or already removed ids are ignored; the rest are returned.
+    /// The analysis columns are cleared so a later import reads the file afresh.
+    pub fn remove_tracks(&mut self, ids: &[String]) -> Result<Vec<Removed>> {
         let mut playlists = BTreeSet::new();
-        let mut removed = 0;
+        let mut removed = Vec::new();
         for id in ids {
             if self.content_state(id)? != Some(false) {
                 continue;
             }
+            let analysis_path: Option<String> = self
+                .tx
+                .query_row("SELECT AnalysisDataPath FROM djmdContent WHERE ID = ?1", [id], |row| row.get(0))?;
             playlists.extend(self.clear_links(id)?);
-            self.tx.execute("UPDATE djmdContent SET rb_local_deleted = 1 WHERE ID = ?1", [id])?;
+            self.tx.execute(
+                "UPDATE djmdContent SET rb_local_deleted = 1, AnalysisDataPath = NULL, Analysed = 0, FileType = NULL, \
+                 BitRate = NULL, SampleRate = NULL, BitDepth = NULL WHERE ID = ?1",
+                [id],
+            )?;
             self.stamp("djmdContent", id)?;
-            removed += 1;
+            removed.push(Removed { id: id.clone(), analysis_path: analysis_path.filter(|p| !p.is_empty()) });
         }
         for playlist in &playlists {
             self.renumber(playlist)?;
@@ -229,6 +275,200 @@ impl Tx<'_> {
             self.touched = true;
             self.renumber(playlist_id)?;
             self.stamp("djmdPlaylist", playlist_id)?;
+        }
+        Ok(removed)
+    }
+
+    /// Reorder so the moved tracks sit together before the track now at `index`.
+    pub fn move_in_playlist(&mut self, playlist_id: &str, content_ids: &[String], index: usize) -> Result<()> {
+        self.require_normal_playlist(playlist_id)?;
+        let songs: Vec<(String, String)> = {
+            let mut stmt = self.tx.prepare(
+                "SELECT ID, ContentID FROM djmdSongPlaylist WHERE PlaylistID = ?1 AND rb_local_deleted = 0 \
+                 ORDER BY TrackNo, ID",
+            )?;
+            let rows = stmt.query_map([playlist_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let moving: BTreeSet<&String> = content_ids.iter().collect();
+        let index = index.min(songs.len());
+        let before = songs[..index].iter().filter(|(_, c)| !moving.contains(c)).count();
+        let (picked, rest): (Vec<_>, Vec<_>) = songs.iter().cloned().partition(|(_, c)| moving.contains(c));
+        let order: Vec<_> = rest[..before].iter().chain(&picked).chain(&rest[before..]).cloned().collect();
+        if order == songs {
+            return Ok(());
+        }
+        for (number, (song_id, _)) in order.iter().enumerate() {
+            let wanted = i64::try_from(number + 1).unwrap_or(i64::MAX);
+            let was = songs.iter().position(|(s, _)| s == song_id).map_or(0, |p| p + 1);
+            if was != number + 1 {
+                self.tx.execute("UPDATE djmdSongPlaylist SET TrackNo = ?1 WHERE ID = ?2", params![wanted, song_id])?;
+                self.stamp("djmdSongPlaylist", song_id)?;
+            }
+        }
+        self.stamp("djmdPlaylist", playlist_id)
+    }
+
+    /// A new playlist or folder at the end of `parent` (the top level when `None`). Returns its id.
+    pub fn create_playlist(
+        &mut self,
+        name: &str,
+        parent: Option<&str>,
+        folder: bool,
+        content_ids: &[String],
+    ) -> Result<String> {
+        let parent_id = parent.filter(|p| !p.is_empty()).unwrap_or("root");
+        if parent_id != "root" {
+            let attribute = self.tx.query_row(
+                "SELECT Attribute FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+                [parent_id],
+                |row| row.get::<_, Option<i64>>(0),
+            );
+            if !matches!(attribute, Ok(Some(1))) {
+                return Err(Error::Refused("the parent does not exist or is not a folder".into()));
+            }
+        }
+        let siblings: i64 = self.tx.query_row(
+            "SELECT count(*) FROM djmdPlaylist WHERE ParentID = ?1 AND rb_local_deleted = 0",
+            [parent_id],
+            |row| row.get(0),
+        )?;
+        let id = unused_id(&self.tx, "djmdPlaylist")?;
+        let attribute = i64::from(folder);
+        self.tx.execute(
+            &format!(
+                "INSERT INTO djmdPlaylist (ID, Seq, Name, Attribute, ParentID, UUID, rb_data_status, rb_local_data_status, \
+                 rb_local_deleted, rb_local_synced, usn, rb_local_usn, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 0, 0, 0, NULL, ?7, {NOW}, {NOW})"
+            ),
+            params![id, siblings + 1, name, attribute, parent_id, Uuid::new_v4().to_string(), self.usn],
+        )?;
+        self.touched = true;
+        self.xml.push(XmlOp::Add { id: id.clone(), parent: parent_id.to_owned(), attribute });
+        if !folder && !content_ids.is_empty() {
+            self.add_to_playlist(&id, content_ids)?;
+        }
+        Ok(id)
+    }
+
+    pub fn rename_playlist(&mut self, playlist_id: &str, name: &str) -> Result<()> {
+        if playlist_id == HIDDEN_PLAYLIST {
+            return Err(Error::NotFound(format!("playlist {playlist_id}")));
+        }
+        let current = self.tx.query_row(
+            "SELECT Name FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+            [playlist_id],
+            |row| row.get::<_, Option<String>>(0),
+        );
+        match current {
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Err(Error::NotFound(format!("playlist {playlist_id}"))),
+            Err(e) => return Err(e.into()),
+            Ok(current) if current.as_deref() == Some(name) => return Ok(()),
+            Ok(_) => {}
+        }
+        self.tx.execute("UPDATE djmdPlaylist SET Name = ?1 WHERE ID = ?2", params![name, playlist_id])?;
+        self.stamp("djmdPlaylist", playlist_id)
+    }
+
+    /// Delete a playlist, or a folder with everything inside it, and close the gap among its siblings.
+    pub fn delete_playlist(&mut self, playlist_id: &str) -> Result<()> {
+        if playlist_id == HIDDEN_PLAYLIST {
+            return Err(Error::NotFound(format!("playlist {playlist_id}")));
+        }
+        let (seq, parent): (Option<i64>, Option<String>) = match self.tx.query_row(
+            "SELECT Seq, ParentID FROM djmdPlaylist WHERE ID = ?1 AND rb_local_deleted = 0",
+            [playlist_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ) {
+            Ok(row) => row,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Err(Error::NotFound(format!("playlist {playlist_id}"))),
+            Err(e) => return Err(e.into()),
+        };
+        let mut doomed = vec![playlist_id.to_owned()];
+        let mut at = 0;
+        while at < doomed.len() {
+            let mut stmt = self.tx.prepare("SELECT ID FROM djmdPlaylist WHERE ParentID = ?1")?;
+            let children: Vec<String> = stmt.query_map([&doomed[at]], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?;
+            doomed.extend(children);
+            at += 1;
+        }
+        for id in &doomed {
+            self.tx.execute("DELETE FROM djmdSongPlaylist WHERE PlaylistID = ?1", [id])?;
+            self.tx.execute("DELETE FROM djmdPlaylist WHERE ID = ?1", [id])?;
+            self.xml.push(XmlOp::Remove(id.clone()));
+        }
+        self.touched = true;
+        if let (Some(seq), Some(parent)) = (seq, parent) {
+            let later: Vec<(String, i64)> = {
+                let mut stmt = self.tx.prepare(
+                    "SELECT ID, Seq FROM djmdPlaylist WHERE ParentID = ?1 AND Seq > ?2 AND rb_local_deleted = 0 ORDER BY Seq",
+                )?;
+                let rows = stmt.query_map(params![parent, seq], |row| Ok((row.get(0)?, row.get(1)?)))?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            for (id, was) in later {
+                self.tx.execute("UPDATE djmdPlaylist SET Seq = ?1 WHERE ID = ?2", params![was - 1, id])?;
+                self.stamp("djmdPlaylist", &id)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn require_tag(&self, tag_id: &str) -> Result<()> {
+        match self.tx.query_row(
+            "SELECT Attribute FROM djmdMyTag WHERE ID = ?1 AND rb_local_deleted = 0",
+            [tag_id],
+            |row| row.get::<_, Option<i64>>(0),
+        ) {
+            Ok(Some(1)) => Err(Error::Refused("pick a tag rather than a tag folder".into())),
+            Ok(_) => Ok(()),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Err(Error::NotFound(format!("tag {tag_id}"))),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Give tracks a My Tag they do not already have. Returns how many were tagged.
+    pub fn add_tag(&mut self, tag_id: &str, content_ids: &[String]) -> Result<usize> {
+        self.require_tag(tag_id)?;
+        let tagged: BTreeSet<String> = {
+            let mut stmt = self.tx.prepare("SELECT ContentID FROM djmdSongMyTag WHERE MyTagID = ?1")?;
+            let rows = stmt.query_map([tag_id], |row| row.get(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let mut next = i64::try_from(tagged.len()).unwrap_or(0);
+        let mut added = 0;
+        let mut seen = BTreeSet::new();
+        for id in content_ids {
+            if tagged.contains(id) || !seen.insert(id) {
+                continue;
+            }
+            if self.content_state(id)? != Some(false) {
+                return Err(Error::NotFound(format!("live track {id}")));
+            }
+            next += 1;
+            self.tx.execute(
+                &format!(
+                    "INSERT INTO djmdSongMyTag (ID, MyTagID, ContentID, TrackNo, UUID, rb_data_status, rb_local_data_status, \
+                     rb_local_deleted, rb_local_synced, usn, rb_local_usn, created_at, updated_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 0, 0, NULL, ?6, {NOW}, {NOW})"
+                ),
+                params![Uuid::new_v4().to_string(), tag_id, id, next, Uuid::new_v4().to_string(), self.usn],
+            )?;
+            self.touched = true;
+            added += 1;
+        }
+        Ok(added)
+    }
+
+    pub fn remove_tag(&mut self, tag_id: &str, content_ids: &[String]) -> Result<usize> {
+        self.require_tag(tag_id)?;
+        let mut removed = 0;
+        for id in content_ids {
+            removed +=
+                self.tx.execute("DELETE FROM djmdSongMyTag WHERE MyTagID = ?1 AND ContentID = ?2", params![tag_id, id])?;
+        }
+        if removed > 0 {
+            self.touched = true;
         }
         Ok(removed)
     }

@@ -8,6 +8,7 @@ pub mod fixture;
 pub mod live;
 pub mod read;
 pub mod write;
+mod xml;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -169,7 +170,7 @@ impl Library {
                 return Err(Error::Refused("ES_DB_TEST is set; the installed library is never written in tests".into()));
             }
         }
-        write::run(&mut self.conn, edit)
+        write::run(&mut self.conn, &self.path.with_file_name("masterPlaylists6.xml"), edit)
     }
 }
 
