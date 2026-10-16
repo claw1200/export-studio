@@ -44,16 +44,21 @@ fn info(state: &State) -> String {
     .to_string()
 }
 
-/// Run one edit against the live database, then re-read the snapshot so later reads see it.
-fn edit<T>(state: &mut State, change: impl FnOnce(&mut Tx<'_>) -> es_db::Result<T>) -> napi::Result<T> {
+/// Run something against the live database, then re-read the snapshot so later reads see it.
+fn with_live<T>(state: &mut State, work: impl FnOnce(&mut Library) -> napi::Result<T>) -> napi::Result<T> {
     if !state.writable {
         return Err(failure("Unlock editing to make changes to the library"));
     }
     let mut live = Library::open_live(&state.source, Guard::RefuseWhileRunning).map_err(failure)?;
-    let out = live.write(change).map_err(failure)?;
+    let out = work(&mut live)?;
     drop(live);
     state.lib = Library::open_snapshot(&state.source).map_err(failure)?;
     Ok(out)
+}
+
+/// Run one edit in a single transaction.
+fn edit<T>(state: &mut State, change: impl FnOnce(&mut Tx<'_>) -> es_db::Result<T>) -> napi::Result<T> {
+    with_live(state, |live| live.write(change).map_err(failure))
 }
 
 fn track_ids(state: &State, playlist: &str) -> napi::Result<String> {
@@ -158,6 +163,7 @@ enum Op {
     CueDelete(String, String),
     CueSetColor(String, String, Option<i64>),
     TrackUpdate(Vec<String>, String),
+    TrackImport { paths: Vec<String>, playlist: Option<String>, artwork: bool },
     RemoveTracks(Vec<String>),
     PlaylistAdd(String, Vec<String>),
     PlaylistRemove(String, Vec<String>),
@@ -306,6 +312,24 @@ impl Run {
                 }
                 Ok(format!(r#"{{"tracks":{},"tagErrors":[]}}"#, tracks_of(state, &unique)?))
             }
+            Op::TrackImport { paths, playlist, artwork } => {
+                let share = state.lib.share_dir();
+                let options = es_engine::import::Options { artwork: *artwork, playlist: playlist.clone() };
+                let outcome = with_live(state, |live| es_engine::import::import_files(live, &share, paths, &options).map_err(failure))?;
+                let failed: Vec<_> = outcome.failed.iter().map(|f| json!({ "path": f.path, "error": f.error })).collect();
+                let playlist_ids = match playlist {
+                    Some(id) => serde_json::from_str(&track_ids(state, id)?).map_err(failure)?,
+                    None => serde_json::Value::Null,
+                };
+                Ok(format!(
+                    r#"{{"tracks":{},"ids":{},"skipped":{},"failed":{},"playlist":{}}}"#,
+                    if outcome.added.is_empty() { "[]".to_owned() } else { tracks_of(state, &outcome.added)? },
+                    json_of(&outcome.ids)?,
+                    outcome.skipped,
+                    json_of(&failed)?,
+                    playlist_ids
+                ))
+            }
             Op::Open(_) | Op::Reload => unreachable!("handled above"),
         }
     }
@@ -431,6 +455,11 @@ impl RekordboxLibrary {
     #[napi(ts_return_type = "Promise<string>")]
     pub fn track_update(&self, ids: Vec<String>, fields: String) -> AsyncTask<Run> {
         self.run(Op::TrackUpdate(ids, fields))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn track_import(&self, paths: Vec<String>, playlist_id: Option<String>, artwork: bool) -> AsyncTask<Run> {
+        self.run(Op::TrackImport { paths, playlist: playlist_id, artwork })
     }
 
     #[napi(ts_return_type = "Promise<string>")]

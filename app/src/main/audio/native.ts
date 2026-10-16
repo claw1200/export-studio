@@ -100,6 +100,7 @@ export interface NativeLibrary {
   cueDelete(id: string, cueId: string): Promise<string>
   cueSetColor(id: string, cueId: string, colorIndex: number | null): Promise<string>
   trackUpdate(ids: string[], fields: string): Promise<string>
+  trackImport(paths: string[], playlistId: string | null, artwork: boolean): Promise<string>
   setWritable(on: boolean): Promise<string>
   removeTracks(ids: string[]): Promise<string>
   playlistAdd(id: string, trackIds: string[]): Promise<string>

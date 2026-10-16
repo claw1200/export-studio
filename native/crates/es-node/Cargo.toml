@@ -13,6 +13,7 @@ es-wave.workspace = true
 es-analyse.workspace = true
 es-db.workspace = true
 es-index.workspace = true
+es-engine.workspace = true
 es-anlz.workspace = true
 napi.workspace = true
 napi-derive.workspace = true

@@ -223,6 +223,14 @@ impl Library {
         Ok(out)
     }
 
+    /// Ids and removed flags of every row stored at `path`.
+    pub fn tracks_at(&self, path: &str) -> Result<Vec<(String, bool)>> {
+        let mut stmt =
+            self.conn().prepare("SELECT ID, rb_local_deleted FROM djmdContent WHERE FolderPath = ?1 ORDER BY ID")?;
+        let rows = stmt.query_map([path], |row| Ok((row.get::<_, String>(0)?, number(row, 1)? != 0)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// Where a track's files are, for a track in the library or removed from it. `None` for an unknown id.
     pub fn track_files(&self, id: &str) -> Result<Option<TrackFiles>> {
         let row = self.conn().query_row(

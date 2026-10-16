@@ -30,6 +30,8 @@ const READS: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> 
 const WRITES: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> = {
   'track.removeFromCollection': (lib, p) => lib.removeTracks(list(p?.ids)),
   'track.update': (lib, p) => lib.trackUpdate(list(p?.ids), JSON.stringify(p?.fields ?? {})),
+  'track.import': (lib, p) =>
+    lib.trackImport(list(p?.paths), p?.playlistId == null ? null : text(p.playlistId), p?.artwork !== false),
   'cue.setHot': (lib, p) => lib.cueSetHot(text(p?.id), Number(p?.kind), Number(p?.ms)),
   'cue.addMemory': (lib, p) => lib.cueAddMemory(text(p?.id), Number(p?.ms)),
   'cue.delete': (lib, p) => lib.cueDelete(text(p?.id), text(p?.cueId)),

@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rusqlite::types::Value;
 use rusqlite::{params, Connection, Transaction, TransactionBehavior};
 use uuid::Uuid;
 
@@ -13,6 +14,7 @@ use crate::xml::{self, XmlOp};
 use crate::{Error, Result};
 
 const NOW: &str = "strftime('%Y-%m-%d %H:%M:%f +00:00','now')";
+const TODAY: &str = "strftime('%Y-%m-%d','now','localtime')";
 
 /// Hot cue slots; 4 is a loop, not a slot.
 const HOT_SLOTS: [i64; 8] = [1, 2, 3, 5, 6, 7, 8, 9];
@@ -73,6 +75,39 @@ pub struct TrackEdit {
     pub label: Option<String>,
 }
 
+/// Stream facts read from an audio file; zero or missing values are left unset.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Stream {
+    pub length: Option<i64>,
+    pub bit_rate: Option<i64>,
+    pub sample_rate: Option<i64>,
+    pub bit_depth: Option<i64>,
+}
+
+/// What a file looks like on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileFacts {
+    pub name: String,
+    pub size: i64,
+    /// rekordbox's file type code: 1 MP3, 4 M4A, 5 FLAC, 11 WAV, 12 AIFF.
+    pub file_type: i64,
+}
+
+/// A track to add to the collection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewTrack {
+    pub uuid: String,
+    /// The stored path, with forward slashes.
+    pub path: String,
+    pub file_name: String,
+    pub file_size: i64,
+    pub file_type: i64,
+    pub stream: Stream,
+    /// Tags to set after the row exists.
+    pub edit: TrackEdit,
+    pub image_path: Option<String>,
+}
+
 /// Artist-like columns share the artist table.
 const NAMED: [(&str, &str); 7] = [
     ("ArtistID", "djmdArtist"),
@@ -127,12 +162,18 @@ pub(crate) fn run<T>(conn: &mut Connection, xml_path: &Path, edit: impl FnOnce(&
 }
 
 fn unused_id(tx: &Transaction<'_>, table: &str) -> Result<String> {
+    unused_value(tx, table, "ID")
+}
+
+/// A random 28-bit number no row of `table` holds in `column`.
+fn unused_value(tx: &Transaction<'_>, table: &str, column: &str) -> Result<String> {
     for _ in 0..1000 {
         let id = i64::try_from(Uuid::new_v4().as_u128() >> 100).unwrap_or(0);
         if id < 100 {
             continue;
         }
-        let used: i64 = tx.query_row(&format!("SELECT count(*) FROM {table} WHERE ID = ?1"), [id.to_string()], |r| r.get(0))?;
+        let used: i64 =
+            tx.query_row(&format!("SELECT count(*) FROM {table} WHERE {column} = ?1"), [id.to_string()], |r| r.get(0))?;
         if used == 0 {
             return Ok(id.to_string());
         }
@@ -497,51 +538,137 @@ impl Tx<'_> {
 
     /// Edit fields of live tracks. Artists, albums, genres and labels are found by name and added when new.
     pub fn update_tracks(&mut self, ids: &[String], edit: &TrackEdit) -> Result<()> {
-        use rusqlite::types::Value;
-        let text = |s: &str| if s.is_empty() { Value::Null } else { Value::Text(s.to_owned()) };
-        let named = [
-            &edit.artist,
-            &edit.remixer,
-            &edit.original_artist,
-            &edit.composer,
-            &edit.album,
-            &edit.genre,
-            &edit.label,
-        ];
-        let mut resolved: Vec<(&str, Value)> = Vec::new();
-        for ((column, table), name) in NAMED.iter().zip(named) {
-            if let Some(name) = name {
-                resolved.push((column, self.named_id(table, name)?.map_or(Value::Null, Value::Text)));
-            }
-        }
+        let resolved = self.resolve_names(edit)?;
         for id in ids {
             if self.content_state(id)? != Some(false) {
                 return Err(Error::NotFound(format!("live track {id}")));
             }
-            let mut changed = false;
-            if let Some(title) = &edit.title {
-                changed |= self.set_content(id, "Title", Value::Text(title.clone()))?;
-            }
-            if let Some(comment) = &edit.comment {
-                changed |= self.set_content(id, "Commnt", text(comment))?;
-            }
-            for (column, value) in [("ReleaseYear", edit.year), ("TrackNo", edit.track_no), ("Rating", edit.rating)] {
-                if let Some(value) = value {
-                    changed |= self.set_content(id, column, Value::Integer(value))?;
-                }
-            }
-            if let Some(color) = edit.color {
-                let value = if color == 0 { Value::Null } else { Value::Text(color.to_string()) };
-                changed |= self.set_content(id, "ColorID", value)?;
-            }
-            for (column, value) in &resolved {
-                changed |= self.set_content(id, column, value.clone())?;
-            }
-            if changed {
+            if self.apply_edit(id, edit, &resolved)? {
                 self.stamp("djmdContent", id)?;
             }
         }
         Ok(())
+    }
+
+    fn resolve_names(&mut self, edit: &TrackEdit) -> Result<Vec<(&'static str, Value)>> {
+        let named = [&edit.artist, &edit.remixer, &edit.original_artist, &edit.composer, &edit.album, &edit.genre, &edit.label];
+        let mut resolved = Vec::new();
+        for ((column, table), name) in NAMED.iter().zip(named) {
+            if let Some(name) = name {
+                resolved.push((*column, self.named_id(table, name)?.map_or(Value::Null, Value::Text)));
+            }
+        }
+        Ok(resolved)
+    }
+
+    /// Set the edited columns of one track; true when any value changed.
+    fn apply_edit(&mut self, id: &str, edit: &TrackEdit, resolved: &[(&str, Value)]) -> Result<bool> {
+        let text = |s: &str| if s.is_empty() { Value::Null } else { Value::Text(s.to_owned()) };
+        let mut changed = false;
+        if let Some(title) = &edit.title {
+            changed |= self.set_content(id, "Title", Value::Text(title.clone()))?;
+        }
+        if let Some(comment) = &edit.comment {
+            changed |= self.set_content(id, "Commnt", text(comment))?;
+        }
+        for (column, value) in [("ReleaseYear", edit.year), ("TrackNo", edit.track_no), ("Rating", edit.rating)] {
+            if let Some(value) = value {
+                changed |= self.set_content(id, column, Value::Integer(value))?;
+            }
+        }
+        if let Some(color) = edit.color {
+            let value = if color == 0 { Value::Null } else { Value::Text(color.to_string()) };
+            changed |= self.set_content(id, "ColorID", value)?;
+        }
+        for (column, value) in resolved {
+            changed |= self.set_content(id, column, value.clone())?;
+        }
+        Ok(changed)
+    }
+
+    /// Ids and removed flags of every row with this stored path.
+    pub fn tracks_at(&self, path: &str) -> Result<Vec<(String, bool)>> {
+        let mut stmt = self.tx.prepare("SELECT ID, rb_local_deleted FROM djmdContent WHERE FolderPath = ?1 ORDER BY ID")?;
+        let rows = stmt.query_map([path], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?.unwrap_or(0) != 0)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    fn first_or_none<T>(row: rusqlite::Result<T>) -> Result<Option<T>> {
+        match row {
+            Ok(found) => Ok(Some(found)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Add a track for an audio file. Returns its id.
+    pub fn create_track(&mut self, new: &NewTrack) -> Result<String> {
+        let id = unused_id(&self.tx, "djmdContent")?;
+        let file_id = unused_value(&self.tx, "djmdContent", "rb_file_id")?;
+        let (device, master) = Self::first_or_none(self.tx.query_row(
+            "SELECT ID, MasterDBID FROM djmdDevice LIMIT 1",
+            [],
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
+        ))?
+        .unwrap_or((None, None));
+        let link = Self::first_or_none(self.tx.query_row(
+            "SELECT rb_local_usn FROM djmdMenuItems WHERE Name = 'TRACK' LIMIT 1",
+            [],
+            |row| row.get::<_, Option<i64>>(0),
+        ))?
+        .flatten();
+        self.tx.execute(
+            &format!(
+                "INSERT INTO djmdContent (ID, UUID, ContentLink, DateCreated, DeviceID, FileNameL, FileSize, FileType, \
+                 FolderPath, HotCueAutoLoad, MasterDBID, MasterSongID, StockDate, rb_file_id, ImagePath, \
+                 Length, BitRate, SampleRate, BitDepth, rb_data_status, rb_local_data_status, rb_local_deleted, \
+                 rb_local_synced, usn, rb_local_usn, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, {TODAY}, ?4, ?5, ?6, ?7, ?8, 'on', ?9, ?1, {TODAY}, ?10, ?11, ?12, ?13, ?14, ?15, \
+                 0, 0, 0, 0, NULL, ?16, {NOW}, {NOW})"
+            ),
+            params![
+                id,
+                new.uuid,
+                link,
+                device,
+                new.file_name,
+                new.file_size,
+                new.file_type,
+                new.path,
+                master,
+                file_id,
+                new.image_path,
+                new.stream.length,
+                new.stream.bit_rate,
+                new.stream.sample_rate,
+                new.stream.bit_depth,
+                self.usn
+            ],
+        )?;
+        self.touched = true;
+        let resolved = self.resolve_names(&new.edit)?;
+        self.apply_edit(&id, &new.edit, &resolved)?;
+        Ok(id)
+    }
+
+    /// Bring a removed track back as the same row, re-reading its file facts. Its tags are not touched.
+    pub fn revive_track(&mut self, id: &str, file: &FileFacts, stream: &Stream) -> Result<()> {
+        self.restore_track(id)?;
+        self.set_content(id, "FileNameL", Value::Text(file.name.clone()))?;
+        self.set_content(id, "FileSize", Value::Integer(file.size))?;
+        self.set_content(id, "FileType", Value::Integer(file.file_type))?;
+        for (column, value) in [
+            ("BitRate", stream.bit_rate),
+            ("SampleRate", stream.sample_rate),
+            ("BitDepth", stream.bit_depth),
+            ("Length", stream.length),
+        ] {
+            if let Some(value) = value.filter(|v| *v != 0) {
+                self.set_content(id, column, Value::Integer(value))?;
+            }
+        }
+        self.tx.execute(&format!("UPDATE djmdContent SET StockDate = {TODAY} WHERE ID = ?1"), [id])?;
+        self.stamp("djmdContent", id)
     }
 
     fn cue_context(&self, content_id: &str) -> Result<(Option<String>, i64)> {
