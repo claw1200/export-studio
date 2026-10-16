@@ -9,7 +9,7 @@ use es_device::paths::volume_path;
 use es_device::{Cue as DeviceCue, Device, LibraryKind, Playlist, Track};
 use serde::Serialize;
 
-use crate::detail::{Bands, Colour, Cue, Detail, Grid, Mono, Waveform};
+use crate::detail::{Bands, Colour, Cue, Detail, Grid, Mono, Preview, Waveform};
 use crate::{cue_counts, stored_file_type, Node, TrackRow};
 
 /// The key the interface uses for a track on a stick: `usb:<volume>:<id>`, the volume percent-encoded.
@@ -231,4 +231,26 @@ mod tests {
         assert_eq!(parse_track_key("tidal:track:1"), None);
         assert_eq!(parse_track_key("usb::5"), None);
     }
+}
+
+/// Previews for stick tracks; each key's stick is read once.
+pub fn previews(read: &mut dyn FnMut(&Path) -> Option<std::sync::Arc<Device>>, keys: &[String]) -> Vec<Preview> {
+    let mut seen: Vec<&String> = Vec::new();
+    let mut out = Vec::new();
+    for key in keys {
+        if seen.contains(&key) || seen.len() >= 80 {
+            continue;
+        }
+        seen.push(key);
+        let found = parse_track_key(key).and_then(|(volume, export_id)| {
+            let volume = std::path::PathBuf::from(volume);
+            let device = read(&volume)?;
+            let track = device.track(export_id)?;
+            let base = (!track.analysis.is_empty()).then(|| volume_path(&track.analysis, &volume).ok()).flatten();
+            let tags = |suffix: &str| base.as_ref().and_then(|b| Tags::read(&b.with_extension(suffix)).ok());
+            Some(Preview::build(key, device_cues(track, None), tags("EXT").as_ref(), tags("2EX").as_ref()))
+        });
+        out.push(found.unwrap_or_else(|| Preview::blank(key)));
+    }
+    out
 }

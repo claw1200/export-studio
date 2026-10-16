@@ -309,3 +309,75 @@ mod tests {
         assert_eq!(hot_cue_colors(&ext).get(&(2, 1500)).map(String::as_str), Some("#102030"));
     }
 }
+
+const OVERVIEW_COLUMNS: usize = 400;
+
+/// A short overview for a browser row: pooled three-band data and a pooled colour (or older mono) waveform.
+#[derive(Default)]
+pub struct Overview {
+    pub band_length: Option<usize>,
+    pub bands: Vec<u8>,
+    pub colour_length: Option<usize>,
+    pub heights: Vec<u8>,
+    pub colors: Vec<u8>,
+}
+
+fn window(index: usize, count: usize) -> (usize, usize) {
+    (index * count / OVERVIEW_COLUMNS, (index + 1) * count / OVERVIEW_COLUMNS)
+}
+
+fn pooled_bands(rows: &[u8]) -> Vec<u8> {
+    let count = rows.len() / 3;
+    if count <= OVERVIEW_COLUMNS {
+        return rows.to_vec();
+    }
+    let mut out = Vec::with_capacity(OVERVIEW_COLUMNS * 3);
+    for index in 0..OVERVIEW_COLUMNS {
+        let (start, end) = window(index, count);
+        for band in 0..3 {
+            out.push((start..end).map(|i| rows[i * 3 + band]).max().unwrap_or(0));
+        }
+    }
+    out
+}
+
+fn colour_rows(ext: &Tags) -> Option<(Vec<u8>, Vec<u8>)> {
+    if let Some(rgb) = rgb(ext) {
+        return Some((rgb.heights, rgb.colors));
+    }
+    let (body, count) = ext.entries("PWV3")?;
+    let count = count.min(body.len());
+    let mut heights = Vec::with_capacity(count);
+    let mut colors = Vec::with_capacity(count * 3);
+    for &b in &body[..count] {
+        heights.push(scale(u32::from(b & 31), 31));
+        let white = f32::from((b >> 5) & 7) / 7.0;
+        colors.extend([(40.0 + 180.0 * white).round_ties_even() as u8, (110.0 + 130.0 * white).round_ties_even() as u8, 255]);
+    }
+    Some((heights, colors))
+}
+
+#[must_use]
+pub fn overview(ext: Option<&Tags>, ex2: Option<&Tags>) -> Option<Overview> {
+    let mut out = Overview::default();
+    if let Some(found) = ex2.and_then(|t| bands(t, "PWV6").or_else(|| bands(t, "PWV7"))) {
+        out.bands = pooled_bands(&found.bands);
+        out.band_length = Some(out.bands.len() / 3);
+    }
+    if let Some((heights, colors)) = ext.and_then(colour_rows) {
+        let count = heights.len();
+        if count <= OVERVIEW_COLUMNS {
+            out.heights = heights;
+            out.colors = colors;
+        } else {
+            for index in 0..OVERVIEW_COLUMNS {
+                let (start, end) = window(index, count);
+                let peak = (start..end).fold(start, |best, i| if heights[i] > heights[best] { i } else { best });
+                out.heights.push(heights[peak]);
+                out.colors.extend_from_slice(&colors[peak * 3..peak * 3 + 3]);
+            }
+        }
+        out.colour_length = Some(out.heights.len());
+    }
+    (out.band_length.is_some() || out.colour_length.is_some()).then_some(out)
+}

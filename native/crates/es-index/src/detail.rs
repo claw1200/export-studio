@@ -141,3 +141,77 @@ pub fn track_detail(lib: &Library, share: &Path, id: &str) -> Result<Detail> {
         waveform,
     })
 }
+
+/// A short waveform for a browser row.
+#[derive(Debug, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Overview {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub band_length: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bands: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rgb_length: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heights: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub colors: Option<String>,
+}
+
+/// Cue stars and a short waveform for a row on screen.
+#[derive(Debug, Serialize)]
+pub struct Preview {
+    pub id: String,
+    pub memory: bool,
+    pub hot: bool,
+    pub phrase: bool,
+    pub cues: Vec<Cue>,
+    pub waveform: Option<Overview>,
+}
+
+impl Preview {
+    #[must_use]
+    pub fn blank(id: &str) -> Self {
+        Self { id: id.to_owned(), memory: false, hot: false, phrase: false, cues: Vec::new(), waveform: None }
+    }
+
+    /// `cues` unpainted; their colours come from `ext`.
+    #[must_use]
+    pub fn build(id: &str, mut cues: Vec<Cue>, ext: Option<&Tags>, ex2: Option<&Tags>) -> Self {
+        let colors = ext.map(decode::hot_cue_colors).unwrap_or_default();
+        for cue in &mut cues {
+            if cue.kind == "hot" {
+                cue.rgb = u32::try_from(cue.slot).ok().zip(u32::try_from(cue.start).ok()).and_then(|k| colors.get(&k).cloned());
+            }
+        }
+        cues.sort_by_key(|c| (c.kind != "hot", c.slot, c.start));
+        let hot = cues.iter().any(|c| (1..=9).contains(&c.slot) && c.slot != 4);
+        let memory = cues.iter().any(|c| c.slot == 0);
+        let waveform = decode::overview(ext, ex2).map(|o| Overview {
+            band_length: o.band_length,
+            bands: o.band_length.map(|_| b64(&o.bands)),
+            rgb_length: o.colour_length,
+            heights: o.colour_length.map(|_| b64(&o.heights)),
+            colors: o.colour_length.map(|_| b64(&o.colors)),
+        });
+        Self { id: id.to_owned(), memory, hot, phrase: ext.is_some_and(|e| e.first(es_anlz::PHRASE_TAG).is_some()), cues, waveform }
+    }
+}
+
+/// Previews for up to 80 distinct ids, in the order asked.
+pub fn previews(lib: &Library, share: &Path, ids: &[String]) -> Result<Vec<Preview>> {
+    let mut wanted: Vec<&String> = Vec::new();
+    for id in ids {
+        if !wanted.contains(&id) && wanted.len() < 80 {
+            wanted.push(id);
+        }
+    }
+    let mut out = Vec::new();
+    for id in wanted {
+        let Some(files) = lib.track_files(id)? else { continue };
+        let ext = tags(share, files.analysis_path.as_deref(), "EXT");
+        let ex2 = tags(share, files.analysis_path.as_deref(), "2EX");
+        out.push(Preview::build(id, cues(lib, id, None)?, ext.as_ref(), ex2.as_ref()));
+    }
+    Ok(out)
+}

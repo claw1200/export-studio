@@ -44,7 +44,7 @@ fn signature(volume: &Path) -> Signature {
 }
 
 impl Devices {
-    fn load(&self, volume: &Path) -> napi::Result<Option<Arc<Device>>> {
+    pub(crate) fn load(&self, volume: &Path) -> napi::Result<Option<Arc<Device>>> {
         let key = volume.to_string_lossy().into_owned();
         let now = signature(volume);
         let mut cache = self.0.lock().map_err(|_| failure("the device cache was poisoned"))?;

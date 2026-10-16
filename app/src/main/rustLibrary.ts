@@ -25,6 +25,7 @@ const READS: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> 
     }
     return lib.mediaResolve(text(p?.kind), text(p?.id), text(p?.size))
   },
+  'track.previews': (lib, p) => lib.trackPreviews(list(p?.ids)),
   'usb.list': (lib) => lib.usbList(),
   'usb.playlists': (lib, p) => lib.usbPlaylists(text(p?.volumeId)),
   'usb.libraries': (lib, p) => lib.usbLibraries(text(p?.volumeId)),

@@ -227,6 +227,7 @@ enum Op {
     PlaylistTracks(String),
     HistoryTracks(String),
     TrackDetail(String),
+    TrackPreviews(Vec<String>),
     MediaResolve { kind: String, id: String, size: String },
     CueSetHot(String, i64, i64),
     CueAddMemory(String, i64),
@@ -371,6 +372,20 @@ impl Run {
             Op::HistoryTracks(id) => json_of(&state.lib.history_track_ids(id).map_err(failure)?),
             Op::TrackDetail(id) => {
                 json_of(&es_index::detail::track_detail(&state.lib, &state.lib.share_dir(), id).map_err(failure)?)
+            }
+            Op::TrackPreviews(ids) => {
+                let (device, own): (Vec<String>, Vec<String>) = ids.iter().cloned().partition(|i| i.starts_with("usb:"));
+                let mut by_id: std::collections::HashMap<String, es_index::detail::Preview> = std::collections::HashMap::new();
+                for row in es_index::detail::previews(&state.lib, &state.lib.share_dir(), &own).map_err(failure)? {
+                    by_id.insert(row.id.clone(), row);
+                }
+                let devices = &self.core.devices;
+                for row in es_index::device::previews(&mut |volume| devices.load(volume).ok().flatten(), &device) {
+                    by_id.insert(row.id.clone(), row);
+                }
+                let mut seen = std::collections::HashSet::new();
+                let ordered: Vec<_> = ids.iter().filter(|i| seen.insert(i.as_str())).take(80).filter_map(|i| by_id.remove(i)).collect();
+                json_of(&ordered)
             }
             Op::MediaResolve { kind, id, size } => {
                 let found = es_index::media::resolve_media(&state.lib, &state.lib.share_dir(), kind, id, size).map_err(failure)?;
@@ -575,6 +590,11 @@ impl RekordboxLibrary {
     #[napi(ts_return_type = "Promise<string>")]
     pub fn track_detail(&self, id: String) -> AsyncTask<Run> {
         self.run(Op::TrackDetail(id))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn track_previews(&self, ids: Vec<String>) -> AsyncTask<Run> {
+        self.run(Op::TrackPreviews(ids))
     }
 
     #[napi(ts_return_type = "Promise<string>")]
