@@ -2,14 +2,17 @@ import { app } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { join, resolve } from 'path'
 import type { NativeLibrary, NativeModule } from './audio/native'
+import type { EngineCommandParams, EngineMethod } from '../preload/engine'
 
-type Params = Record<string, unknown> | undefined
+type CommandHandlers = {
+  [Method in EngineMethod]?: (lib: NativeLibrary, params: EngineCommandParams[Method]) => Promise<string>
+}
 
 const text = (value: unknown): string => String(value ?? '')
 const list = (value: unknown): string[] => (Array.isArray(value) ? value.map(String) : [])
 
 /** Calls that only read the library. */
-const READS: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> = {
+const READS: CommandHandlers = {
   'library.tracks': (lib) => lib.tracks(),
   'library.playlists': (lib) => lib.playlists(),
   'library.histories': (lib) => lib.histories(),
@@ -46,7 +49,7 @@ const READS: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> 
 }
 
 /** Calls that change the library, or other things on disk. */
-const WRITES: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> = {
+const WRITES: CommandHandlers = {
   'backup.create': (lib) => lib.backupCreate(),
   'backup.delete': (lib, p) => lib.backupDelete(text(p?.id)),
   'backup.restore': (lib, p) => lib.backupRestore(text(p?.id)),
@@ -99,9 +102,19 @@ const WRITES: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>>
     )
 }
 
-const LIFECYCLE: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> = {
+const LIFECYCLE: CommandHandlers = {
   'library.info': (lib) => lib.info(),
   'library.setWritable': (lib, p) => lib.setWritable(Boolean(p?.writable))
+}
+
+function isEngineMethod(method: string): method is EngineMethod {
+  return (
+    method === 'library.open' ||
+    method === 'library.reload' ||
+    Object.prototype.hasOwnProperty.call(READS, method) ||
+    Object.prototype.hasOwnProperty.call(WRITES, method) ||
+    Object.prototype.hasOwnProperty.call(LIFECYCLE, method)
+  )
 }
 
 const DAILY_CHECK_MS = 10 * 60 * 1000
@@ -233,11 +246,12 @@ export class Library {
     check()
   }
 
-  async call<T = unknown>(method: string, params?: unknown): Promise<T> {
-    const p = params as Params
+  async call<T = unknown>(method: EngineMethod, params?: EngineCommandParams[EngineMethod]): Promise<T> {
+    if (!isEngineMethod(method)) throw new LibraryError(`Unknown method: ${method}`)
     try {
       if (method === 'library.open') {
-        const info = await this.library().open(text(p?.dbPath) || null)
+        const openParams = params as EngineCommandParams['library.open']
+        const info = await this.library().open(text(openParams?.dbPath) || null)
         this.opened = true
         this.running = null
         this.notified = false
@@ -249,9 +263,10 @@ export class Library {
         this.emit('library.reloaded', {})
         return JSON.parse(info) as T
       }
-      const run = READS[method] ?? WRITES[method] ?? LIFECYCLE[method]
-      if (!run) throw new LibraryError(`Unknown method: ${method}`)
-      return JSON.parse(await run(this.library(), p)) as T
+      const handler = READS[method] ?? WRITES[method] ?? LIFECYCLE[method]
+      if (!handler) throw new LibraryError(`Unknown method: ${method}`)
+      const run = handler as (lib: NativeLibrary, params: unknown) => Promise<string>
+      return JSON.parse(await run(this.library(), params)) as T
     } catch (e) {
       if (e instanceof LibraryError) throw e
       throw new LibraryError((e as Error).message)
