@@ -1,0 +1,15 @@
+[package]
+name = "es-backup"
+description = "Zip backups of the rekordbox library: the database, playlist files and the share folder."
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde_json = "1"
+thiserror.workspace = true
+zip = { version = "9", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"

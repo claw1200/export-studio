@@ -4,7 +4,13 @@
   import { api } from '$lib/api'
   import { getApp } from '$lib/context'
   import { suspendModal } from '$lib/modal'
-  import type { UsbImportPreview, UsbImportResult } from '$lib/types'
+  import type { PlaylistPolicy, UsbImportPreview, UsbImportResult } from '$lib/types'
+
+  const POLICIES: { value: PlaylistPolicy; label: string; hint: string }[] = [
+    { value: 'skipExisting', label: 'Leave existing playlists alone', hint: 'Playlists the library already has keep their tracks.' },
+    { value: 'merge', label: 'Add to existing playlists', hint: 'Tracks from the device are added to playlists with the same name.' },
+    { value: 'createNew', label: 'Always create new playlists', hint: 'Every playlist on the device becomes a new one.' }
+  ]
 
   let { volumeId, onclose }: { volumeId: string; onclose: () => void } = $props()
 
@@ -13,6 +19,7 @@
   const volume = $derived(library.devices.find((item) => item.id === volumeId) ?? null)
 
   let folder = $state<string | null>(null)
+  let policy = $state<PlaylistPolicy>('skipExisting')
   let preview = $state.raw<UsbImportPreview | null>(null)
   let loading = $state(true)
   let error = $state<string | null>(null)
@@ -28,7 +35,7 @@
     loading = true
     error = null
     try {
-      const next = await api.usbImportPreview(volumeId, folder)
+      const next = await api.usbImportPreview(volumeId, folder, policy)
       if (current === token) preview = next
     } catch (reason) {
       if (current !== token) return
@@ -56,7 +63,7 @@
   async function submit(): Promise<void> {
     if (locked || loading || !importable) return
     error = null
-    const outcome = await library.importDevice(volumeId, folder)
+    const outcome = await library.importDevice(volumeId, folder, policy)
     if (!outcome) {
       error = library.syncError
       return
@@ -175,6 +182,26 @@
             {preview.layout}/ folders.
           </p>
         {/if}
+
+        <label class="mt-4 flex items-center gap-3 text-[12.5px] text-muted">
+          <span class="shrink-0">Playlists</span>
+          <select
+            bind:value={policy}
+            disabled={locked}
+            class="h-8 min-w-0 flex-1 rounded-md bg-raised px-2 text-[12.5px] text-fg disabled:opacity-40"
+            onchange={(e) => {
+              policy = e.currentTarget.value as PlaylistPolicy
+              void load()
+            }}
+          >
+            {#each POLICIES as option (option.value)}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+        </label>
+        <p class="mt-1.5 text-[11px] text-faint">
+          {POLICIES.find((option) => option.value === policy)?.hint}
+        </p>
 
         {#if loading}
           <p class="mt-4 flex items-center gap-2 text-[12.5px] text-muted">

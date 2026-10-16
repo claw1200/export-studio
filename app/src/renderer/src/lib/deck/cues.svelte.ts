@@ -30,6 +30,7 @@ export class CueEditor {
   private async write(write: (id: string) => Promise<Cue[]>): Promise<void> {
     if (this.grid.editing) return
     const id = this.session.track?.id
+    if (id?.startsWith('usb:')) return
     const cues = await this.session.edit(write, (detail, next) => ({ ...detail, cues: next }))
     if (id && cues) browserPreviews.noteCues(id, cues)
   }

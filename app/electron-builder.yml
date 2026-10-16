@@ -14,8 +14,6 @@ files:
 asarUnpack:
   - resources/**
 extraResources:
-  - from: ../engine/dist/exportstudio-engine
-    to: engine
   - from: resources/native/es-usb
     to: engine/es-usb
   - from: resources/native

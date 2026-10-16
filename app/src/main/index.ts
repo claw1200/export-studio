@@ -5,16 +5,19 @@ import icon from '../../resources/icon.png?asset'
 import macIcon from '../../resources/icon-mac.png?asset'
 import { AnalysisQueue } from './analysis'
 import { AudioBridge } from './audio/bridge'
-import { Engine } from './engine'
 import { buildMenu, registerFiles } from './files'
 import { handleMediaProtocol, registerMediaScheme } from './media'
+import { ffmpegBinary, Library, usbExport } from './library'
 import { flushSettings, loadSettings, registerSettings } from './settings'
+import type { EngineCallArgs } from '../preload/engine'
 
 const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'aac', 'mp4', 'flac', 'wav', 'aif', 'aiff', 'ogg', 'alac']
 
-const engine = new Engine()
-const audio = new AudioBridge(engine)
-const analysis = new AnalysisQueue(engine, () => audio.addon())
+process.env.EXPORTSTUDIO_USB_EXPORT ??= usbExport()
+process.env.EXPORTSTUDIO_FFMPEG ??= ffmpegBinary()
+const library = new Library(() => audio.addon())
+const audio = new AudioBridge(library)
+const analysis = new AnalysisQueue(library, () => audio.addon())
 registerMediaScheme()
 
 function createWindow(): BrowserWindow {
@@ -45,9 +48,10 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
 
-  const unsubscribe = engine.onEvent((event, data) => {
+  const forward = (event: string, data: unknown): void => {
     if (!win.isDestroyed()) win.webContents.send('engine:event', event, data)
-  })
+  }
+  const unsubscribe = library.onEvent(forward)
   win.on('closed', unsubscribe)
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -67,8 +71,8 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window, { zoom: true })
   })
 
-  engine.start().catch((err) => console.error('[engine] failed to start', err))
-  handleMediaProtocol(engine)
+  library.start()
+  handleMediaProtocol(library)
   audio.register()
   analysis.register()
   buildMenu()
@@ -76,9 +80,10 @@ app.whenReady().then(() => {
   loadSettings()
   registerSettings()
 
-  ipcMain.handle('engine:call', async (_e, method: string, params?: unknown) => {
+  ipcMain.handle('engine:call', async (_e, ...args: EngineCallArgs) => {
     try {
-      return { ok: true, result: await engine.call(method, params) }
+      const [method, params] = args
+      return { ok: true, result: await library.call(method, params) }
     } catch (err) {
       const e = err as Error & { type?: string }
       return { ok: false, error: { message: e.message, type: e.type ?? 'Error' } }
@@ -118,5 +123,5 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   flushSettings()
   audio.stop()
-  engine.stop()
+  library.stop()
 })

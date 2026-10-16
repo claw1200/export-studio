@@ -1,11 +1,12 @@
 import type { AnalysisJob, AnalysisProgress, MenuCommand } from './analysis'
 import type { AudioApi } from './audio'
+import type { EngineCallArgs } from './engine'
 
 export interface Api {
   platform: string
   /** The operating system's Music folder. */
   musicDirectory: string
-  call<T = unknown>(method: string, params?: unknown): Promise<T>
+  call<T = unknown>(...args: EngineCallArgs): Promise<T>
   onEvent(listener: (event: string, data: unknown) => void): () => void
   showItemInFolder(path: string): Promise<void>
   choosePath(kind: 'audio' | 'folder', defaultPath?: string): Promise<string | null>

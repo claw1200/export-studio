@@ -174,6 +174,10 @@
   }
 
   function edit(tracks: Track[]): void {
+    if (tracks.some((track) => track.id.startsWith('usb:'))) {
+      library.notify('Device tracks are read-only; sync to change them')
+      return
+    }
     whenCollectionWritable(tracks, 'Unlock editing to change track info', (rows) => {
       editing = rows
     })

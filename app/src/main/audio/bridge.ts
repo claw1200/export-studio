@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import type { AudioStatus, DeckCommand, DeckEvent, DeckTick, Tick, WaveAnalysis } from '../../preload/audio'
-import type { Engine } from '../engine'
+import type { Library } from '../library'
 import { loadNative, type NativeEngine, type NativeModule } from './native'
 
 /** The playing deck, and a second one that auditions a browser row without loading it. */
@@ -29,7 +29,7 @@ export class AudioBridge {
   /** The newest command applied, echoed in every tick. */
   private seq = 0
 
-  constructor(private library: Engine) {
+  constructor(private library: Library) {
     try {
       this.native = loadNative()
     } catch (err) {

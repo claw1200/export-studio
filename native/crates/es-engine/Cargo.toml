@@ -1,0 +1,24 @@
+[package]
+name = "es-engine"
+description = "What the app does with the library: use cases built from the storage crates."
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+es-db.workspace = true
+es-backup.workspace = true
+es-index.workspace = true
+es-tags.workspace = true
+es-device.workspace = true
+es-anlz.workspace = true
+unicode-normalization = "0.1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+thiserror.workspace = true
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+

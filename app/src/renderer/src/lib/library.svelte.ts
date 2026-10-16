@@ -21,6 +21,7 @@ import type {
   Track,
   TrackEdit,
   TreeItem,
+  PlaylistPolicy,
   UsbImportResult,
   View,
   Volume
@@ -736,6 +737,10 @@ export class Library {
   }
 
   async removeFromPlaylist(playlistId: string, ids: string[]): Promise<void> {
+    if (ids.some((id) => id.startsWith('usb:'))) {
+      this.notify('Device tracks are read-only; sync to change them')
+      return
+    }
     const result = await this.edit(() => api.removeFromPlaylist(playlistId, ids))
     if (result) {
       this.applyPlaylistIds(playlistId, result)
@@ -745,6 +750,10 @@ export class Library {
 
   /** Move tracks so they sit just before `beforeId`, or at the end when it is null. */
   async moveInPlaylist(playlistId: string, ids: string[], beforeId: string | null): Promise<void> {
+    if (ids.some((id) => id.startsWith('usb:'))) {
+      this.notify('Device tracks are read-only; sync to change them')
+      return
+    }
     if (!(this.source.type === 'playlist' && this.source.id === playlistId && this.sourceIds)) return
     const current = this.sourceIds
     const found = beforeId === null ? -1 : current.indexOf(beforeId)
@@ -759,6 +768,10 @@ export class Library {
   }
 
   async createPlaylist(parentId = 'root', folder = false, trackIds: string[] = []): Promise<string | null> {
+    if (trackIds.some((id) => id.startsWith('usb:'))) {
+      this.notify('Device tracks are read-only; sync to change them')
+      return null
+    }
     const name = folder ? 'New folder' : 'New playlist'
     const result = await this.edit(() => api.createPlaylist(name, parentId, folder, trackIds))
     if (!result) return null
@@ -786,6 +799,10 @@ export class Library {
   }
 
   async setTag(tagId: string, ids: string[], on: boolean): Promise<void> {
+    if (ids.some((id) => id.startsWith('usb:'))) {
+      this.notify('Device tracks are read-only; sync to change them')
+      return
+    }
     const result = await this.edit(() => (on ? api.addTag(tagId, ids) : api.removeTag(tagId, ids)))
     if (result) this.applyTracks(result)
   }
@@ -865,7 +882,11 @@ export class Library {
     }
   }
 
-  async importDevice(volumeId: string, folder: string | null = null): Promise<UsbImportResult | null> {
+  async importDevice(
+    volumeId: string,
+    folder: string | null = null,
+    policy: PlaylistPolicy = 'skipExisting'
+  ): Promise<UsbImportResult | null> {
     if (this.syncing) return null
     if (!this.writable) {
       this.syncError = 'Unlock editing to import tracks'
@@ -876,7 +897,7 @@ export class Library {
     this.syncError = null
     this.syncProgress = { phase: 'import' }
     try {
-      const result = await api.usbImport(volumeId, folder)
+      const result = await api.usbImport(volumeId, folder, policy)
       await this.refreshContents()
       return result
     } catch (e) {

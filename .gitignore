@@ -1,12 +1,5 @@
 .DS_Store
 
-# engine
-engine/.venv/
-engine/build/
-engine/dist/
-__pycache__/
-*.pyc
-
 # app
 app/node_modules/
 app/out/

@@ -707,7 +707,7 @@
         ondrop={rowsDrop}
       >
         <div class="absolute inset-x-0 top-0" style:transform="translateY({first * ROW}px)">
-          {#each rows as track, i (track.id)}
+          {#each rows as track, i (`${track.id}:${first + i}`)}
             {@const index = first + i}
             {@const selected = library.selection.has(track.id)}
             <div

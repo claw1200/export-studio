@@ -22,8 +22,13 @@
   const { library, player } = getApp()
   const track = $derived(library.selected)
   const loose = $derived(track?.collected === false)
-  const editable = $derived(library.writable && !loose)
-  const canEditSelection = $derived(library.writable && library.selectedTracks.some((item) => item.collected !== false))
+  const deviceTrack = $derived(track?.id.startsWith('usb:') ?? false)
+  const editable = $derived(library.writable && !loose && !deviceTrack)
+  const canEditSelection = $derived(
+    library.writable &&
+      library.selectedTracks.length > 0 &&
+      library.selectedTracks.every((item) => item.collected !== false && !item.id.startsWith('usb:'))
+  )
   const MAX_NUMBER = 9999
 
   const detailPromise = $derived(track && !loose ? loadDetail(track.id).then((d) => d.detail) : null)
@@ -72,7 +77,7 @@
   }
 
   const tags = $derived(track ? track.myTags.map((id) => library.tagNames.get(id)).filter(Boolean) : [])
-  const canRemoveCues = $derived(library.writable && !!player.detail && player.track?.id === track?.id)
+  const canRemoveCues = $derived(library.writable && !deviceTrack && !!player.detail && player.track?.id === track?.id)
 
   function removeCueLabel(cue: Cue): string {
     if (cue.kind === 'hot') return `Remove hot cue ${hotCueLetter(cue.slot)}`
@@ -87,7 +92,7 @@
       <button
         class="flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium text-accent hover:bg-accent-soft disabled:pointer-events-none disabled:opacity-40"
         disabled={!canEditSelection}
-        title={canEditSelection ? undefined : 'Unlock editing to change tracks'}
+        title={canEditSelection ? undefined : 'USB tracks are read-only; sync to change them'}
         onclick={() => onedit(library.selectedTracks.filter((item) => item.collected !== false))}
       >
         <Pencil class="size-3" />

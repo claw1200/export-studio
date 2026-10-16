@@ -242,7 +242,7 @@ impl Stretcher {
         end_of_stream: bool,
     ) -> Option<(f32, f32, u64)> {
         let rate = rate.max(MIN_TEMPO);
-        if !self.primed && !(pop && self.prime(feed, rate, end_of_stream)) {
+        if !(self.primed || pop && self.prime(feed, rate, end_of_stream)) {
             return None;
         }
         if self.out_read >= self.out_len {
