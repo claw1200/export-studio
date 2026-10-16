@@ -1,0 +1,11 @@
+[package]
+name = "es-anlz"
+description = "rekordbox analysis files (ANLZ .DAT, .EXT, .2EX): locating and reading their tags."
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+tempfile = "3"

@@ -8,6 +8,7 @@ import { AudioBridge } from './audio/bridge'
 import { Engine } from './engine'
 import { buildMenu, registerFiles } from './files'
 import { handleMediaProtocol, registerMediaScheme } from './media'
+import { RustReads } from './rustReads'
 import { flushSettings, loadSettings, registerSettings } from './settings'
 
 const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'aac', 'mp4', 'flac', 'wav', 'aif', 'aiff', 'ogg', 'alac']
@@ -15,6 +16,7 @@ const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'aac', 'mp4', 'flac', 'wav', 'aif', 'aif
 const engine = new Engine()
 const audio = new AudioBridge(engine)
 const analysis = new AnalysisQueue(engine, () => audio.addon())
+const rustReads = new RustReads(() => audio.addon())
 registerMediaScheme()
 
 function createWindow(): BrowserWindow {
@@ -78,7 +80,16 @@ app.whenReady().then(() => {
 
   ipcMain.handle('engine:call', async (_e, method: string, params?: unknown) => {
     try {
-      return { ok: true, result: await engine.call(method, params) }
+      if (rustReads.handles(method)) {
+        try {
+          return { ok: true, result: await rustReads.call(method, params as Record<string, unknown> | undefined) }
+        } catch (err) {
+          console.warn(`[rust-reads] ${method} fell back to the Python engine:`, (err as Error).message)
+        }
+      }
+      const result = await engine.call(method, params)
+      await rustReads.after(method, params as Record<string, unknown> | undefined)
+      return { ok: true, result }
     } catch (err) {
       const e = err as Error & { type?: string }
       return { ok: false, error: { message: e.message, type: e.type ?? 'Error' } }

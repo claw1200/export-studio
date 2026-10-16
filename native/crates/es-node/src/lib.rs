@@ -6,6 +6,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
+mod library;
+
 use es_deck::{DeckEvent, DeckSnapshot, Engine, EventSink};
 use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{

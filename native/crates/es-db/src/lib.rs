@@ -11,11 +11,12 @@ pub mod write;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::SystemTime;
 
 use rusqlite::Connection;
 use tempfile::TempDir;
 
-pub use read::{PlaylistKind, PlaylistNode, Track};
+pub use read::{HistoryNode, PlaylistKind, PlaylistNode, TagNode, Track};
 pub use write::Tx;
 
 #[derive(Debug, thiserror::Error)]
@@ -58,7 +59,27 @@ pub struct Library {
     path: PathBuf,
     mode: Mode,
     guard: Guard,
-    _snapshot: Option<TempDir>,
+    snapshot: Option<Snapshot>,
+}
+
+/// What a read-only copy was taken from, so a later change to the source can be noticed.
+struct Snapshot {
+    _dir: TempDir,
+    source: PathBuf,
+    signature: Vec<Option<(SystemTime, u64)>>,
+    taken: SystemTime,
+}
+
+fn signature(source: &Path) -> Vec<Option<(SystemTime, u64)>> {
+    let wal = {
+        let mut name = source.file_name().unwrap_or_default().to_os_string();
+        name.push("-wal");
+        source.with_file_name(name)
+    };
+    [source, wal.as_path()]
+        .iter()
+        .map(|p| std::fs::metadata(p).ok().and_then(|m| Some((m.modified().ok()?, m.len()))))
+        .collect()
 }
 
 impl Library {
@@ -88,7 +109,8 @@ impl Library {
         let path = dir.path().join(name);
         let conn = unlock(&path)?;
         conn.pragma_update(None, "query_only", true)?;
-        Ok(Self { conn, path, mode: Mode::Snapshot, guard: Guard::RefuseWhileRunning, _snapshot: Some(dir) })
+        let snapshot = Snapshot { _dir: dir, source: source.to_path_buf(), signature: signature(source), taken: SystemTime::now() };
+        Ok(Self { conn, path, mode: Mode::Snapshot, guard: Guard::RefuseWhileRunning, snapshot: Some(snapshot) })
     }
 
     pub fn open_live(path: &Path, guard: Guard) -> Result<Self> {
@@ -96,7 +118,28 @@ impl Library {
             return Err(Error::RekordboxRunning);
         }
         let conn = unlock(path)?;
-        Ok(Self { conn, path: path.to_path_buf(), mode: Mode::Live, guard, _snapshot: None })
+        Ok(Self { conn, path: path.to_path_buf(), mode: Mode::Live, guard, snapshot: None })
+    }
+
+    /// When the snapshot was taken, as seconds since the Unix epoch; 0 for a live handle.
+    #[must_use]
+    pub fn snapshot_time(&self) -> f64 {
+        self.snapshot
+            .as_ref()
+            .and_then(|s| s.taken.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map_or(0.0, |d| d.as_secs_f64())
+    }
+
+    /// Whether the library the snapshot was copied from has changed since.
+    #[must_use]
+    pub fn source_changed(&self) -> bool {
+        self.snapshot.as_ref().is_some_and(|s| signature(&s.source) != s.signature)
+    }
+
+    /// The folder holding analysis files and artwork.
+    #[must_use]
+    pub fn share_dir(&self) -> PathBuf {
+        self.snapshot.as_ref().map_or_else(|| self.path.clone(), |s| s.source.clone()).with_file_name("share")
     }
 
     #[must_use]

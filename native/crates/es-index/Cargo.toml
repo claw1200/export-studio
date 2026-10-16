@@ -1,0 +1,15 @@
+[package]
+name = "es-index"
+description = "The library as rows the interface shows: names resolved, files checked, counts consistent."
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+es-db.workspace = true
+es-anlz.workspace = true
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"
+serde_json = "1"

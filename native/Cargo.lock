@@ -448,6 +448,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "es-anlz"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "es-db"
 version = "0.1.0"
 dependencies = [
@@ -479,15 +486,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "es-index"
+version = "0.1.0"
+dependencies = [
+ "es-anlz",
+ "es-db",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "es-node"
 version = "0.1.0"
 dependencies = [
  "es-analyse",
+ "es-db",
  "es-deck",
+ "es-index",
  "es-wave",
  "napi",
  "napi-build",
  "napi-derive",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

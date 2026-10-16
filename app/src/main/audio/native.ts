@@ -81,8 +81,23 @@ export interface NativeTrackAnalysis {
   waveform: Uint8Array
 }
 
+export interface NativeLibrary {
+  /** Every call resolves to JSON text. */
+  open(path?: string | null): Promise<string>
+  reload(): Promise<string>
+  info(): Promise<string>
+  tracks(): Promise<string>
+  playlists(): Promise<string>
+  histories(): Promise<string>
+  myTags(): Promise<string>
+  playlistMembers(): Promise<string>
+  playlistTracks(id: string): Promise<string>
+  historyTracks(id: string): Promise<string>
+}
+
 export interface NativeModule {
   AudioEngine: new (decks: number, onEvent: (event: NativeDeckEvent) => void) => NativeEngine
+  RekordboxLibrary: new () => NativeLibrary
   analyse(path: string, bands: boolean, quality: number): Promise<NativeWave | null>
   analyseTrack(path: string, options: NativeTrackAnalysisOptions): Promise<NativeTrackAnalysis>
 }
