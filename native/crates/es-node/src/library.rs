@@ -76,29 +76,12 @@ fn track_ids(state: &State, playlist: &str) -> napi::Result<String> {
     json_of(&reads(state).playlist_tracks(playlist).map_err(failure)?)
 }
 
-fn playlists(state: &State) -> napi::Result<serde_json::Value> {
-    serde_json::to_value(reads(state).playlists().map_err(failure)?).map_err(failure)
-}
-
 fn tracks_of(state: &State, ids: &[String]) -> napi::Result<String> {
     json_of(&reads(state).tracks_by_id(ids).map_err(failure)?)
 }
 
 fn reads(state: &State) -> es_engine::library::LibraryRead<'_> {
     es_engine::library::LibraryRead::new(state.database())
-}
-
-fn cues_json(state: &State, id: &str) -> napi::Result<String> {
-    json_of(&reads(state).cues(id).map_err(failure)?)
-}
-
-fn clean_name(name: &str, folder: bool) -> String {
-    let name = name.trim();
-    if name.is_empty() {
-        (if folder { "New folder" } else { "New playlist" }).into()
-    } else {
-        name.into()
-    }
 }
 
 /// A whole number from what the interface sends: nothing, an empty string or false mean 0.
@@ -361,6 +344,32 @@ impl Run {
             }
             _ => {}
         }
+        match &self.op {
+            Op::CueSetHot(id, kind, ms) => return json_of(&service.cue_set_hot(id, *kind, *ms).map_err(failure)?),
+            Op::CueAddMemory(id, ms) => return json_of(&service.cue_add_memory(id, *ms).map_err(failure)?),
+            Op::CueDelete(id, cue_id) => return json_of(&service.cue_delete(id, cue_id).map_err(failure)?),
+            Op::CueSetColor(id, cue_id, color) => {
+                return json_of(&service.cue_set_color(id, cue_id, *color).map_err(failure)?);
+            }
+            Op::RemoveTracks(ids) => {
+                let removed = service.remove_tracks(ids).map_err(failure)?;
+                return json_of(&json!({ "removed": removed.ids, "playlists": removed.playlists }));
+            }
+            Op::PlaylistAdd(id, ids) => return json_of(&service.playlist_add(id, ids).map_err(failure)?),
+            Op::PlaylistRemove(id, ids) => return json_of(&service.playlist_remove(id, ids).map_err(failure)?),
+            Op::PlaylistMove(id, ids, index) => {
+                return json_of(&service.playlist_move(id, ids, *index as usize).map_err(failure)?);
+            }
+            Op::PlaylistCreate { name, parent, folder, ids } => {
+                let (id, playlists) = service.playlist_create(name, parent.as_deref(), *folder, ids).map_err(failure)?;
+                return json_of(&json!({ "id": id, "playlists": playlists }));
+            }
+            Op::PlaylistRename(id, name) => return json_of(&service.playlist_rename(id, name).map_err(failure)?),
+            Op::PlaylistDelete(id) => return json_of(&service.playlist_delete(id).map_err(failure)?),
+            Op::TagAdd(tag_id, ids) => return json_of(&service.tag_add(tag_id, ids).map_err(failure)?),
+            Op::TagRemove(tag_id, ids) => return json_of(&service.tag_remove(tag_id, ids).map_err(failure)?),
+            _ => {}
+        }
         let state = service.session_mut().ok_or_else(|| failure("Library not open"))?;
         match &self.op {
             Op::SetWritable(_) | Op::Info | Op::Tracks | Op::Playlists | Op::Histories | Op::MyTags | Op::PlaylistMembers
@@ -471,74 +480,19 @@ impl Run {
                 json_of(&rows.into_iter().next().unwrap_or(Value::Null))
             }
             Op::MediaResolve { .. } => unreachable!("handled above"),
-            Op::CueSetHot(id, kind, ms) => {
-                edit(state, |tx| tx.set_hot_cue(id, *kind, *ms))?;
-                cues_json(state, id)
-            }
-            Op::CueAddMemory(id, ms) => {
-                edit(state, |tx| tx.add_memory_cue(id, *ms))?;
-                cues_json(state, id)
-            }
-            Op::CueDelete(id, cue) => {
-                edit(state, |tx| tx.delete_cue(id, cue))?;
-                cues_json(state, id)
-            }
-            Op::CueSetColor(id, cue, color) => {
-                edit(state, |tx| tx.set_cue_color(id, cue, *color))?;
-                cues_json(state, id)
-            }
-            Op::RemoveTracks(ids) => {
-                let removed = edit(state, |tx| tx.remove_tracks(ids))?;
-                let share = state.database().share_dir();
-                for item in &removed {
-                    if let Some(path) = &item.analysis_path {
-                        if let Err(e) = es_anlz::discard(&es_anlz::files(&share, path)) {
-                            eprintln!("[es-db] could not delete analysis files for {}: {e}", item.id);
-                        }
-                    }
-                }
-                let mut ids: Vec<&str> = removed.iter().map(|r| r.id.as_str()).collect();
-                ids.sort_unstable();
-                Ok(json!({ "removed": ids, "playlists": playlists(state)? }).to_string())
-            }
-            Op::PlaylistAdd(id, ids) => {
-                edit(state, |tx| tx.add_to_playlist(id, ids))?;
-                track_ids(state, id)
-            }
-            Op::PlaylistRemove(id, ids) => {
-                edit(state, |tx| tx.remove_from_playlist(id, ids))?;
-                track_ids(state, id)
-            }
-            Op::PlaylistMove(id, ids, index) => {
-                edit(state, |tx| tx.move_in_playlist(id, ids, *index as usize))?;
-                track_ids(state, id)
-            }
-            Op::PlaylistCreate { name, parent, folder, ids } => {
-                let name = clean_name(name, *folder);
-                let parent = parent.as_deref().filter(|p| *p != "root");
-                let id = edit(state, |tx| tx.create_playlist(&name, parent, *folder, ids))?;
-                Ok(json!({ "id": id, "playlists": playlists(state)? }).to_string())
-            }
-            Op::PlaylistRename(id, name) => {
-                let name = name.trim();
-                if name.is_empty() {
-                    return Err(failure("A playlist needs a name"));
-                }
-                edit(state, |tx| tx.rename_playlist(id, name))?;
-                json_of(&playlists(state)?)
-            }
-            Op::PlaylistDelete(id) => {
-                edit(state, |tx| tx.delete_playlist(id))?;
-                json_of(&playlists(state)?)
-            }
-            Op::TagAdd(tag, ids) => {
-                edit(state, |tx| tx.add_tag(tag, ids))?;
-                tracks_of(state, ids)
-            }
-            Op::TagRemove(tag, ids) => {
-                edit(state, |tx| tx.remove_tag(tag, ids))?;
-                tracks_of(state, ids)
-            }
+            Op::CueSetHot(_, _, _)
+            | Op::CueAddMemory(_, _)
+            | Op::CueDelete(_, _)
+            | Op::CueSetColor(_, _, _)
+            | Op::RemoveTracks(_)
+            | Op::PlaylistAdd(_, _)
+            | Op::PlaylistRemove(_, _)
+            | Op::PlaylistMove(_, _, _)
+            | Op::PlaylistCreate { .. }
+            | Op::PlaylistRename(_, _)
+            | Op::PlaylistDelete(_)
+            | Op::TagAdd(_, _)
+            | Op::TagRemove(_, _) => unreachable!("handled above"),
             Op::TrackUpdate(ids, fields, write_tags) => {
                 let change = parse_edit(fields)?;
                 let mut unique = ids.clone();

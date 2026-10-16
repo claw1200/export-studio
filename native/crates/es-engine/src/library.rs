@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use es_backup::Backups;
-use es_db::{Guard, Library as Database};
+use es_db::{Guard, Library as Database, Tx};
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -41,6 +41,12 @@ pub struct LibraryInfo {
     pub rekordbox_running: bool,
     pub source_changed: bool,
     pub writable: bool,
+}
+
+#[derive(Debug)]
+pub struct RemovedTracks {
+    pub ids: Vec<String>,
+    pub playlists: Vec<es_index::Node>,
 }
 
 impl LibraryService {
@@ -180,6 +186,140 @@ impl LibraryService {
 
     pub fn find_missing(&self, ids: &[String], directory: &Path) -> Result<crate::relocate::Found> {
         self.read_model()?.find_missing(ids, directory)
+    }
+
+    fn edit<T>(&mut self, change: impl FnOnce(&mut Tx<'_>) -> es_db::Result<T>) -> Result<T> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        session.with_live(|database| Ok(database.write(change)?))
+    }
+
+    pub fn playlist_add(&mut self, id: &str, track_ids: &[String]) -> Result<Vec<String>> {
+        self.edit(|tx| tx.add_to_playlist(id, track_ids))?;
+        self.playlist_tracks(id)
+    }
+
+    pub fn playlist_remove(&mut self, id: &str, track_ids: &[String]) -> Result<Vec<String>> {
+        self.edit(|tx| tx.remove_from_playlist(id, track_ids))?;
+        self.playlist_tracks(id)
+    }
+
+    pub fn playlist_move(
+        &mut self,
+        id: &str,
+        track_ids: &[String],
+        index: usize,
+    ) -> Result<Vec<String>> {
+        self.edit(|tx| tx.move_in_playlist(id, track_ids, index))?;
+        self.playlist_tracks(id)
+    }
+
+    pub fn playlist_create(
+        &mut self,
+        name: &str,
+        parent: Option<&str>,
+        folder: bool,
+        track_ids: &[String],
+    ) -> Result<(String, Vec<es_index::Node>)> {
+        let fallback = if folder { "New folder" } else { "New playlist" };
+        let name = if name.trim().is_empty() {
+            fallback
+        } else {
+            name.trim()
+        };
+        let parent = parent.filter(|parent| *parent != "root");
+        let id = self.edit(|tx| tx.create_playlist(name, parent, folder, track_ids))?;
+        Ok((id, self.playlists()?))
+    }
+
+    pub fn playlist_rename(&mut self, id: &str, name: &str) -> Result<Vec<es_index::Node>> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(crate::Error::Other("A playlist needs a name".into()));
+        }
+        self.edit(|tx| tx.rename_playlist(id, name))?;
+        self.playlists()
+    }
+
+    pub fn playlist_delete(&mut self, id: &str) -> Result<Vec<es_index::Node>> {
+        self.edit(|tx| tx.delete_playlist(id))?;
+        self.playlists()
+    }
+
+    pub fn tag_add(
+        &mut self,
+        tag_id: &str,
+        track_ids: &[String],
+    ) -> Result<Vec<es_index::TrackRow>> {
+        self.edit(|tx| tx.add_tag(tag_id, track_ids))?;
+        self.tracks_by_id(track_ids)
+    }
+
+    pub fn tag_remove(
+        &mut self,
+        tag_id: &str,
+        track_ids: &[String],
+    ) -> Result<Vec<es_index::TrackRow>> {
+        self.edit(|tx| tx.remove_tag(tag_id, track_ids))?;
+        self.tracks_by_id(track_ids)
+    }
+
+    pub fn cue_set_hot(
+        &mut self,
+        id: &str,
+        kind: i64,
+        ms: i64,
+    ) -> Result<Vec<es_index::detail::Cue>> {
+        self.edit(|tx| tx.set_hot_cue(id, kind, ms))?;
+        self.cues(id)
+    }
+
+    pub fn cue_add_memory(&mut self, id: &str, ms: i64) -> Result<Vec<es_index::detail::Cue>> {
+        self.edit(|tx| tx.add_memory_cue(id, ms))?;
+        self.cues(id)
+    }
+
+    pub fn cue_delete(&mut self, id: &str, cue_id: &str) -> Result<Vec<es_index::detail::Cue>> {
+        self.edit(|tx| tx.delete_cue(id, cue_id))?;
+        self.cues(id)
+    }
+
+    pub fn cue_set_color(
+        &mut self,
+        id: &str,
+        cue_id: &str,
+        color: Option<i64>,
+    ) -> Result<Vec<es_index::detail::Cue>> {
+        self.edit(|tx| tx.set_cue_color(id, cue_id, color))?;
+        self.cues(id)
+    }
+
+    pub fn remove_tracks(&mut self, ids: &[String]) -> Result<RemovedTracks> {
+        let removed = self.edit(|tx| tx.remove_tracks(ids))?;
+        let share = self
+            .session
+            .as_ref()
+            .ok_or_else(|| crate::Error::Other("Library not open".into()))?
+            .database()
+            .share_dir();
+        for item in &removed {
+            if let Some(path) = &item.analysis_path {
+                if let Err(error) = es_anlz::discard(&es_anlz::files(&share, path)) {
+                    eprintln!(
+                        "[es-engine] could not delete analysis files for {}: {error}",
+                        item.id
+                    );
+                }
+            }
+        }
+        let mut ids: Vec<String> = removed.into_iter().map(|item| item.id).collect();
+        ids.sort_unstable();
+        Ok(RemovedTracks {
+            ids,
+            playlists: self.playlists()?,
+        })
     }
 
     fn backups(&self) -> &Backups {
