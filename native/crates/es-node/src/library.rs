@@ -7,15 +7,13 @@ use std::sync::{Arc, Mutex};
 
 use crate::usb::UsbOp;
 use es_db::{Library, TrackEdit};
-use es_engine::library::{LibraryService, LibrarySession, ServiceEvent};
+use es_engine::library::{LibraryService, ServiceEvent};
 use napi::bindgen_prelude::AsyncTask;
 use napi::threadsafe_function::{ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::{Env, JsFunction, Task};
 use napi_derive::napi;
 use serde::Serialize;
 use serde_json::{json, Value};
-
-pub(crate) type State = LibrarySession;
 
 type Events = ThreadsafeFunction<(String, String), ErrorStrategy::Fatal>;
 
@@ -48,6 +46,17 @@ impl Core {
             ServiceEvent::BackupProgress(data) => self.emit("backup.progress", &data),
             ServiceEvent::BackupChanged => self.emit("backup.changed", &json!({})),
             ServiceEvent::LibraryReloaded => self.emit("library.reloaded", &json!({})),
+            ServiceEvent::ConvertProgress { done, total, id } => {
+                let mut data = json!({ "done": done, "total": total });
+                if let Some(id) = id {
+                    data["id"] = json!(id);
+                }
+                self.emit("convert.progress", &data);
+            }
+            ServiceEvent::UsbImportProgress { done, total, name } => self.emit(
+                "usb.progress",
+                &json!({ "phase": "import", "done": done, "total": total, "name": name }),
+            ),
         }
     }
 }
@@ -58,21 +67,6 @@ pub(crate) fn failure(reason: impl std::fmt::Display) -> napi::Error {
 
 pub(crate) fn json_of(value: &impl Serialize) -> napi::Result<String> {
     serde_json::to_string(value).map_err(failure)
-}
-
-/// Run something against the live database, then re-read the snapshot so later reads see it.
-pub(crate) fn with_live<T>(state: &mut State, work: impl FnOnce(&mut Library) -> napi::Result<T>) -> napi::Result<T> {
-    state
-        .with_live(|live| work(live).map_err(|error| es_engine::Error::Other(error.to_string())))
-        .map_err(failure)
-}
-
-fn tracks_of(state: &State, ids: &[String]) -> napi::Result<String> {
-    json_of(&reads(state).tracks_by_id(ids).map_err(failure)?)
-}
-
-fn reads(state: &State) -> es_engine::library::LibraryRead<'_> {
-    es_engine::library::LibraryRead::new(state.database())
 }
 
 /// A whole number from what the interface sends: nothing, an empty string or false mean 0.
@@ -131,40 +125,6 @@ fn parse_edit(fields: &str) -> napi::Result<TrackEdit> {
         return Err(failure("A track needs a title"));
     }
     Ok(edit)
-}
-
-/// Header checks for a batch of collection tracks; a file whose size and mtime still match the caller's cache is not read again.
-fn inspect_tracks(state: &State, items: &str) -> napi::Result<String> {
-    use es_engine::inspect::{inspect_file, same_fingerprint};
-    let list: Vec<Value> = serde_json::from_str(items).map_err(|_| failure("tracks must be a list"))?;
-    let mut out = Vec::new();
-    for item in list.iter().take(80) {
-        let id = item.get("id").and_then(Value::as_str).filter(|i| !i.is_empty()).ok_or_else(|| failure("tracks must be a list of track ids"))?;
-        let files = state.database().track_files(id).map_err(failure)?.ok_or_else(|| failure(format!("Unknown track {id}")))?;
-        if !es_engine::relocate::is_local(&files.folder_path) {
-            out.push(json!({ "id": id, "size": 0, "mtime": null, "same": false, "issues": [], "audio": null }));
-            continue;
-        }
-        let path = std::path::Path::new(&files.folder_path);
-        if let (Some(size), Some(mtime)) = (item.get("size"), item.get("mtime")) {
-            let hinted = size.as_i64().or_else(|| size.as_str().and_then(|s| s.trim().parse().ok()));
-            let mtime = match mtime {
-                Value::Null => None,
-                Value::String(s) => Some(s.clone()),
-                other => Some(other.to_string()),
-            };
-            if let Some((size, mtime)) = same_fingerprint(path, hinted, mtime.as_deref()) {
-                out.push(json!({ "id": id, "size": size, "mtime": mtime, "same": true, "issues": [], "audio": null }));
-                continue;
-            }
-        }
-        let found = inspect_file(path);
-        let mut entry = serde_json::to_value(&found).map_err(failure)?;
-        entry["id"] = json!(id);
-        entry["same"] = json!(false);
-        out.push(entry);
-    }
-    json_of(&out)
 }
 
 enum Op {
@@ -248,7 +208,7 @@ impl Run {
                     .or_else(Library::installed_path)
                     .ok_or_else(|| failure("No rekordbox library found on this computer"))?;
                 let writable = service.session().is_some_and(|s| s.is_writable() && s.source() == source.as_path());
-                let backed_up = service.session().is_some_and(State::backed_up);
+                let backed_up = service.session().is_some_and(|session| session.backed_up());
                 service.open(source, writable, backed_up).map_err(failure)?;
                 return json_of(&service.info().map_err(failure)?);
             }
@@ -313,6 +273,33 @@ impl Run {
                     "scanned": found.scanned,
                 }));
             }
+            Op::TrackInspect(body) => {
+                let items: Vec<Value> = serde_json::from_str(body).map_err(|_| failure("tracks must be a list"))?;
+                let mut requests = Vec::new();
+                for item in items.iter().take(80) {
+                    let id = item
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .filter(|id| !id.is_empty())
+                        .ok_or_else(|| failure("tracks must be a list of track ids"))?;
+                    let has_cache = item.get("size").is_some() && item.get("mtime").is_some();
+                    let cached_size = item
+                        .get("size")
+                        .and_then(|size| size.as_i64().or_else(|| size.as_str().and_then(|value| value.trim().parse().ok())));
+                    let cached_mtime = item.get("mtime").and_then(|mtime| match mtime {
+                        Value::Null => None,
+                        Value::String(value) => Some(value.clone()),
+                        other => Some(other.to_string()),
+                    });
+                    requests.push(es_engine::library::InspectionRequest {
+                        id: id.to_owned(),
+                        cached_size,
+                        cached_mtime,
+                        has_cache,
+                    });
+                }
+                return json_of(&service.inspect_tracks(&requests).map_err(failure)?);
+            }
             Op::MediaResolve { kind, id, size } => {
                 return json_of(&service.resolve_media(kind, id, size).map_err(failure)?);
             }
@@ -322,6 +309,91 @@ impl Run {
             }
             Op::TrackImport { paths, playlist, artwork } => {
                 return json_of(&service.track_import(paths, playlist.clone(), *artwork).map_err(failure)?);
+            }
+            Op::TrackRelocate(body) => {
+                let parsed: serde_json::Map<String, Value> = serde_json::from_str(body).map_err(failure)?;
+                let moves: Vec<(String, String)> = parsed
+                    .into_iter()
+                    .map(|(id, path)| (id, path.as_str().unwrap_or_default().to_owned()))
+                    .collect();
+                return json_of(&service.track_relocate(&moves).map_err(failure)?);
+            }
+            Op::BeatgridSet(id, body) => {
+                let input: Value = serde_json::from_str(body).map_err(failure)?;
+                let numbers = |key: &str| -> napi::Result<Vec<f64>> {
+                    input
+                        .get(key)
+                        .and_then(Value::as_array)
+                        .map(|values| values.iter().map(|value| value.as_f64().unwrap_or(f64::NAN)).collect())
+                        .ok_or_else(|| failure(format!("{key} must be a list")))
+                };
+                let grid = es_engine::analysis::Grid {
+                    times: numbers("times")?.iter().map(|time| time.round_ties_even() as i64).collect(),
+                    beats: numbers("beats")?.iter().map(|beat| *beat as i64).collect(),
+                    bpms: numbers("bpms")?,
+                };
+                let cues: Vec<es_db::CueMove> = input
+                    .get("cues")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| {
+                                Some(es_db::CueMove {
+                                    id: item.get("id").map(|value| value.as_str().map_or_else(|| value.to_string(), str::to_owned))?,
+                                    start_ms: item.get("start")?.as_f64()?.round_ties_even() as i64,
+                                    end_ms: item.get("end").and_then(Value::as_f64).map(|end| end.round_ties_even() as i64),
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                return json_of(&service.beatgrid_set(id, &grid, &cues).map_err(failure)?);
+            }
+            Op::ApplyAnalysis(id, body) => {
+                use base64::Engine as _;
+                let input: Value = serde_json::from_str(body).map_err(failure)?;
+                let result = input.get("result").cloned().unwrap_or(Value::Null);
+                let options = input.get("options").cloned().unwrap_or(Value::Null);
+                let beats = result
+                    .get("beats")
+                    .and_then(Value::as_array)
+                    .map(|values| {
+                        values
+                            .iter()
+                            .map(|beat| {
+                                let at = |index: usize| beat.get(index).and_then(Value::as_i64).unwrap_or(0);
+                                (at(0) as u16, at(1) as u16, at(2) as u32)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let waveform = base64::engine::general_purpose::STANDARD
+                    .decode(result.get("waveform").and_then(Value::as_str).unwrap_or(""))
+                    .map_err(failure)?;
+                let key = result.get("key").filter(|value| !value.is_null()).map(|value| {
+                    (value.get("tonic").and_then(Value::as_i64).unwrap_or(0), value.get("minor").and_then(Value::as_bool).unwrap_or(false))
+                });
+                let analysis = es_engine::analysis::Analysis {
+                    beats,
+                    waveform,
+                    key,
+                    bpm: result.get("bpm").and_then(Value::as_f64).unwrap_or(0.0),
+                    duration: result.get("duration").and_then(Value::as_f64).unwrap_or(0.0),
+                };
+                let flag = |name: &str, default: bool| options.get(name).map_or(default, |value| value.as_bool().unwrap_or(false));
+                let chosen = es_engine::analysis::Options {
+                    overwrite: flag("overwrite", false),
+                    grid: flag("grid", true),
+                    key: flag("key", true),
+                };
+                return json_of(&service.track_apply_analysis(id, &analysis, chosen).map_err(failure)?);
+            }
+            Op::Convert { ids, preset, mode } => {
+                let mode = es_engine::convert::Mode::parse(mode).map_err(failure)?;
+                let preset = es_engine::convert::clean_preset(&serde_json::from_str(preset).map_err(failure)?).map_err(failure)?;
+                let emit = |event| self.core.emit_service_event(event);
+                return json_of(&service.track_convert(ids, &preset, mode, &emit).map_err(failure)?);
             }
             _ => {}
         }
@@ -351,141 +423,7 @@ impl Run {
             Op::TagRemove(tag_id, ids) => return json_of(&service.tag_remove(tag_id, ids).map_err(failure)?),
             _ => {}
         }
-        let state = service.session_mut().ok_or_else(|| failure("Library not open"))?;
-        match &self.op {
-            Op::SetWritable(_) | Op::Info | Op::Tracks | Op::Playlists | Op::Histories | Op::MyTags | Op::PlaylistMembers
-            | Op::PlaylistTracks(_) | Op::HistoryTracks(_) | Op::TrackDetail(_) | Op::TrackPreviews(_) => unreachable!("handled above"),
-            Op::TrackRelocate(moves) => {
-                let parsed: serde_json::Map<String, serde_json::Value> = serde_json::from_str(moves).map_err(failure)?;
-                let moves: Vec<(String, String)> =
-                    parsed.into_iter().map(|(id, path)| (id, path.as_str().unwrap_or_default().to_owned())).collect();
-                let share = state.database().share_dir();
-                let ids = with_live(state, |live| es_engine::relocate::relocate(live, &share, &moves).map_err(failure))?;
-                tracks_of(state, &ids)
-            }
-            Op::TrackFindMissing(_, _) => unreachable!("handled above"),
-            Op::TrackInspect(items) => inspect_tracks(state, items),
-            Op::FilesRead(_) => unreachable!("handled above"),
-            Op::BeatgridSet(id, body) => {
-                let input: Value = serde_json::from_str(body).map_err(failure)?;
-                let numbers = |key: &str| -> napi::Result<Vec<f64>> {
-                    input.get(key).and_then(Value::as_array).map(|a| a.iter().map(|v| v.as_f64().unwrap_or(f64::NAN)).collect()).ok_or_else(|| failure(format!("{key} must be a list")))
-                };
-                let grid = es_engine::analysis::Grid {
-                    times: numbers("times")?.iter().map(|t| t.round_ties_even() as i64).collect(),
-                    beats: numbers("beats")?.iter().map(|b| *b as i64).collect(),
-                    bpms: numbers("bpms")?,
-                };
-                let moves: Vec<es_db::CueMove> = input
-                    .get("cues")
-                    .and_then(Value::as_array)
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|m| {
-                                Some(es_db::CueMove {
-                                    id: m.get("id").map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_owned))?,
-                                    start_ms: m.get("start")?.as_f64()?.round_ties_even() as i64,
-                                    end_ms: m.get("end").and_then(Value::as_f64).map(|e| e.round_ties_even() as i64),
-                                })
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let share = state.database().share_dir();
-                let bpm = with_live(state, |live| es_engine::analysis::set_beatgrid(live, &share, id, &grid, &moves).map_err(failure))?;
-                let reads = reads(state);
-                json_of(&json!({
-                    "beatgrid": reads.beatgrid(id).map_err(failure)?,
-                    "cues": reads.cues(id).map_err(failure)?,
-                    "bpm": bpm,
-                }))
-            }
-            Op::Convert { ids, preset, mode } => {
-                let mode = es_engine::convert::Mode::parse(mode).map_err(failure)?;
-                let preset = es_engine::convert::clean_preset(&serde_json::from_str(preset).map_err(failure)?).map_err(failure)?;
-                let share = state.database().share_dir();
-                let core = &self.core;
-                let outcome = with_live(state, |live| {
-                    Ok(es_engine::convert::convert_tracks(live, &share, ids, &preset, mode, &|done, total, id| {
-                        let mut event = json!({ "done": done, "total": total });
-                        if let Some(id) = id {
-                            event["id"] = json!(id);
-                        }
-                        core.emit("convert.progress", &event);
-                    }))
-                })?;
-                let tracks = if outcome.ids.is_empty() { "[]".to_owned() } else { tracks_of(state, &outcome.ids)? };
-                Ok(format!(
-                    r#"{{"tracks":{},"ids":{},"originals":{},"failed":{}}}"#,
-                    tracks,
-                    json_of(&outcome.ids)?,
-                    json_of(&outcome.originals)?,
-                    json_of(&outcome.failed.iter().map(|(id, error)| json!({ "id": id, "error": error })).collect::<Vec<_>>())?
-                ))
-            }
-            Op::ApplyAnalysis(id, body) => {
-                use base64::Engine as _;
-                let input: Value = serde_json::from_str(body).map_err(failure)?;
-                let result = input.get("result").cloned().unwrap_or(Value::Null);
-                let options = input.get("options").cloned().unwrap_or(Value::Null);
-                let beats = result
-                    .get("beats")
-                    .and_then(Value::as_array)
-                    .map(|a| {
-                        a.iter()
-                            .map(|b| {
-                                let at = |i: usize| b.get(i).and_then(Value::as_i64).unwrap_or(0);
-                                (at(0) as u16, at(1) as u16, at(2) as u32)
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let waveform = base64::engine::general_purpose::STANDARD
-                    .decode(result.get("waveform").and_then(Value::as_str).unwrap_or(""))
-                    .map_err(failure)?;
-                let key = result.get("key").filter(|k| !k.is_null()).map(|k| {
-                    (k.get("tonic").and_then(Value::as_i64).unwrap_or(0), k.get("minor").and_then(Value::as_bool).unwrap_or(false))
-                });
-                let analysis = es_engine::analysis::Analysis {
-                    beats,
-                    waveform,
-                    key,
-                    bpm: result.get("bpm").and_then(Value::as_f64).unwrap_or(0.0),
-                    duration: result.get("duration").and_then(Value::as_f64).unwrap_or(0.0),
-                };
-                let flag = |name: &str, default: bool| options.get(name).map_or(default, |v| v.as_bool().unwrap_or(false));
-                let chosen = es_engine::analysis::Options { overwrite: flag("overwrite", false), grid: flag("grid", true), key: flag("key", true) };
-                let share = state.database().share_dir();
-                with_live(state, |live| es_engine::analysis::apply_analysis(live, &share, id, &analysis, chosen).map_err(failure))?;
-                let rows: Vec<Value> = serde_json::from_str(&tracks_of(state, std::slice::from_ref(id))?).map_err(failure)?;
-                json_of(&rows.into_iter().next().unwrap_or(Value::Null))
-            }
-            Op::MediaResolve { .. } => unreachable!("handled above"),
-            Op::CueSetHot(_, _, _)
-            | Op::CueAddMemory(_, _)
-            | Op::CueDelete(_, _)
-            | Op::CueSetColor(_, _, _)
-            | Op::RemoveTracks(_)
-            | Op::PlaylistAdd(_, _)
-            | Op::PlaylistRemove(_, _)
-            | Op::PlaylistMove(_, _, _)
-            | Op::PlaylistCreate { .. }
-            | Op::PlaylistRename(_, _)
-            | Op::PlaylistDelete(_)
-            | Op::TagAdd(_, _)
-            | Op::TagRemove(_, _) => unreachable!("handled above"),
-            Op::TrackUpdate(_, _, _) | Op::TrackImport { .. } => unreachable!("handled above"),
-            Op::Usb(_) => unreachable!("handled above"),
-            Op::Open(_)
-            | Op::Reload
-            | Op::BackupList
-            | Op::BackupCreate
-            | Op::BackupDelete(_)
-            | Op::BackupRestore(_)
-            | Op::BackupSettings
-            | Op::BackupSetSettings { .. }
-            | Op::DailyBackup => unreachable!("handled above"),
-        }
+        unreachable!("every operation is handled before the session fallback")
     }
 }
 

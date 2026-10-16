@@ -32,6 +32,16 @@ pub enum ServiceEvent {
     BackupProgress(Value),
     BackupChanged,
     LibraryReloaded,
+    ConvertProgress {
+        done: usize,
+        total: usize,
+        id: Option<String>,
+    },
+    UsbImportProgress {
+        done: usize,
+        total: usize,
+        name: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -70,6 +80,47 @@ pub struct TrackImportResult {
     pub skipped: usize,
     pub failed: Vec<TrackImportFailure>,
     pub playlist: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BeatgridResult {
+    pub beatgrid: Option<es_index::detail::Grid>,
+    pub cues: Vec<es_index::detail::Cue>,
+    pub bpm: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TrackConvertFailure {
+    pub id: String,
+    pub error: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TrackConvertResult {
+    pub tracks: Vec<es_index::TrackRow>,
+    pub ids: Vec<String>,
+    pub originals: Vec<String>,
+    pub failed: Vec<TrackConvertFailure>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InspectionRequest {
+    pub id: String,
+    pub cached_size: Option<i64>,
+    pub cached_mtime: Option<String>,
+    pub has_cache: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackInspection {
+    pub id: String,
+    pub size: u64,
+    pub mtime: Option<String>,
+    pub same: bool,
+    pub issues: Vec<crate::inspect::Issue>,
+    pub audio: Option<crate::inspect::Audio>,
 }
 
 fn tag_edit(change: &TrackEdit) -> es_tags::Edit {
@@ -227,6 +278,73 @@ impl LibraryService {
 
     pub fn find_missing(&self, ids: &[String], directory: &Path) -> Result<crate::relocate::Found> {
         self.read_model()?.find_missing(ids, directory)
+    }
+
+    pub fn playlist_selection(&self) -> Result<(Vec<String>, u64)> {
+        let database = self
+            .session
+            .as_ref()
+            .ok_or_else(|| crate::Error::Other("Library not open".into()))?
+            .database();
+        let ids = database
+            .playlists()?
+            .into_iter()
+            .map(|playlist| playlist.id)
+            .collect();
+        Ok((ids, u64::try_from(database.db_id()?).unwrap_or(0)))
+    }
+
+    pub fn inspect_tracks(&self, requests: &[InspectionRequest]) -> Result<Vec<TrackInspection>> {
+        let database = self
+            .session
+            .as_ref()
+            .ok_or_else(|| crate::Error::Other("Library not open".into()))?
+            .database();
+        let mut inspected = Vec::new();
+        for request in requests.iter().take(80) {
+            let files = database
+                .track_files(&request.id)?
+                .ok_or_else(|| crate::Error::Other(format!("Unknown track {}", request.id)))?;
+            if !crate::relocate::is_local(&files.folder_path) {
+                inspected.push(TrackInspection {
+                    id: request.id.clone(),
+                    size: 0,
+                    mtime: None,
+                    same: false,
+                    issues: Vec::new(),
+                    audio: None,
+                });
+                continue;
+            }
+            let path = Path::new(&files.folder_path);
+            if request.has_cache {
+                if let Some((size, mtime)) = crate::inspect::same_fingerprint(
+                    path,
+                    request.cached_size,
+                    request.cached_mtime.as_deref(),
+                ) {
+                    inspected.push(TrackInspection {
+                        id: request.id.clone(),
+                        size,
+                        mtime,
+                        same: true,
+                        issues: Vec::new(),
+                        audio: None,
+                    });
+                    continue;
+                }
+            }
+            let inspection = crate::inspect::inspect_file(path);
+            inspected.push(TrackInspection {
+                id: request.id.clone(),
+                size: inspection.size,
+                mtime: inspection.mtime,
+                same: false,
+                issues: inspection.issues,
+                audio: inspection.audio,
+            });
+        }
+        Ok(inspected)
     }
 
     fn edit<T>(&mut self, change: impl FnOnce(&mut Tx<'_>) -> es_db::Result<T>) -> Result<T> {
@@ -458,6 +576,129 @@ impl LibraryService {
             skipped: outcome.skipped,
             failed,
             playlist,
+        })
+    }
+
+    pub fn track_relocate(
+        &mut self,
+        moves: &[(String, String)],
+    ) -> Result<Vec<es_index::TrackRow>> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        let share = session.database().share_dir();
+        let ids =
+            session.with_live(|database| crate::relocate::relocate(database, &share, moves))?;
+        self.tracks_by_id(&ids)
+    }
+
+    pub fn beatgrid_set(
+        &mut self,
+        id: &str,
+        grid: &crate::analysis::Grid,
+        cues: &[es_db::CueMove],
+    ) -> Result<BeatgridResult> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        let share = session.database().share_dir();
+        let bpm = session.with_live(|database| {
+            crate::analysis::set_beatgrid(database, &share, id, grid, cues)
+        })?;
+        let reads = self.read_model()?;
+        Ok(BeatgridResult {
+            beatgrid: reads.beatgrid(id)?,
+            cues: reads.cues(id)?,
+            bpm,
+        })
+    }
+
+    pub fn track_apply_analysis(
+        &mut self,
+        id: &str,
+        analysis: &crate::analysis::Analysis,
+        options: crate::analysis::Options,
+    ) -> Result<Option<es_index::TrackRow>> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        let share = session.database().share_dir();
+        session.with_live(|database| {
+            crate::analysis::apply_analysis(database, &share, id, analysis, options)
+        })?;
+        Ok(self.tracks_by_id(&[id.to_owned()])?.into_iter().next())
+    }
+
+    pub fn track_convert(
+        &mut self,
+        ids: &[String],
+        preset: &crate::convert::Preset,
+        mode: crate::convert::Mode,
+        emit: &impl Fn(ServiceEvent),
+    ) -> Result<TrackConvertResult> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        let share = session.database().share_dir();
+        let outcome = session.with_live(|database| {
+            Ok(crate::convert::convert_tracks(
+                database,
+                &share,
+                ids,
+                preset,
+                mode,
+                &|done, total, id| {
+                    emit(ServiceEvent::ConvertProgress {
+                        done,
+                        total,
+                        id: id.map(str::to_owned),
+                    });
+                },
+            ))
+        })?;
+        Ok(TrackConvertResult {
+            tracks: self.tracks_by_id(&outcome.ids)?,
+            ids: outcome.ids,
+            originals: outcome.originals,
+            failed: outcome
+                .failed
+                .into_iter()
+                .map(|(id, error)| TrackConvertFailure { id, error })
+                .collect(),
+        })
+    }
+
+    pub fn device_import(
+        &mut self,
+        volume: &Path,
+        device: &es_device::Device,
+        options: &crate::device_import::Options,
+        emit: &impl Fn(ServiceEvent),
+    ) -> Result<crate::device_import::Outcome> {
+        let session = self
+            .session
+            .as_mut()
+            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        let share = session.database().share_dir();
+        session.with_live(|database| {
+            crate::device_import::import_device(
+                database,
+                &share,
+                volume,
+                device,
+                options,
+                &|progress| {
+                    emit(ServiceEvent::UsbImportProgress {
+                        done: progress.done,
+                        total: progress.total,
+                        name: progress.name,
+                    });
+                },
+            )
         })
     }
 

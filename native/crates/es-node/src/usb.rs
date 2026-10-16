@@ -10,7 +10,7 @@ use es_engine::device_import::{self, PlaylistPolicy, TrackStatus};
 use es_engine::sync::{self, Progress as SyncProgress};
 use serde_json::json;
 
-use crate::library::{failure, json_of, with_live, Core};
+use crate::library::{failure, json_of, Core};
 use es_engine::library::LibraryService;
 
 pub(crate) enum UsbOp {
@@ -141,9 +141,7 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
             json_of(&found)
         }
         UsbOp::Selection(volume) => {
-            let state = service.session().ok_or_else(|| failure("Library not open"))?;
-            let ids: Vec<String> = state.database().playlists().map_err(failure)?.into_iter().map(|n| n.id).collect();
-            let db_id = u64::try_from(state.database().db_id().map_err(failure)?).unwrap_or(0);
+            let (ids, db_id) = service.playlist_selection().map_err(failure)?;
             json_of(&json!({ "playlistIds": es_device::selection::recorded_playlist_ids(&mounted(volume)?, &ids, db_id) }))
         }
         UsbOp::Tracks(volume, playlist) => {
@@ -196,17 +194,11 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
             }))
         }
         UsbOp::Import { volume, folder, policy } => {
-            let state = service.session_mut().ok_or_else(|| failure("Library not open"))?;
             let volume = listed(volume)?;
             let device = require(core.devices.load(&volume)?)?;
             let options = import_options(folder, policy)?;
-            let share = state.database().share_dir();
-            let outcome = with_live(state, |live| {
-                device_import::import_device(live, &share, &volume, &device, &options, &|p| {
-                    core.emit("usb.progress", &json!({ "phase": "import", "done": p.done, "total": p.total, "name": p.name }));
-                })
-                .map_err(failure)
-            })?;
+            let emit = |event| core.emit_service_event(event);
+            let outcome = service.device_import(&volume, &device, &options, &emit).map_err(failure)?;
             core.emit("usb.progress", &json!({ "phase": "done" }));
             json_of(&json!({
                 "playlists": outcome.playlists,
