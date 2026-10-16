@@ -163,12 +163,51 @@ fn export_error(kind: &str, message: String) -> Error {
     }
 }
 
+/// Publishes a prepared, versioned USB export job and reports progress from the publisher.
+pub trait UsbPublisher {
+    fn publish(&self, job: &Value, on_progress: &dyn Fn(Progress)) -> Result<Value>;
+}
+
+/// The isolated `es-usb` process that writes the device databases.
+pub struct CommandPublisher {
+    binary: PathBuf,
+}
+
+impl CommandPublisher {
+    pub fn discover() -> Result<Self> {
+        Ok(Self { binary: exporter()? })
+    }
+}
+
+impl UsbPublisher for CommandPublisher {
+    fn publish(&self, job: &Value, on_progress: &dyn Fn(Progress)) -> Result<Value> {
+        let job_path = std::env::temp_dir().join(format!("exportstudio-usb-{}.json", uuid::Uuid::new_v4()));
+        std::fs::write(&job_path, job.to_string()).map_err(|error| Error::Other(error.to_string()))?;
+        let outcome = run(&self.binary, &job_path, on_progress);
+        let _ = std::fs::remove_file(&job_path);
+        outcome
+    }
+}
+
 /// Copy the bundle's playlists onto `volume` and publish both device databases.
 pub fn sync_volume(
     lib: &Library,
     volume: &Path,
     playlist_ids: &[String],
     overwrite: bool,
+    on_progress: &dyn Fn(Progress),
+) -> Result<Outcome> {
+    let publisher = CommandPublisher::discover()?;
+    sync_volume_with_publisher(lib, volume, playlist_ids, overwrite, &publisher, on_progress)
+}
+
+/// Build and validate the library export, then publish it through the selected device boundary.
+pub fn sync_volume_with_publisher(
+    lib: &Library,
+    volume: &Path,
+    playlist_ids: &[String],
+    overwrite: bool,
+    publisher: &impl UsbPublisher,
     on_progress: &dyn Fn(Progress),
 ) -> Result<Outcome> {
     let volume = volume
@@ -183,13 +222,8 @@ pub fn sync_volume(
             return Err(Error::Other(format!("Audio file is missing: {}", track.folder_path)));
         }
     }
-    let binary = exporter()?;
     let body = job(&lib.share_dir(), &volume, &bundle, overwrite)?;
-    let job_path = std::env::temp_dir().join(format!("exportstudio-usb-{}.json", uuid::Uuid::new_v4()));
-    std::fs::write(&job_path, body.to_string()).map_err(|e| Error::Other(e.to_string()))?;
-    let outcome = run(&binary, &job_path, on_progress);
-    let _ = std::fs::remove_file(&job_path);
-    let result = outcome?;
+    let result = publisher.publish(&body, on_progress)?;
     let tracks = result.get("tracks").and_then(Value::as_i64).unwrap_or(0);
     let playlists = result.get("playlists").and_then(Value::as_i64).unwrap_or(0);
     on_progress(Progress::Done { tracks, playlists });
@@ -248,6 +282,17 @@ fn run(binary: &Path, job: &Path, on_progress: &dyn Fn(Progress)) -> Result<Valu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use es_db::fixture::{self, Rows};
+    use es_db::Guard;
+
+    struct FakePublisher;
+
+    impl UsbPublisher for FakePublisher {
+        fn publish(&self, job: &Value, _on_progress: &dyn Fn(Progress)) -> Result<Value> {
+            assert_eq!(job["schemaVersion"], JOB_SCHEMA_VERSION);
+            Ok(json!({ "tracks": 0, "playlists": 1 }))
+        }
+    }
 
     #[test]
     fn usb_job_declares_its_schema_version() {
@@ -255,5 +300,30 @@ mod tests {
         let body = job(directory.path(), directory.path(), &Bundle::default(), false).unwrap();
 
         assert_eq!(body["schemaVersion"], JOB_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn sync_use_case_publishes_through_the_injected_port() {
+        let directory = tempfile::tempdir().unwrap();
+        let database_path = fixture::build(directory.path(), 1).unwrap();
+        {
+            let connection = fixture::connect(&database_path).unwrap();
+            Rows(&connection).playlist("playlist-1", "Test playlist", 0).unwrap();
+        }
+        let library = Library::open_live(&database_path, Guard::Off).unwrap();
+        let volume = directory.path().join("STICK");
+        std::fs::create_dir_all(&volume).unwrap();
+
+        let result = sync_volume_with_publisher(
+            &library,
+            &volume,
+            &["playlist-1".into()],
+            false,
+            &FakePublisher,
+            &|_| {},
+        )
+        .unwrap();
+
+        assert_eq!((result.tracks, result.playlists), (0, 1));
     }
 }
