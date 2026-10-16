@@ -614,6 +614,25 @@ impl Tx<'_> {
         Ok(changed)
     }
 
+    /// Point a live track at another file; the original location follows when it was the same.
+    pub fn relocate_track(&mut self, id: &str, stored: &str, file_name: &str, size: i64) -> Result<()> {
+        if self.content_state(id)? != Some(false) {
+            return Err(Error::NotFound(format!("live track {id}")));
+        }
+        let old: Option<String> = self.tx.query_row("SELECT FolderPath FROM djmdContent WHERE ID = ?1", [id], |row| row.get(0))?;
+        let mut changed = self.set_content(id, "FolderPath", Value::Text(stored.to_owned()))?;
+        let org: Option<String> = self.tx.query_row("SELECT OrgFolderPath FROM djmdContent WHERE ID = ?1", [id], |row| row.get(0))?;
+        if org == old {
+            changed |= self.set_content(id, "OrgFolderPath", Value::Text(stored.to_owned()))?;
+        }
+        changed |= self.set_content(id, "FileNameL", Value::Text(file_name.to_owned()))?;
+        changed |= self.set_content(id, "FileSize", Value::Integer(size))?;
+        if changed {
+            self.stamp("djmdContent", id)?;
+        }
+        Ok(())
+    }
+
     /// Ids and removed flags of every row with this stored path.
     pub fn tracks_at(&self, path: &str) -> Result<Vec<(String, bool)>> {
         let mut stmt = self.tx.prepare("SELECT ID, rb_local_deleted FROM djmdContent WHERE FolderPath = ?1 ORDER BY ID")?;

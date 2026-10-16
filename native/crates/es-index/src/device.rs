@@ -219,20 +219,6 @@ pub fn audio_file(volume: &Path, track: &Track) -> Option<String> {
     audio_path(volume, track).filter(|p| p.is_file()).map(|p| p.to_string_lossy().into_owned())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn track_keys_round_trip_with_awkward_volume_names() {
-        let key = track_key("/Volumes/MY STICK & more", 42);
-        assert_eq!(key, "usb:%2FVolumes%2FMY%20STICK%20%26%20more:42");
-        assert_eq!(parse_track_key(&key), Some(("/Volumes/MY STICK & more".to_owned(), 42)));
-        assert_eq!(parse_track_key("tidal:track:1"), None);
-        assert_eq!(parse_track_key("usb::5"), None);
-    }
-}
-
 /// Previews for stick tracks; each key's stick is read once.
 pub fn previews(read: &mut dyn FnMut(&Path) -> Option<std::sync::Arc<Device>>, keys: &[String]) -> Vec<Preview> {
     let mut seen: Vec<&String> = Vec::new();
@@ -253,4 +239,18 @@ pub fn previews(read: &mut dyn FnMut(&Path) -> Option<std::sync::Arc<Device>>, k
         out.push(found.unwrap_or_else(|| Preview::blank(key)));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn track_keys_round_trip_with_awkward_volume_names() {
+        let key = track_key("/Volumes/MY STICK & more", 42);
+        assert_eq!(key, "usb:%2FVolumes%2FMY%20STICK%20%26%20more:42");
+        assert_eq!(parse_track_key(&key), Some(("/Volumes/MY STICK & more".to_owned(), 42)));
+        assert_eq!(parse_track_key("tidal:track:1"), None);
+        assert_eq!(parse_track_key("usb::5"), None);
+    }
 }

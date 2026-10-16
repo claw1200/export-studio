@@ -99,6 +99,8 @@ pub struct TrackFiles {
     pub folder_path: String,
     pub analysis_path: Option<String>,
     pub image_path: Option<String>,
+    pub file_name: String,
+    pub file_size: Option<i64>,
 }
 
 fn text(row: &Row<'_>, index: usize) -> rusqlite::Result<String> {
@@ -254,13 +256,15 @@ impl Library {
     /// Where a track's files are, for a track in the library or removed from it. `None` for an unknown id.
     pub fn track_files(&self, id: &str) -> Result<Option<TrackFiles>> {
         let row = self.conn().query_row(
-            "SELECT FolderPath, AnalysisDataPath, ImagePath FROM djmdContent WHERE ID = ?1",
+            "SELECT FolderPath, AnalysisDataPath, ImagePath, FileNameL, FileSize FROM djmdContent WHERE ID = ?1",
             [id],
             |row| {
                 Ok(TrackFiles {
                     folder_path: text(row, 0)?,
                     analysis_path: row.get::<_, Option<String>>(1)?.filter(|p| !p.is_empty()),
                     image_path: row.get::<_, Option<String>>(2)?.filter(|p| !p.is_empty()),
+                    file_name: text(row, 3)?,
+                    file_size: row.get::<_, Option<i64>>(4)?,
                 })
             },
         );

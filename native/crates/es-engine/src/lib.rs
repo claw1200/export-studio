@@ -3,6 +3,8 @@
 pub mod artwork;
 pub mod device_import;
 pub mod import;
+pub mod inspect;
+pub mod relocate;
 pub mod place;
 pub mod sync;
 
