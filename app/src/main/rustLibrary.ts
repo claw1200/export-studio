@@ -85,6 +85,7 @@ const WRITES: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>>
     ),
   'track.applyAnalysis': (lib, p) =>
     lib.trackApplyAnalysis(text(p?.id), JSON.stringify({ result: p?.result, options: p?.options })),
+  'track.convert': (lib, p) => lib.trackConvert(list(p?.ids), JSON.stringify(p?.preset ?? {}), text(p?.mode)),
   'track.relocate': (lib, p) => lib.trackRelocate(JSON.stringify(p?.moves ?? {})),
   'usb.eject': (lib, p) => lib.usbEject(text(p?.volumeId)),
   'usb.format': (lib, p) => lib.usbFormat(text(p?.volumeId)),

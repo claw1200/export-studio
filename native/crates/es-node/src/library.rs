@@ -267,6 +267,7 @@ enum Op {
     TrackInspect(String),
     FilesRead(Vec<String>),
     BeatgridSet(String, String),
+    Convert { ids: Vec<String>, preset: String, mode: String },
     ApplyAnalysis(String, String),
     MediaResolve { kind: String, id: String, size: String },
     CueSetHot(String, i64, i64),
@@ -479,6 +480,29 @@ impl Run {
                     "cues": es_index::detail::cues_for(&state.lib, &share, id).map_err(failure)?,
                     "bpm": bpm,
                 }))
+            }
+            Op::Convert { ids, preset, mode } => {
+                let mode = es_engine::convert::Mode::parse(mode).map_err(failure)?;
+                let preset = es_engine::convert::clean_preset(&serde_json::from_str(preset).map_err(failure)?).map_err(failure)?;
+                let share = state.lib.share_dir();
+                let core = &self.core;
+                let outcome = with_live(state, |live| {
+                    Ok(es_engine::convert::convert_tracks(live, &share, ids, &preset, mode, &|done, total, id| {
+                        let mut event = json!({ "done": done, "total": total });
+                        if let Some(id) = id {
+                            event["id"] = json!(id);
+                        }
+                        core.emit("convert.progress", &event);
+                    }))
+                })?;
+                let tracks = if outcome.ids.is_empty() { "[]".to_owned() } else { tracks_of(state, &outcome.ids)? };
+                Ok(format!(
+                    r#"{{"tracks":{},"ids":{},"originals":{},"failed":{}}}"#,
+                    tracks,
+                    json_of(&outcome.ids)?,
+                    json_of(&outcome.originals)?,
+                    json_of(&outcome.failed.iter().map(|(id, error)| json!({ "id": id, "error": error })).collect::<Vec<_>>())?
+                ))
             }
             Op::ApplyAnalysis(id, body) => {
                 use base64::Engine as _;
@@ -740,6 +764,11 @@ impl RekordboxLibrary {
     #[napi(ts_return_type = "Promise<string>")]
     pub fn track_apply_analysis(&self, id: String, body: String) -> AsyncTask<Run> {
         self.run(Op::ApplyAnalysis(id, body))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn track_convert(&self, ids: Vec<String>, preset: String, mode: String) -> AsyncTask<Run> {
+        self.run(Op::Convert { ids, preset, mode })
     }
 
     #[napi(ts_return_type = "Promise<string>")]

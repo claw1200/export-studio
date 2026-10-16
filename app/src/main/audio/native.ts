@@ -113,6 +113,7 @@ export interface NativeLibrary {
   trackPreviews(ids: string[]): Promise<string>
   filesRead(paths: string[]): Promise<string>
   beatgridSet(id: string, body: string): Promise<string>
+  trackConvert(ids: string[], preset: string, mode: string): Promise<string>
   trackApplyAnalysis(id: string, body: string): Promise<string>
   trackRelocate(moves: string): Promise<string>
   trackFindMissing(ids: string[], directory: string): Promise<string>

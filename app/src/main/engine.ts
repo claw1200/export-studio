@@ -22,7 +22,7 @@ export function usbExport(): string {
   return join(process.resourcesPath, 'engine', name)
 }
 
-function ffmpegBinary(): string {
+export function ffmpegBinary(): string {
   const name = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
   if (is.dev) return resolve(app.getAppPath(), 'resources', 'native', name)
   return join(process.resourcesPath, 'engine', name)

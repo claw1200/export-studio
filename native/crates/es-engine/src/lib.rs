@@ -3,6 +3,7 @@
 pub mod analysis;
 pub mod artwork;
 pub mod browse;
+pub mod convert;
 pub mod device_import;
 pub mod import;
 pub mod inspect;

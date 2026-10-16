@@ -1050,6 +1050,168 @@ impl Tx<'_> {
     }
 }
 
+/// The file a conversion produced, and how it moves the track's positions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConversionTarget {
+    pub stored: String,
+    pub file_name: String,
+    pub file_size: Option<i64>,
+    pub file_type: Option<i64>,
+    pub stream: Stream,
+    /// How far cue positions move because of encoder delay.
+    pub offset_ms: i64,
+    /// The track has analysis files that the converted track should keep.
+    pub carry_analysis: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Converted {
+    pub id: String,
+    /// The analysis location now recorded for the track, when analysis files go with it.
+    pub analysis: Option<String>,
+}
+
+/// Track columns a converted copy inherits; file, analysis and sync columns are rebuilt.
+const COPIED_COLUMNS: [&str; 24] = [
+    "Title", "ArtistID", "AlbumID", "GenreID", "BPM", "TrackNo", "Commnt", "Rating", "ReleaseYear", "RemixerID", "LabelID",
+    "OrgArtistID", "KeyID", "ColorID", "ImagePath", "DiscNo", "ComposerID", "Subtitle", "ReleaseDate", "DateCreated",
+    "Lyricist", "ISRC", "DisableQuantize", "HotCueAutoLoad",
+];
+
+impl Tx<'_> {
+    fn content_columns(&self) -> Result<Vec<String>> {
+        let mut stmt = self.tx.prepare("SELECT name FROM pragma_table_info('djmdContent')")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Point a track at its converted file. With `copy`, a new track is made instead (or a removed one at that
+    /// path is brought back) with the original's tags and cues.
+    pub fn convert_track(&mut self, source_id: &str, copy: bool, target: &ConversionTarget) -> Result<Converted> {
+        if self.content_state(source_id)? != Some(false) {
+            return Err(Error::NotFound(format!("live track {source_id}")));
+        }
+        let (_, length) = self.cue_context(source_id)?;
+        let shifted = |msec: i64| if target.offset_ms == 0 { msec } else { clamp_msec(msec + target.offset_ms, length) };
+        let columns = self.content_columns()?;
+        let row_id = if copy {
+            let at = self.tracks_at(&target.stored)?;
+            if at.iter().any(|(_, removed)| !removed) {
+                return Err(Error::Refused("The converted file is already in the collection".into()));
+            }
+            let title: Option<String> = self.tx.query_row("SELECT Title FROM djmdContent WHERE ID = ?1", [source_id], |row| row.get(0))?;
+            let id = if let Some((id, _)) = at.first() {
+                self.restore_track(id)?;
+                self.set_content(id, "Title", title.map_or(Value::Null, Value::Text))?;
+                id.clone()
+            } else {
+                self.create_track(&NewTrack {
+                    uuid: Uuid::new_v4().to_string(),
+                    path: target.stored.clone(),
+                    file_name: target.file_name.clone(),
+                    file_size: target.file_size.unwrap_or(0),
+                    file_type: target.file_type.unwrap_or(0),
+                    stream: target.stream.clone(),
+                    edit: TrackEdit { title: Some(title.unwrap_or_default()), ..TrackEdit::default() },
+                    image_path: None,
+                })?
+            };
+            for column in COPIED_COLUMNS.iter().filter(|c| columns.iter().any(|have| have == *c)) {
+                let value: Value = self.tx.query_row(&format!("SELECT {column} FROM djmdContent WHERE ID = ?1"), [source_id], |row| row.get(0))?;
+                if value != Value::Null {
+                    self.set_content(&id, column, value)?;
+                }
+            }
+            self.tx.execute(&format!("UPDATE djmdContent SET StockDate = {TODAY} WHERE ID = ?1"), [&id])?;
+            let new_uuid: Option<String> = self.tx.query_row("SELECT UUID FROM djmdContent WHERE ID = ?1", [&id], |row| row.get(0))?;
+            let mut stmt = self.tx.prepare(
+                "SELECT Kind, InMsec, OutMsec, Color, ColorTableIndex, Comment, ActiveLoop, BeatLoopSize FROM djmdCue \
+                 WHERE ContentID = ?1 AND rb_local_deleted = 0 ORDER BY rowid",
+            )?;
+            type Cue = (i64, i64, Option<i64>, Option<i64>, Option<i64>, Option<String>, Option<i64>, Option<i64>);
+            let cues: Vec<Cue> = stmt
+                .query_map([source_id], |row| {
+                    Ok((
+                        row.get::<_, Option<i64>>(0)?.unwrap_or(0),
+                        row.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            drop(stmt);
+            for (kind, start, out, color, color_index, comment, active, beat_loop) in cues {
+                let cue = self.insert_cue(&id, new_uuid.as_deref(), kind, shifted(start))?;
+                self.tx.execute(
+                    "UPDATE djmdCue SET Color = ?1, ColorTableIndex = ?2, Comment = ?3, ActiveLoop = ?4, BeatLoopSize = ?5 WHERE ID = ?6",
+                    params![color, color_index, comment, active, beat_loop, cue],
+                )?;
+                if let Some(out) = out.filter(|o| *o >= 0) {
+                    let out = shifted(out);
+                    self.tx.execute("UPDATE djmdCue SET OutMsec = ?1, OutFrame = ?2 WHERE ID = ?3", params![out, out * CUE_FRAMES_PER_SECOND / 1000, cue])?;
+                }
+            }
+            id
+        } else {
+            self.set_content(source_id, "FolderPath", Value::Text(target.stored.clone()))?;
+            if target.offset_ms != 0 {
+                let mut stmt = self.tx.prepare("SELECT ID, InMsec, OutMsec FROM djmdCue WHERE ContentID = ?1 AND rb_local_deleted = 0")?;
+                let moves: Vec<CueMove> = stmt
+                    .query_map([source_id], |row| {
+                        let out = row.get::<_, Option<i64>>(2)?;
+                        Ok(CueMove {
+                            id: row.get(0)?,
+                            start_ms: row.get::<_, Option<i64>>(1)?.unwrap_or(0) + target.offset_ms,
+                            end_ms: out.filter(|o| *o >= 0).map(|o| o + target.offset_ms),
+                        })
+                    })?
+                    .collect::<rusqlite::Result<_>>()?;
+                drop(stmt);
+                self.apply_beatgrid(source_id, None, &moves)?;
+            }
+            source_id.to_owned()
+        };
+
+        let int = |v: Option<i64>| v.map_or(Value::Null, Value::Integer);
+        for (column, value) in [
+            ("FileType", target.file_type),
+            ("BitRate", target.stream.bit_rate),
+            ("SampleRate", target.stream.sample_rate),
+            ("BitDepth", target.stream.bit_depth),
+        ] {
+            self.set_content(&row_id, column, int(value))?;
+        }
+        self.set_content(&row_id, "FileNameL", Value::Text(target.file_name.clone()))?;
+        if let Some(size) = target.file_size {
+            self.set_content(&row_id, "FileSize", Value::Integer(size))?;
+        }
+        if let Some(length) = target.stream.length.filter(|l| *l != 0) {
+            self.set_content(&row_id, "Length", Value::Integer(length))?;
+        }
+        let mut analysis = None;
+        if target.carry_analysis {
+            let relative = if copy {
+                let uuid: Option<String> = self.tx.query_row("SELECT UUID FROM djmdContent WHERE ID = ?1", [&row_id], |row| row.get(0))?;
+                let uuid = uuid.filter(|u| u.len() > 3).ok_or_else(|| Error::Refused("the new track has no UUID".into()))?;
+                let relative = format!("/PIONEER/USBANLZ/{}/{}/ANLZ0000.DAT", &uuid[..3], &uuid[3..]);
+                self.set_content(&row_id, "AnalysisDataPath", Value::Text(relative.clone()))?;
+                let analysed: Value = self.tx.query_row("SELECT Analysed FROM djmdContent WHERE ID = ?1", [source_id], |row| row.get(0))?;
+                self.set_content(&row_id, "Analysed", analysed)?;
+                relative
+            } else {
+                self.tx.query_row("SELECT AnalysisDataPath FROM djmdContent WHERE ID = ?1", [&row_id], |row| row.get::<_, Option<String>>(0))?.unwrap_or_default()
+            };
+            analysis = Some(relative);
+        }
+        self.stamp("djmdContent", &row_id)?;
+        Ok(Converted { id: row_id, analysis })
+    }
+}
+
 #[cfg(test)]
 mod key_tests {
     use super::*;
