@@ -29,6 +29,7 @@ const READS: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> 
 /** Edits the Rust library makes. A failed edit is reported, never retried in Python. */
 const WRITES: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> = {
   'track.removeFromCollection': (lib, p) => lib.removeTracks(list(p?.ids)),
+  'track.update': (lib, p) => lib.trackUpdate(list(p?.ids), JSON.stringify(p?.fields ?? {})),
   'cue.setHot': (lib, p) => lib.cueSetHot(text(p?.id), Number(p?.kind), Number(p?.ms)),
   'cue.addMemory': (lib, p) => lib.cueAddMemory(text(p?.id), Number(p?.ms)),
   'cue.delete': (lib, p) => lib.cueDelete(text(p?.id), text(p?.cueId)),
@@ -92,8 +93,10 @@ export class RustLibrary {
     return process.env.EXPORTSTUDIO_RUST_LIBRARY === '1'
   }
 
-  kind(method: string): Kind | null {
+  kind(method: string, params?: Params): Kind | null {
     if (!this.enabled || !this.opened) return null
+    // Writing tags into audio files is still done by the Python engine.
+    if (method === 'track.update' && params?.writeTags) return null
     if (method in READS) return 'read'
     if (method in WRITES) return 'write'
     return null

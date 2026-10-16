@@ -24,7 +24,7 @@ const rustLibrary = new RustLibrary(
 /** A library call, answered by the Rust addon where it can and by the Python engine otherwise. */
 async function libraryCall<T = unknown>(method: string, params?: unknown): Promise<T> {
   const args = params as Record<string, unknown> | undefined
-  const kind = rustLibrary.kind(method)
+  const kind = rustLibrary.kind(method, args)
   if (kind === 'write') return (await rustLibrary.call(method, args)) as T
   if (kind === 'read') {
     try {

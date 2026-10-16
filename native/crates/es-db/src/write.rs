@@ -54,6 +54,36 @@ pub const DEPENDENTS: &[(&str, OnRemove)] = &[
     ("contentFile", OnRemove::Keep),
 ];
 
+/// Fields of a track that can be edited. `None` leaves a field alone; for text, empty clears it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TrackEdit {
+    pub title: Option<String>,
+    pub comment: Option<String>,
+    pub year: Option<i64>,
+    pub track_no: Option<i64>,
+    pub rating: Option<i64>,
+    /// 0 clears the colour.
+    pub color: Option<i64>,
+    pub artist: Option<String>,
+    pub remixer: Option<String>,
+    pub original_artist: Option<String>,
+    pub composer: Option<String>,
+    pub album: Option<String>,
+    pub genre: Option<String>,
+    pub label: Option<String>,
+}
+
+/// Artist-like columns share the artist table.
+const NAMED: [(&str, &str); 7] = [
+    ("ArtistID", "djmdArtist"),
+    ("RemixerID", "djmdArtist"),
+    ("OrgArtistID", "djmdArtist"),
+    ("ComposerID", "djmdArtist"),
+    ("AlbumID", "djmdAlbum"),
+    ("GenreID", "djmdGenre"),
+    ("LabelID", "djmdLabel"),
+];
+
 pub struct Tx<'a> {
     tx: Transaction<'a>,
     usn: i64,
@@ -425,6 +455,95 @@ impl Tx<'_> {
     }
 
     /// The track's UUID and length in seconds, which a new cue needs.
+    fn named_id(&mut self, table: &str, name: &str) -> Result<Option<String>> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Ok(None);
+        }
+        let found = self.tx.query_row(
+            &format!("SELECT ID FROM {table} WHERE Name = ?1 ORDER BY rb_local_deleted LIMIT 1"),
+            [name],
+            |row| row.get::<_, String>(0),
+        );
+        match found {
+            Ok(id) => Ok(Some(id)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                let id = unused_id(&self.tx, table)?;
+                self.tx.execute(
+                    &format!(
+                        "INSERT INTO {table} (ID, Name, UUID, rb_data_status, rb_local_data_status, rb_local_deleted, \
+                         rb_local_synced, usn, rb_local_usn, created_at, updated_at) \
+                         VALUES (?1, ?2, ?3, 0, 0, 0, 0, NULL, ?4, {NOW}, {NOW})"
+                    ),
+                    params![id, name, Uuid::new_v4().to_string(), self.usn],
+                )?;
+                self.touched = true;
+                Ok(Some(id))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Set one column of a track, reporting whether the value changed.
+    fn set_content(&mut self, id: &str, column: &str, value: rusqlite::types::Value) -> Result<bool> {
+        let current: rusqlite::types::Value =
+            self.tx.query_row(&format!("SELECT {column} FROM djmdContent WHERE ID = ?1"), [id], |row| row.get(0))?;
+        if current == value {
+            return Ok(false);
+        }
+        self.tx.execute(&format!("UPDATE djmdContent SET {column} = ?1 WHERE ID = ?2"), params![value, id])?;
+        Ok(true)
+    }
+
+    /// Edit fields of live tracks. Artists, albums, genres and labels are found by name and added when new.
+    pub fn update_tracks(&mut self, ids: &[String], edit: &TrackEdit) -> Result<()> {
+        use rusqlite::types::Value;
+        let text = |s: &str| if s.is_empty() { Value::Null } else { Value::Text(s.to_owned()) };
+        let named = [
+            &edit.artist,
+            &edit.remixer,
+            &edit.original_artist,
+            &edit.composer,
+            &edit.album,
+            &edit.genre,
+            &edit.label,
+        ];
+        let mut resolved: Vec<(&str, Value)> = Vec::new();
+        for ((column, table), name) in NAMED.iter().zip(named) {
+            if let Some(name) = name {
+                resolved.push((column, self.named_id(table, name)?.map_or(Value::Null, Value::Text)));
+            }
+        }
+        for id in ids {
+            if self.content_state(id)? != Some(false) {
+                return Err(Error::NotFound(format!("live track {id}")));
+            }
+            let mut changed = false;
+            if let Some(title) = &edit.title {
+                changed |= self.set_content(id, "Title", Value::Text(title.clone()))?;
+            }
+            if let Some(comment) = &edit.comment {
+                changed |= self.set_content(id, "Commnt", text(comment))?;
+            }
+            for (column, value) in [("ReleaseYear", edit.year), ("TrackNo", edit.track_no), ("Rating", edit.rating)] {
+                if let Some(value) = value {
+                    changed |= self.set_content(id, column, Value::Integer(value))?;
+                }
+            }
+            if let Some(color) = edit.color {
+                let value = if color == 0 { Value::Null } else { Value::Text(color.to_string()) };
+                changed |= self.set_content(id, "ColorID", value)?;
+            }
+            for (column, value) in &resolved {
+                changed |= self.set_content(id, column, value.clone())?;
+            }
+            if changed {
+                self.stamp("djmdContent", id)?;
+            }
+        }
+        Ok(())
+    }
+
     fn cue_context(&self, content_id: &str) -> Result<(Option<String>, i64)> {
         match self.tx.query_row(
             "SELECT UUID, COALESCE(Length, 0) FROM djmdContent WHERE ID = ?1",

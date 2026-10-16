@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/es-decode", "crates/es-deck", "crates/es-wave", "crates/es-analyse", "crates/es-db", "crates/es-anlz", "crates/es-index", "crates/es-node"]
+members = ["crates/es-decode", "crates/es-deck", "crates/es-wave", "crates/es-analyse", "crates/es-db", "crates/es-anlz", "crates/es-index", "crates/es-tags", "crates/es-node"]
 
 [workspace.package]
 edition = "2021"
@@ -15,6 +15,7 @@ es-analyse = { path = "crates/es-analyse" }
 es-db = { path = "crates/es-db" }
 es-anlz = { path = "crates/es-anlz" }
 es-index = { path = "crates/es-index" }
+es-tags = { path = "crates/es-tags" }
 rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
 symphonia = { version = "0.5", default-features = false, features = [
   "mp3",

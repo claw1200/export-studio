@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use es_db::{Guard, Library, Tx};
+use es_db::{Guard, Library, TrackEdit, Tx};
 use napi::bindgen_prelude::AsyncTask;
 use napi::{Env, Task};
 use napi_derive::napi;
@@ -81,6 +81,64 @@ fn clean_name(name: &str, folder: bool) -> String {
     }
 }
 
+/// A whole number from what the interface sends: nothing, an empty string or false mean 0.
+fn whole(value: &serde_json::Value, label: &str, limit: i64) -> napi::Result<i64> {
+    use serde_json::Value;
+    let number = match value {
+        Value::Null => 0,
+        Value::Bool(b) => i64::from(*b),
+        Value::Number(n) => n.as_f64().map_or(0, |f| f.trunc() as i64),
+        Value::String(s) if s.trim().is_empty() => 0,
+        Value::String(s) => s.trim().parse::<i64>().map_err(|_| failure(format!("{label} must be a whole number")))?,
+        _ => return Err(failure(format!("{label} must be a whole number"))),
+    };
+    if (0..=limit).contains(&number) {
+        Ok(number)
+    } else {
+        Err(failure(format!("{label} must be between 0 and {limit}")))
+    }
+}
+
+fn parse_edit(fields: &str) -> napi::Result<TrackEdit> {
+    let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(fields).map_err(failure)?;
+    let known = [
+        "title", "comment", "year", "trackNo", "rating", "color", "artist", "remixer", "originalArtist", "composer",
+        "album", "genre", "label",
+    ];
+    let mut unknown: Vec<&str> = map.keys().map(String::as_str).filter(|k| !known.contains(k)).collect();
+    if !unknown.is_empty() {
+        unknown.sort_unstable();
+        return Err(failure(format!("These fields can't be edited: {}", unknown.join(", "))));
+    }
+    let text = |key: &str| {
+        map.get(key).map(|v| match v {
+            serde_json::Value::Null | serde_json::Value::Bool(false) => String::new(),
+            serde_json::Value::String(s) => s.trim().to_owned(),
+            other => other.to_string().trim().to_owned(),
+        })
+    };
+    let number = |key: &str, label: &str, limit: i64| map.get(key).map(|v| whole(v, label, limit)).transpose();
+    let edit = TrackEdit {
+        title: text("title"),
+        comment: text("comment"),
+        year: number("year", "Year", 9999)?,
+        track_no: number("trackNo", "Track number", 9999)?,
+        rating: number("rating", "Rating", 5)?,
+        color: number("color", "Colour", 8)?,
+        artist: text("artist"),
+        remixer: text("remixer"),
+        original_artist: text("originalArtist"),
+        composer: text("composer"),
+        album: text("album"),
+        genre: text("genre"),
+        label: text("label"),
+    };
+    if edit.title.as_deref() == Some("") {
+        return Err(failure("A track needs a title"));
+    }
+    Ok(edit)
+}
+
 enum Op {
     Open(Option<String>),
     Reload,
@@ -99,6 +157,7 @@ enum Op {
     CueAddMemory(String, i64),
     CueDelete(String, String),
     CueSetColor(String, String, Option<i64>),
+    TrackUpdate(Vec<String>, String),
     RemoveTracks(Vec<String>),
     PlaylistAdd(String, Vec<String>),
     PlaylistRemove(String, Vec<String>),
@@ -238,6 +297,15 @@ impl Run {
                 edit(state, |tx| tx.remove_tag(tag, ids))?;
                 tracks_of(state, ids)
             }
+            Op::TrackUpdate(ids, fields) => {
+                let change = parse_edit(fields)?;
+                let mut unique = ids.clone();
+                unique.dedup();
+                if change != TrackEdit::default() && !unique.is_empty() {
+                    edit(state, |tx| tx.update_tracks(&unique, &change))?;
+                }
+                Ok(format!(r#"{{"tracks":{},"tagErrors":[]}}"#, tracks_of(state, &unique)?))
+            }
             Op::Open(_) | Op::Reload => unreachable!("handled above"),
         }
     }
@@ -358,6 +426,11 @@ impl RekordboxLibrary {
     #[napi(ts_return_type = "Promise<string>")]
     pub fn cue_set_color(&self, id: String, cue_id: String, color_index: Option<i64>) -> AsyncTask<Run> {
         self.run(Op::CueSetColor(id, cue_id, color_index))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn track_update(&self, ids: Vec<String>, fields: String) -> AsyncTask<Run> {
+        self.run(Op::TrackUpdate(ids, fields))
     }
 
     #[napi(ts_return_type = "Promise<string>")]
