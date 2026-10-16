@@ -111,6 +111,10 @@ export interface NativeLibrary {
   trackImport(paths: string[], playlistId: string | null, artwork: boolean): Promise<string>
   setWritable(on: boolean): Promise<string>
   trackPreviews(ids: string[]): Promise<string>
+  filesRead(paths: string[]): Promise<string>
+  trackRelocate(moves: string): Promise<string>
+  trackFindMissing(ids: string[], directory: string): Promise<string>
+  trackInspect(tracks: string): Promise<string>
   usbList(): Promise<string>
   usbEject(volume: string): Promise<string>
   usbFormat(volume: string): Promise<string>

@@ -26,6 +26,9 @@ const READS: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>> 
     return lib.mediaResolve(text(p?.kind), text(p?.id), text(p?.size))
   },
   'track.previews': (lib, p) => lib.trackPreviews(list(p?.ids)),
+  'files.read': (lib, p) => lib.filesRead(list(p?.paths)),
+  'track.findMissing': (lib, p) => lib.trackFindMissing(list(p?.ids), text(p?.directory)),
+  'track.inspect': (lib, p) => lib.trackInspect(JSON.stringify(p?.tracks ?? [])),
   'usb.list': (lib) => lib.usbList(),
   'usb.playlists': (lib, p) => lib.usbPlaylists(text(p?.volumeId)),
   'usb.libraries': (lib, p) => lib.usbLibraries(text(p?.volumeId)),
@@ -75,6 +78,7 @@ const WRITES: Record<string, (lib: NativeLibrary, p: Params) => Promise<string>>
   'playlist.delete': (lib, p) => lib.playlistDelete(text(p?.id)),
   'tag.add': (lib, p) => lib.tagAdd(text(p?.id), list(p?.trackIds)),
   'tag.remove': (lib, p) => lib.tagRemove(text(p?.id), list(p?.trackIds)),
+  'track.relocate': (lib, p) => lib.trackRelocate(JSON.stringify(p?.moves ?? {})),
   'usb.eject': (lib, p) => lib.usbEject(text(p?.volumeId)),
   'usb.format': (lib, p) => lib.usbFormat(text(p?.volumeId)),
   'usb.sync': (lib, p) => lib.usbSync(text(p?.volumeId), list(p?.playlistIds), Boolean(p?.overwrite)),

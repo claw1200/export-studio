@@ -1,6 +1,7 @@
 //! Use cases. Each takes the storage crates it needs and does one thing the app offers.
 
 pub mod artwork;
+pub mod browse;
 pub mod device_import;
 pub mod import;
 pub mod inspect;

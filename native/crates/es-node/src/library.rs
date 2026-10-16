@@ -214,6 +214,40 @@ fn parse_edit(fields: &str) -> napi::Result<TrackEdit> {
     Ok(edit)
 }
 
+/// Header checks for a batch of collection tracks; a file whose size and mtime still match the caller's cache is not read again.
+fn inspect_tracks(state: &State, items: &str) -> napi::Result<String> {
+    use es_engine::inspect::{inspect_file, same_fingerprint};
+    let list: Vec<Value> = serde_json::from_str(items).map_err(|_| failure("tracks must be a list"))?;
+    let mut out = Vec::new();
+    for item in list.iter().take(80) {
+        let id = item.get("id").and_then(Value::as_str).filter(|i| !i.is_empty()).ok_or_else(|| failure("tracks must be a list of track ids"))?;
+        let files = state.lib.track_files(id).map_err(failure)?.ok_or_else(|| failure(format!("Unknown track {id}")))?;
+        if !es_engine::relocate::is_local(&files.folder_path) {
+            out.push(json!({ "id": id, "size": 0, "mtime": null, "same": false, "issues": [], "audio": null }));
+            continue;
+        }
+        let path = std::path::Path::new(&files.folder_path);
+        if let (Some(size), Some(mtime)) = (item.get("size"), item.get("mtime")) {
+            let hinted = size.as_i64().or_else(|| size.as_str().and_then(|s| s.trim().parse().ok()));
+            let mtime = match mtime {
+                Value::Null => None,
+                Value::String(s) => Some(s.clone()),
+                other => Some(other.to_string()),
+            };
+            if let Some((size, mtime)) = same_fingerprint(path, hinted, mtime.as_deref()) {
+                out.push(json!({ "id": id, "size": size, "mtime": mtime, "same": true, "issues": [], "audio": null }));
+                continue;
+            }
+        }
+        let found = inspect_file(path);
+        let mut entry = serde_json::to_value(&found).map_err(failure)?;
+        entry["id"] = json!(id);
+        entry["same"] = json!(false);
+        out.push(entry);
+    }
+    json_of(&out)
+}
+
 enum Op {
     Open(Option<String>),
     Reload,
@@ -228,6 +262,10 @@ enum Op {
     HistoryTracks(String),
     TrackDetail(String),
     TrackPreviews(Vec<String>),
+    TrackRelocate(String),
+    TrackFindMissing(Vec<String>, String),
+    TrackInspect(String),
+    FilesRead(Vec<String>),
     MediaResolve { kind: String, id: String, size: String },
     CueSetHot(String, i64, i64),
     CueAddMemory(String, i64),
@@ -339,6 +377,9 @@ impl Run {
             }
             _ => {}
         }
+        if let Op::FilesRead(paths) = &self.op {
+            return json_of(&es_engine::browse::file_rows(paths));
+        }
         if let Op::Usb(op) = &self.op {
             return crate::usb::perform(&self.core, slot, op);
         }
@@ -387,6 +428,23 @@ impl Run {
                 let ordered: Vec<_> = ids.iter().filter(|i| seen.insert(i.as_str())).take(80).filter_map(|i| by_id.remove(i)).collect();
                 json_of(&ordered)
             }
+            Op::TrackRelocate(moves) => {
+                let parsed: serde_json::Map<String, serde_json::Value> = serde_json::from_str(moves).map_err(failure)?;
+                let moves: Vec<(String, String)> =
+                    parsed.into_iter().map(|(id, path)| (id, path.as_str().unwrap_or_default().to_owned())).collect();
+                let share = state.lib.share_dir();
+                let ids = with_live(state, |live| es_engine::relocate::relocate(live, &share, &moves).map_err(failure))?;
+                tracks_of(state, &ids)
+            }
+            Op::TrackFindMissing(ids, directory) => {
+                let found = es_engine::relocate::find_missing(&state.lib, ids, std::path::Path::new(directory)).map_err(failure)?;
+                json_of(&json!({
+                    "matches": found.matches.iter().map(|m| json!({ "id": m.id, "path": m.path })).collect::<Vec<_>>(),
+                    "scanned": found.scanned,
+                }))
+            }
+            Op::TrackInspect(items) => inspect_tracks(state, items),
+            Op::FilesRead(_) => unreachable!("handled above"),
             Op::MediaResolve { kind, id, size } => {
                 let found = es_index::media::resolve_media(&state.lib, &state.lib.share_dir(), kind, id, size).map_err(failure)?;
                 json_of(&found)
@@ -595,6 +653,26 @@ impl RekordboxLibrary {
     #[napi(ts_return_type = "Promise<string>")]
     pub fn track_previews(&self, ids: Vec<String>) -> AsyncTask<Run> {
         self.run(Op::TrackPreviews(ids))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn files_read(&self, paths: Vec<String>) -> AsyncTask<Run> {
+        self.run(Op::FilesRead(paths))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn track_relocate(&self, moves: String) -> AsyncTask<Run> {
+        self.run(Op::TrackRelocate(moves))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn track_find_missing(&self, ids: Vec<String>, directory: String) -> AsyncTask<Run> {
+        self.run(Op::TrackFindMissing(ids, directory))
+    }
+
+    #[napi(ts_return_type = "Promise<string>")]
+    pub fn track_inspect(&self, tracks: String) -> AsyncTask<Run> {
+        self.run(Op::TrackInspect(tracks))
     }
 
     #[napi(ts_return_type = "Promise<string>")]

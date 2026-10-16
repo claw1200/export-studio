@@ -109,6 +109,31 @@ fn leading_float(value: &str) -> f64 {
     value.trim_start()[..end].parse::<f64>().ok().filter(|v| *v > 0.0 && *v < 1000.0).unwrap_or(0.0)
 }
 
+/// A FLAC file's bitrate in kilobits per second, rounded: lofty truncates it.
+fn flac_bitrate(path: &Path, duration_secs: f64) -> Option<i64> {
+    use std::io::{Read, Seek, SeekFrom};
+    if duration_secs <= 0.0 {
+        return None;
+    }
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut magic = [0u8; 4];
+    file.read_exact(&mut magic).ok()?;
+    if &magic != b"fLaC" {
+        return None;
+    }
+    loop {
+        let mut head = [0u8; 4];
+        file.read_exact(&mut head).ok()?;
+        let len = (u64::from(head[1]) << 16) | (u64::from(head[2]) << 8) | u64::from(head[3]);
+        file.seek(SeekFrom::Current(i64::try_from(len).ok()?)).ok()?;
+        if head[0] & 0x80 != 0 {
+            break;
+        }
+    }
+    let audio = file.metadata().ok()?.len().checked_sub(file.stream_position().ok()?)?;
+    Some((audio as f64 * 8.0 / duration_secs / 1000.0).round_ties_even() as i64)
+}
+
 pub fn read(path: &Path) -> Result<Info> {
     let file = open(path)?;
     let props = file.properties();
@@ -119,6 +144,11 @@ pub fn read(path: &Path) -> Result<Info> {
         bit_depth: i64::from(props.bit_depth().unwrap_or(0)),
         ..Info::default()
     };
+    if file.file_type() == lofty::file::FileType::Flac {
+        if let Some(rounded) = flac_bitrate(path, props.duration().as_secs_f64()) {
+            info.bitrate = rounded;
+        }
+    }
     if let Some(tag) = pick(&file) {
         info.fields = Fields {
             title: text(tag, &ItemKey::TrackTitle),
