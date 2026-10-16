@@ -5,7 +5,7 @@ import type { NativeLibrary, NativeModule } from './audio/native'
 import type { EngineCommandParams, EngineMethod } from '../preload/engine'
 
 type CommandHandlers = {
-  [Method in EngineMethod]?: (lib: NativeLibrary, params: EngineCommandParams[Method]) => Promise<string>
+  [Method in EngineMethod]?: (lib: NativeLibrary, params: EngineCommandParams[Method]) => Promise<unknown>
 }
 
 const text = (value: unknown): string => String(value ?? '')
@@ -26,7 +26,7 @@ const READS: CommandHandlers = {
     text(p?.id).startsWith('usb:') ? lib.usbDetail(text(p?.id)) : lib.trackDetail(text(p?.id)),
   'media.resolve': (lib, p) => {
     if (text(p?.id).startsWith('usb:')) {
-      return text(p?.kind) === 'audio' ? lib.usbMedia(text(p?.id)) : Promise.resolve('null')
+      return text(p?.kind) === 'audio' ? lib.usbMedia(text(p?.id)) : Promise.resolve(null)
     }
     return lib.mediaResolve(text(p?.kind), text(p?.id), text(p?.size))
   },
@@ -214,14 +214,14 @@ export class Library {
   private async watch(): Promise<void> {
     try {
       const lib = this.library()
-      const volumes = JSON.parse(await lib.usbList()) as Volume[]
+      const volumes = (await lib.usbList()) as Volume[]
       const key = JSON.stringify(volumes.map((v) => [v.id, v.hasLibrary, v.rootName, v.ejectable]))
       if (this.volumes && key !== this.volumes) this.emit('usb.volumes', { volumes })
       this.volumes = key
       if (!this.opened) return
-      const info = JSON.parse(await lib.info()) as Info
+      const info = (await lib.info()) as Info
       if (info.writable && info.rekordboxRunning) {
-        this.emit('library.locked', JSON.parse(await lib.setWritable(false)))
+        this.emit('library.locked', await lib.setWritable(false))
         this.notified = false
       } else if (this.running !== null && info.rekordboxRunning !== this.running) {
         this.emit('library.rekordbox', { running: info.rekordboxRunning })
@@ -256,17 +256,17 @@ export class Library {
         this.running = null
         this.notified = false
         this.startDaily()
-        return JSON.parse(info) as T
+        return info as T
       }
       if (method === 'library.reload') {
         const info = await this.library().reload()
         this.emit('library.reloaded', {})
-        return JSON.parse(info) as T
+        return info as T
       }
       const handler = READS[method] ?? WRITES[method] ?? LIFECYCLE[method]
       if (!handler) throw new LibraryError(`Unknown method: ${method}`)
-      const run = handler as (lib: NativeLibrary, params: unknown) => Promise<string>
-      return JSON.parse(await run(this.library(), params)) as T
+      const run = handler as (lib: NativeLibrary, params: unknown) => Promise<unknown>
+      return (await run(this.library(), params)) as T
     } catch (e) {
       if (e instanceof LibraryError) throw e
       throw new LibraryError((e as Error).message)

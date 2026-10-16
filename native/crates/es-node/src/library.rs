@@ -76,8 +76,8 @@ pub(crate) fn failure(reason: impl std::fmt::Display) -> napi::Error {
     napi::Error::from_reason(reason.to_string())
 }
 
-pub(crate) fn json_of(value: &impl Serialize) -> napi::Result<String> {
-    serde_json::to_string(value).map_err(failure)
+pub(crate) fn json_of(value: &impl Serialize) -> napi::Result<Value> {
+    serde_json::to_value(value).map_err(failure)
 }
 
 /// A whole number from what the interface sends: nothing, an empty string or false mean 0.
@@ -192,7 +192,7 @@ pub struct Run {
 
 impl Run {
     /// Backup calls that need nothing but the library's location.
-    fn backup_op(&self, service: &LibraryService) -> napi::Result<String> {
+    fn backup_op(&self, service: &LibraryService) -> napi::Result<Value> {
         let emit = |event| self.core.emit_service_event(event);
         match &self.op {
             Op::BackupList => json_of(&service.backup_list()),
@@ -210,7 +210,7 @@ impl Run {
         }
     }
 
-    fn perform(&self, service: &mut LibraryService) -> napi::Result<String> {
+    fn perform(&self, service: &mut LibraryService) -> napi::Result<Value> {
         match &self.op {
             Op::Open(path) => {
                 let source = path
@@ -236,7 +236,7 @@ impl Run {
             }
             Op::DailyBackup => {
                 let emit = |event| self.core.emit_service_event(event);
-                return Ok(service.daily_backup(&emit).map_err(failure)?.to_string());
+                return Ok(json!(service.daily_backup(&emit).map_err(failure)?));
             }
             _ => {}
         }
@@ -439,16 +439,16 @@ impl Run {
 }
 
 impl Task for Run {
-    type Output = String;
-    type JsValue = String;
+    type Output = Value;
+    type JsValue = napi::JsUnknown;
 
-    fn compute(&mut self) -> napi::Result<String> {
+    fn compute(&mut self) -> napi::Result<Value> {
         let mut service = self.core.service.lock().map_err(|_| failure("the library lock was poisoned"))?;
         self.perform(&mut service)
     }
 
-    fn resolve(&mut self, _env: Env, output: String) -> napi::Result<String> {
-        Ok(output)
+    fn resolve(&mut self, env: Env, output: Value) -> napi::Result<napi::JsUnknown> {
+        env.to_js_value(&output)
     }
 }
 
@@ -469,133 +469,133 @@ impl RekordboxLibrary {
         AsyncTask::new(Run { core: Arc::clone(&self.core), op })
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn open(&self, path: Option<String>) -> AsyncTask<Run> {
         self.run(Op::Open(path))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn reload(&self) -> AsyncTask<Run> {
         self.run(Op::Reload)
     }
 
     /// Whether edits are allowed; the app sets it when the user unlocks editing.
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn set_writable(&self, on: bool) -> AsyncTask<Run> {
         self.run(Op::SetWritable(on))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn info(&self) -> AsyncTask<Run> {
         self.run(Op::Info)
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn tracks(&self) -> AsyncTask<Run> {
         self.run(Op::Tracks)
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn playlists(&self) -> AsyncTask<Run> {
         self.run(Op::Playlists)
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn histories(&self) -> AsyncTask<Run> {
         self.run(Op::Histories)
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn my_tags(&self) -> AsyncTask<Run> {
         self.run(Op::MyTags)
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn playlist_members(&self) -> AsyncTask<Run> {
         self.run(Op::PlaylistMembers)
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn playlist_tracks(&self, id: String) -> AsyncTask<Run> {
         self.run(Op::PlaylistTracks(id))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn history_tracks(&self, id: String) -> AsyncTask<Run> {
         self.run(Op::HistoryTracks(id))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn track_detail(&self, id: String) -> AsyncTask<Run> {
         self.run(Op::TrackDetail(id))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn track_previews(&self, ids: Vec<String>) -> AsyncTask<Run> {
         self.run(Op::TrackPreviews(ids))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn files_read(&self, paths: Vec<String>) -> AsyncTask<Run> {
         self.run(Op::FilesRead(paths))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn beatgrid_set(&self, id: String, body: String) -> AsyncTask<Run> {
         self.run(Op::BeatgridSet(id, body))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn track_apply_analysis(&self, id: String, body: String) -> AsyncTask<Run> {
         self.run(Op::ApplyAnalysis(id, body))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn track_convert(&self, ids: Vec<String>, preset: String, mode: String) -> AsyncTask<Run> {
         self.run(Op::Convert { ids, preset, mode })
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn track_relocate(&self, moves: String) -> AsyncTask<Run> {
         self.run(Op::TrackRelocate(moves))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn track_find_missing(&self, ids: Vec<String>, directory: String) -> AsyncTask<Run> {
         self.run(Op::TrackFindMissing(ids, directory))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn track_inspect(&self, tracks: String) -> AsyncTask<Run> {
         self.run(Op::TrackInspect(tracks))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn media_resolve(&self, kind: String, id: String, size: String) -> AsyncTask<Run> {
         self.run(Op::MediaResolve { kind, id, size })
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn cue_set_hot(&self, id: String, kind: i64, ms: i64) -> AsyncTask<Run> {
         self.run(Op::CueSetHot(id, kind, ms))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn cue_add_memory(&self, id: String, ms: i64) -> AsyncTask<Run> {
         self.run(Op::CueAddMemory(id, ms))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn cue_delete(&self, id: String, cue_id: String) -> AsyncTask<Run> {
         self.run(Op::CueDelete(id, cue_id))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn cue_set_color(&self, id: String, cue_id: String, color_index: Option<i64>) -> AsyncTask<Run> {
         self.run(Op::CueSetColor(id, cue_id, color_index))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn track_update(&self, ids: Vec<String>, fields: String, write_tags: Option<bool>) -> AsyncTask<Run> {
         self.run(Op::TrackUpdate(ids, fields, write_tags.unwrap_or(false)))
     }
@@ -617,68 +617,68 @@ impl RekordboxLibrary {
         Ok(())
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn backup_list(&self) -> AsyncTask<Run> {
         self.run(Op::BackupList)
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn backup_create(&self) -> AsyncTask<Run> {
         self.run(Op::BackupCreate)
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn backup_delete(&self, id: String) -> AsyncTask<Run> {
         self.run(Op::BackupDelete(id))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn backup_restore(&self, id: String) -> AsyncTask<Run> {
         self.run(Op::BackupRestore(id))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn backup_settings(&self) -> AsyncTask<Run> {
         self.run(Op::BackupSettings)
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn backup_set_settings(&self, auto: Option<bool>, keep: Option<i64>, interval: Option<i64>) -> AsyncTask<Run> {
         self.run(Op::BackupSetSettings { auto, keep, interval })
     }
 
     /// Takes a daily backup when one is due; resolves to whether it was due.
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn daily_backup(&self) -> AsyncTask<Run> {
         self.run(Op::DailyBackup)
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn track_import(&self, paths: Vec<String>, playlist_id: Option<String>, artwork: bool) -> AsyncTask<Run> {
         self.run(Op::TrackImport { paths, playlist: playlist_id, artwork })
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn remove_tracks(&self, ids: Vec<String>) -> AsyncTask<Run> {
         self.run(Op::RemoveTracks(ids))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn playlist_add(&self, id: String, track_ids: Vec<String>) -> AsyncTask<Run> {
         self.run(Op::PlaylistAdd(id, track_ids))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn playlist_remove(&self, id: String, track_ids: Vec<String>) -> AsyncTask<Run> {
         self.run(Op::PlaylistRemove(id, track_ids))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn playlist_move(&self, id: String, track_ids: Vec<String>, index: u32) -> AsyncTask<Run> {
         self.run(Op::PlaylistMove(id, track_ids, index))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn playlist_create(
         &self,
         name: String,
@@ -689,82 +689,82 @@ impl RekordboxLibrary {
         self.run(Op::PlaylistCreate { name, parent: parent_id, folder, ids: track_ids })
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn playlist_rename(&self, id: String, name: String) -> AsyncTask<Run> {
         self.run(Op::PlaylistRename(id, name))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn playlist_delete(&self, id: String) -> AsyncTask<Run> {
         self.run(Op::PlaylistDelete(id))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn tag_add(&self, tag_id: String, track_ids: Vec<String>) -> AsyncTask<Run> {
         self.run(Op::TagAdd(tag_id, track_ids))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn tag_remove(&self, tag_id: String, track_ids: Vec<String>) -> AsyncTask<Run> {
         self.run(Op::TagRemove(tag_id, track_ids))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_list(&self) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::List))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_eject(&self, volume: String) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::Eject(volume)))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_format(&self, volume: String) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::Format(volume)))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_playlists(&self, volume: String) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::Playlists(volume)))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_libraries(&self, volume: String) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::Libraries(volume)))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_selection(&self, volume: String) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::Selection(volume)))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_tracks(&self, volume: String, playlist_id: Option<String>) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::Tracks(volume, playlist_id)))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_detail(&self, key: String) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::Detail(key)))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_media(&self, key: String) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::Media(key)))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_import_preview(&self, volume: String, folder: Option<String>, policy: Option<String>) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::ImportPreview { volume, folder, policy }))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_import(&self, volume: String, folder: Option<String>, policy: Option<String>) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::Import { volume, folder, policy }))
     }
 
-    #[napi(ts_return_type = "Promise<string>")]
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_sync(&self, volume: String, playlist_ids: Vec<String>, overwrite: bool) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::Sync { volume, playlists: playlist_ids, overwrite }))
     }

@@ -82,63 +82,62 @@ export interface NativeTrackAnalysis {
 }
 
 export interface NativeLibrary {
-  /** Every call resolves to JSON text. */
-  open(path?: string | null): Promise<string>
-  reload(): Promise<string>
-  info(): Promise<string>
-  tracks(): Promise<string>
-  playlists(): Promise<string>
-  histories(): Promise<string>
-  myTags(): Promise<string>
-  playlistMembers(): Promise<string>
-  playlistTracks(id: string): Promise<string>
-  historyTracks(id: string): Promise<string>
-  trackDetail(id: string): Promise<string>
-  mediaResolve(kind: string, id: string, size: string): Promise<string>
-  cueSetHot(id: string, kind: number, ms: number): Promise<string>
-  cueAddMemory(id: string, ms: number): Promise<string>
-  cueDelete(id: string, cueId: string): Promise<string>
-  cueSetColor(id: string, cueId: string, colorIndex: number | null): Promise<string>
+  open(path?: string | null): Promise<unknown>
+  reload(): Promise<unknown>
+  info(): Promise<unknown>
+  tracks(): Promise<unknown>
+  playlists(): Promise<unknown>
+  histories(): Promise<unknown>
+  myTags(): Promise<unknown>
+  playlistMembers(): Promise<unknown>
+  playlistTracks(id: string): Promise<unknown>
+  historyTracks(id: string): Promise<unknown>
+  trackDetail(id: string): Promise<unknown>
+  mediaResolve(kind: string, id: string, size: string): Promise<unknown>
+  cueSetHot(id: string, kind: number, ms: number): Promise<unknown>
+  cueAddMemory(id: string, ms: number): Promise<unknown>
+  cueDelete(id: string, cueId: string): Promise<unknown>
+  cueSetColor(id: string, cueId: string, colorIndex: number | null): Promise<unknown>
   onEvent(callback: (event: string, data: string) => void): void
-  backupList(): Promise<string>
-  backupCreate(): Promise<string>
-  backupDelete(id: string): Promise<string>
-  backupRestore(id: string): Promise<string>
-  backupSettings(): Promise<string>
-  backupSetSettings(auto: boolean | null, keep: number | null, interval: number | null): Promise<string>
-  dailyBackup(): Promise<string>
-  trackUpdate(ids: string[], fields: string, writeTags?: boolean): Promise<string>
-  trackImport(paths: string[], playlistId: string | null, artwork: boolean): Promise<string>
-  setWritable(on: boolean): Promise<string>
-  trackPreviews(ids: string[]): Promise<string>
-  filesRead(paths: string[]): Promise<string>
-  beatgridSet(id: string, body: string): Promise<string>
-  trackConvert(ids: string[], preset: string, mode: string): Promise<string>
-  trackApplyAnalysis(id: string, body: string): Promise<string>
-  trackRelocate(moves: string): Promise<string>
-  trackFindMissing(ids: string[], directory: string): Promise<string>
-  trackInspect(tracks: string): Promise<string>
-  usbList(): Promise<string>
-  usbEject(volume: string): Promise<string>
-  usbFormat(volume: string): Promise<string>
-  usbPlaylists(volume: string): Promise<string>
-  usbLibraries(volume: string): Promise<string>
-  usbSelection(volume: string): Promise<string>
-  usbTracks(volume: string, playlistId: string | null): Promise<string>
-  usbDetail(key: string): Promise<string>
-  usbMedia(key: string): Promise<string>
-  usbImportPreview(volume: string, folder: string | null, policy: string | null): Promise<string>
-  usbImport(volume: string, folder: string | null, policy: string | null): Promise<string>
-  usbSync(volume: string, playlistIds: string[], overwrite: boolean): Promise<string>
-  removeTracks(ids: string[]): Promise<string>
-  playlistAdd(id: string, trackIds: string[]): Promise<string>
-  playlistRemove(id: string, trackIds: string[]): Promise<string>
-  playlistMove(id: string, trackIds: string[], index: number): Promise<string>
-  playlistCreate(name: string, parentId: string | null, folder: boolean, trackIds: string[]): Promise<string>
-  playlistRename(id: string, name: string): Promise<string>
-  playlistDelete(id: string): Promise<string>
-  tagAdd(tagId: string, trackIds: string[]): Promise<string>
-  tagRemove(tagId: string, trackIds: string[]): Promise<string>
+  backupList(): Promise<unknown>
+  backupCreate(): Promise<unknown>
+  backupDelete(id: string): Promise<unknown>
+  backupRestore(id: string): Promise<unknown>
+  backupSettings(): Promise<unknown>
+  backupSetSettings(auto: boolean | null, keep: number | null, interval: number | null): Promise<unknown>
+  dailyBackup(): Promise<unknown>
+  trackUpdate(ids: string[], fields: string, writeTags?: boolean): Promise<unknown>
+  trackImport(paths: string[], playlistId: string | null, artwork: boolean): Promise<unknown>
+  setWritable(on: boolean): Promise<unknown>
+  trackPreviews(ids: string[]): Promise<unknown>
+  filesRead(paths: string[]): Promise<unknown>
+  beatgridSet(id: string, body: string): Promise<unknown>
+  trackConvert(ids: string[], preset: string, mode: string): Promise<unknown>
+  trackApplyAnalysis(id: string, body: string): Promise<unknown>
+  trackRelocate(moves: string): Promise<unknown>
+  trackFindMissing(ids: string[], directory: string): Promise<unknown>
+  trackInspect(tracks: string): Promise<unknown>
+  usbList(): Promise<unknown>
+  usbEject(volume: string): Promise<unknown>
+  usbFormat(volume: string): Promise<unknown>
+  usbPlaylists(volume: string): Promise<unknown>
+  usbLibraries(volume: string): Promise<unknown>
+  usbSelection(volume: string): Promise<unknown>
+  usbTracks(volume: string, playlistId: string | null): Promise<unknown>
+  usbDetail(key: string): Promise<unknown>
+  usbMedia(key: string): Promise<unknown>
+  usbImportPreview(volume: string, folder: string | null, policy: string | null): Promise<unknown>
+  usbImport(volume: string, folder: string | null, policy: string | null): Promise<unknown>
+  usbSync(volume: string, playlistIds: string[], overwrite: boolean): Promise<unknown>
+  removeTracks(ids: string[]): Promise<unknown>
+  playlistAdd(id: string, trackIds: string[]): Promise<unknown>
+  playlistRemove(id: string, trackIds: string[]): Promise<unknown>
+  playlistMove(id: string, trackIds: string[], index: number): Promise<unknown>
+  playlistCreate(name: string, parentId: string | null, folder: boolean, trackIds: string[]): Promise<unknown>
+  playlistRename(id: string, name: string): Promise<unknown>
+  playlistDelete(id: string): Promise<unknown>
+  tagAdd(tagId: string, trackIds: string[]): Promise<unknown>
+  tagRemove(tagId: string, trackIds: string[]): Promise<unknown>
 }
 
 export interface NativeModule {

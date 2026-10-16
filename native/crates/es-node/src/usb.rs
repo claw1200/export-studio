@@ -7,7 +7,7 @@ use std::time::SystemTime;
 
 use es_device::{paths::pioneer_dir, volumes, Device, LibraryKind};
 use es_engine::device_import::{self, PlaylistPolicy, TrackStatus};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::library::{failure, json_of, Core};
 use es_engine::library::LibraryService;
@@ -110,19 +110,19 @@ fn require(device: Option<Arc<Device>>) -> napi::Result<Arc<Device>> {
     device.ok_or_else(|| failure("This volume has no rekordbox library"))
 }
 
-pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> napi::Result<String> {
+pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> napi::Result<Value> {
     match op {
         UsbOp::List => json_of(&volumes::list(None)),
         UsbOp::Eject(id) => {
             volumes::eject(id, None).map_err(failure)?;
             publish_volumes(core);
-            Ok("null".into())
+            Ok(Value::Null)
         }
         UsbOp::Format(id) => {
             volumes::format(id, None).map_err(failure)?;
             core.devices.forget(Path::new(id));
             publish_volumes(core);
-            Ok("null".into())
+            Ok(Value::Null)
         }
         UsbOp::Playlists(volume) => {
             let volume = mounted(volume)?;
@@ -146,7 +146,7 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
         UsbOp::Tracks(volume, playlist) => {
             let volume = mounted(volume)?;
             match core.devices.load(&volume)? {
-                None => Ok("[]".into()),
+                None => Ok(json!([])),
                 Some(device) => json_of(&es_index::device::tracks(&volume, &device, playlist.as_deref()).map_err(failure)?),
             }
         }
