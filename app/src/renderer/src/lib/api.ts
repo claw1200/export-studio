@@ -21,6 +21,7 @@ import type {
   TrackUpdate,
   DeviceLibraryView,
   TreeItem,
+  UsbImportPreview,
   UsbImportResult,
   Volume
 } from './types'
@@ -78,7 +79,10 @@ export const api = {
   usbTracks: (volumeId: string, playlistId: string | null) => call<Track[]>('usb.tracks', { volumeId, playlistId }),
   usbSync: (volumeId: string, playlistIds: string[], overwrite = false) =>
     call<{ volumeId: string; tracks: number; playlists: number }>('usb.sync', { volumeId, playlistIds, overwrite }),
-  usbImport: (volumeId: string) => call<UsbImportResult>('usb.import', { volumeId }),
+  usbImportPreview: (volumeId: string, folder: string | null) =>
+    call<UsbImportPreview>('usb.importPreview', { volumeId, folder }),
+  usbImport: (volumeId: string, folder: string | null = null) =>
+    call<UsbImportResult>('usb.import', { volumeId, folder }),
   usbFormat: (volumeId: string) => call<void>('usb.format', { volumeId }),
   backupList: () => call<Backup[]>('backup.list'),
   backupCreate: () => call<Backup>('backup.create'),

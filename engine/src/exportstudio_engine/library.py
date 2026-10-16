@@ -1393,6 +1393,70 @@ class Library:
         self._content_cache.clear()
         return self.tracks(ids=[content.ID])[0]
 
+    def apply_device_data(
+        self, content_id: str, anlz: dict[str, bytes], fields: dict, cues: list[dict]
+    ) -> None:
+        """Give a freshly imported track the analysis files, cues and numbers it had on a device.
+
+        `anlz` maps DAT, EXT and 2EX to the device's file bytes. `fields` may hold bpm (x100), key
+        (a scale name), rating and color. Each cue has kind, start, end, colorIndex, comment, activeLoop.
+        """
+        db = self._writable_db()
+        content = self._content(content_id)
+        relative = content.AnalysisDataPath or (
+            f"/PIONEER/USBANLZ/{content.UUID[:3]}/{content.UUID[3:]}/ANLZ0000.DAT"
+        )
+        dat = self.share_dir / relative.strip("/\\")
+        path_tag = anlz_build.path_tag("?/" + Path(content.FolderPath or "").name)
+        writes = {dat.with_suffix(f".{kind}"): anlz_build.patch_file(data, {"PPTH": path_tag}) for kind, data in anlz.items()}
+        previous = {path: path.read_bytes() if path.is_file() else None for path in writes}
+
+        def update() -> None:
+            if writes:
+                _set(content, "AnalysisDataPath", relative)
+                _set(content, "Analysed", ANALYSED)
+            if fields.get("bpm"):
+                _set(content, "BPM", int(fields["bpm"]))
+            if fields.get("rating"):
+                _set(content, "Rating", int(fields["rating"]))
+            if fields.get("color"):
+                _set(content, "ColorID", str(fields["color"]))
+            if fields.get("key"):
+                key = db.query(t.DjmdKey).filter(t.DjmdKey.ScaleName == fields["key"]).first()
+                if key is not None:
+                    _set(content, "KeyID", key.ID)
+            for cue in cues:
+                row = _new_cue(db, content, int(cue["kind"]), _clamp_msec(content, cue["start"]))
+                end = cue.get("end")
+                if end is not None and end >= 0:
+                    out = _clamp_msec(content, end)
+                    row.OutMsec = out
+                    row.OutFrame = out * CDJ_FRAMES_PER_SECOND // 1000
+                if cue.get("colorIndex"):
+                    row.ColorTableIndex = int(cue["colorIndex"])
+                row.Comment = cue.get("comment") or ""
+                row.ActiveLoop = int(bool(cue.get("activeLoop")))
+                db.add(row)
+
+        try:
+            for path, data in writes.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_name(path.name + ".tmp")
+                tmp.write_bytes(data)
+                os.replace(tmp, path)
+            _commit(db, update)
+        except Exception:
+            for path, data in previous.items():
+                try:
+                    if data is None:
+                        path.unlink(missing_ok=True)
+                    else:
+                        path.write_bytes(data)
+                except OSError:
+                    log.exception("Could not restore %s", path)
+            raise
+        self._content_cache.clear()
+
     def _key_id(self, db: Rekordbox6Database, tonic: int, minor: bool) -> str:
         """The key row for a key, in whichever notation the library already uses, added if missing."""
         rows = db.query(t.DjmdKey).all()

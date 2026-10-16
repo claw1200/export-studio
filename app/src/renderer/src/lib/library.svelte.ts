@@ -865,7 +865,7 @@ export class Library {
     }
   }
 
-  async importDevice(volumeId: string): Promise<UsbImportResult | null> {
+  async importDevice(volumeId: string, folder: string | null = null): Promise<UsbImportResult | null> {
     if (this.syncing) return null
     if (!this.writable) {
       this.syncError = 'Unlock editing to import tracks'
@@ -876,7 +876,7 @@ export class Library {
     this.syncError = null
     this.syncProgress = { phase: 'import' }
     try {
-      const result = await api.usbImport(volumeId)
+      const result = await api.usbImport(volumeId, folder)
       await this.refreshContents()
       return result
     } catch (e) {

@@ -12,7 +12,7 @@ from .backup import Backups
 from .library import WRITE_BLOCKED, Library, _rekordbox_db_path
 from .usb import browse
 from .usb.selection import library_db_id, recorded_playlist_ids
-from .usb.importing import import_device
+from .usb.importing import import_device, preview_import
 from .usb.sync import bundle_from_library, sync_volume
 from .usb.volumes import eject_volume, format_volume, list_volumes
 
@@ -90,7 +90,8 @@ class Engine:
             "usb.tracks": lambda volumeId, playlistId=None: browse.tracks(Path(volumeId), playlistId),
             "usb.detail": lambda id: browse.detail(id),
             "usb.sync": lambda volumeId, playlistIds, overwrite=False: self.sync(volumeId, playlistIds, overwrite),
-            "usb.import": lambda volumeId: self.import_usb(volumeId),
+            "usb.importPreview": lambda volumeId, folder=None: self.import_preview(volumeId, folder),
+            "usb.import": lambda volumeId, folder=None: self.import_usb(volumeId, folder),
             "usb.format": lambda volumeId: self.format(volumeId),
             "backup.list": lambda: self.backups.list_backups(self._source(required=False)),
             "backup.create": lambda: self.back_up("manual"),
@@ -223,13 +224,17 @@ class Engine:
         emit("usb.volumes", {"volumes": list_volumes()})
         return result
 
-    def import_usb(self, volumeId: str) -> dict:
+    def import_preview(self, volumeId: str, folder: str | None = None) -> dict:
+        volume = self._listed_volume(volumeId)
+        return preview_import(self.lib, volume, browse.load(volume), folder=folder)
+
+    def import_usb(self, volumeId: str, folder: str | None = None) -> dict:
         volume = self._listed_volume(volumeId)
 
         def progress(event: dict) -> None:
             emit("usb.progress", event)
 
-        result = import_device(self.lib, volume, on_progress=progress)
+        result = import_device(self.lib, volume, folder=folder, on_progress=progress)
         emit("usb.progress", {"phase": "done"})
         return result
 

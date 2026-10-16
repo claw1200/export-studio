@@ -32,6 +32,7 @@
   import type { Source, View, Volume } from '$lib/types'
   import ConfirmDialog from './ConfirmDialog.svelte'
   import ContextMenu from './ContextMenu.svelte'
+  import ImportDialog from './ImportDialog.svelte'
   import SyncDialog from './SyncDialog.svelte'
   import ViewDialog from './ViewDialog.svelte'
 
@@ -205,6 +206,7 @@
   let menu = $state<MenuRequest | null>(null)
   let deleting = $state<TreeNode | null>(null)
   let syncing = $state<{ playlistId: string; volumeId: string } | null>(null)
+  let importing = $state<string | null>(null)
   let viewDialog = $state<View | 'new' | null>(null)
   let deletingView = $state<View | null>(null)
 
@@ -297,6 +299,29 @@
   function openSync(playlistId: string, volumeId: string): void {
     void library.refreshDevices()
     syncing = { playlistId, volumeId }
+  }
+
+  function deviceMenu(e: MouseEvent, volume: Volume): void {
+    e.preventDefault()
+    menu = menuAt(e, 'Device', [
+      { label: 'Sync…', icon: FolderSync, disabled: library.syncing, onselect: () => openSync('', volume.id) },
+      {
+        label: 'Import…',
+        icon: FolderInput,
+        disabled: library.syncing || !volume.hasLibrary,
+        onselect: () => {
+          void library.refreshDevices()
+          importing = volume.id
+        }
+      },
+      SEPARATOR,
+      {
+        label: 'Eject',
+        icon: Eject,
+        disabled: library.syncing || !volume.ejectable || ejectingId === volume.id,
+        onselect: () => void ejectVolume(volume)
+      }
+    ])
   }
 
   async function toggleDevice(volumeId: string, hasLibrary: boolean): Promise<void> {
@@ -507,7 +532,12 @@
         {@const key = `device:${volume.id}`}
         {@const open = expanded.has(key)}
         {@const active = library.isSource({ type: 'device', volumeId: volume.id, playlistId: null })}
-        <div class="flex h-7 items-center gap-1 rounded-md pr-2" class:bg-select={active && volume.hasLibrary}>
+        <div
+          class="flex h-7 items-center gap-1 rounded-md pr-2"
+          class:bg-select={active && volume.hasLibrary}
+          role="presentation"
+          oncontextmenu={(e) => deviceMenu(e, volume)}
+        >
           <button
             class="grid size-7 place-items-center text-faint hover:text-fg"
             aria-label={open ? `Collapse ${volume.name}` : `Expand ${volume.name}`}
@@ -631,6 +661,10 @@
 {#if syncing}
   {@const target = syncing}
   <SyncDialog playlistId={target.playlistId} volumeId={target.volumeId} onclose={() => (syncing = null)} />
+{/if}
+
+{#if importing}
+  <ImportDialog volumeId={importing} onclose={() => (importing = null)} />
 {/if}
 
 {#if viewDialog}

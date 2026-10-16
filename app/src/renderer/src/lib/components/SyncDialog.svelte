@@ -40,7 +40,7 @@
   let overwrite = $state(false)
   let refreshToken = $state(0)
   let deviceToken = $state(0)
-  let confirm = $state<'import' | 'format' | null>(null)
+  let confirm = $state<'format' | null>(null)
   let formatId = $state<string | null>(null)
   let batch = $state(false)
   let activeDevice = $state<string | null>(null)
@@ -346,26 +346,6 @@
       activeDevice = null
       batch = false
     }
-  }
-
-  async function runImport(): Promise<void> {
-    if (locked || !volumeId) return
-    confirm = null
-    error = null
-    notice = null
-    const result = await library.importDevice(volumeId)
-    if (!result) {
-      error = library.syncError
-      return
-    }
-    if (!result.tracks && result.failed.length) {
-      error = result.failed[0].error
-      return
-    }
-    const problems = result.failed.length
-      ? ` ${result.failed.length} couldn’t be copied.`
-      : ''
-    notice = `Imported ${result.tracks} tracks.${problems}`
   }
 
   async function runFormat(): Promise<void> {
@@ -691,23 +671,13 @@
         {/if}
 
         <div class="mt-3 flex flex-col gap-2.5">
-          <div class="flex gap-2">
-            <button
-              value="confirm"
-              disabled={locked || pending || selectedIds.length === 0 || checked.size === 0}
-              class="h-8 flex-1 rounded-md bg-accent px-3 text-[12.5px] font-medium text-bg hover:bg-accent/90 disabled:opacity-40"
-            >
-              {overwrite ? 'Sync anyway' : 'Sync'}
-            </button>
-            <button
-              type="button"
-              disabled={locked || pending || !volume?.hasLibrary}
-              class="h-8 flex-1 rounded-md bg-accent px-3 text-[12.5px] font-medium text-bg hover:bg-accent/90 disabled:opacity-40"
-              onclick={() => (confirm = 'import')}
-            >
-              Import
-            </button>
-          </div>
+          <button
+            value="confirm"
+            disabled={locked || pending || selectedIds.length === 0 || checked.size === 0}
+            class="h-8 rounded-md bg-accent px-3 text-[12.5px] font-medium text-bg hover:bg-accent/90 disabled:opacity-40"
+          >
+            {overwrite ? 'Sync anyway' : 'Sync'}
+          </button>
           <label class="flex items-start gap-2 text-[12px] leading-snug text-muted">
             <input type="checkbox" class="mt-0.5" bind:checked={ejectAfter} disabled={locked || !canEject} />
             Eject after syncing
@@ -725,30 +695,6 @@
       </section>
     </div>
 
-    {#if confirm === 'import'}
-      <div class="mt-4 border-t border-line pt-4">
-        <p class="text-[12.5px] leading-relaxed text-muted">
-          Copy this USB’s playlists into the library. Tracks already here are reused. New audio is copied into
-          Music/PioneerDJ/Imported from Device.
-        </p>
-        <div class="mt-3 flex justify-end gap-2">
-          <button
-            type="button"
-            class="h-7 rounded-md px-3 text-[12.5px] text-muted hover:bg-hover hover:text-fg"
-            onclick={() => (confirm = null)}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="h-7 rounded-md bg-accent px-3 text-[12.5px] font-medium text-bg hover:bg-accent/90"
-            onclick={() => void runImport()}
-          >
-            Import
-          </button>
-        </div>
-      </div>
-    {/if}
     </div>
   </form>
 </dialog>

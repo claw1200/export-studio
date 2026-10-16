@@ -204,6 +204,14 @@ export interface Volume {
   bytesFree: number
 }
 
+export interface UsbImportPreview {
+  destination: string
+  layout: string
+  playlists: { name: string; folder: boolean; depth: number; tracks: number; exists: boolean }[]
+  tracks: { title: string; artist: string; status: 'reuse' | 'copy' | 'missing' }[]
+  counts: { reuse: number; copy: number; missing: number }
+}
+
 export interface UsbImportResult {
   playlists: number
   tracks: number

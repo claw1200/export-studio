@@ -7,14 +7,20 @@ replaced. Tracks this library already exported (their master content id)
 are reused without a copy.
 """
 
+import logging
 import os
 import unicodedata
 from collections import defaultdict
 from pathlib import Path
 
+from pyrekordbox.anlz import structs
+
+from .. import waveform
 from ..library import WRITE_BLOCKED
 from .device import DeviceLibrary, DevicePlaylist, DeviceTrack
 from .paths import volume_path
+
+log = logging.getLogger(__name__)
 
 DIR_NAME_MAX = 48
 FILE_NAME_MAX = 120
@@ -81,10 +87,11 @@ def numbered(file_name: str, n: int) -> str:
     return f"{stem}{suffix}{extension}"
 
 
-def candidate(root: Path, artist: str, album: str, file_name: str) -> Path:
+def candidate(root: Path, artist: str, album: str, file_name: str, *, contents: bool = True) -> Path:
     artist_name = dir_name(artist.strip() or "UnknownArtist")
     album_name = dir_name(album.strip() or "UnknownAlbum")
-    return root / "Contents" / artist_name / album_name / fat_file_name(file_name)
+    base = root / "Contents" if contents else root
+    return base / artist_name / album_name / fat_file_name(file_name)
 
 
 def _same_bytes(left: Path, right: Path) -> bool:
@@ -180,7 +187,166 @@ def _audio(volume: Path, track: DeviceTrack) -> Path | None:
     return path if path.is_file() else None
 
 
-def import_device(library, volume: Path, *, music: Path | None = None, on_progress=None) -> dict:
+def _custom_folder(folder: str | Path | None) -> Path | None:
+    if not folder:
+        return None
+    path = Path(folder).expanduser()
+    if not path.is_absolute():
+        raise ValueError("Choose a folder to import into")
+    return path
+
+
+def _children(device: DeviceLibrary) -> dict[int, list[DevicePlaylist]]:
+    children: dict[int, list[DevicePlaylist]] = defaultdict(list)
+    known = {row.export_id for row in device.playlists}
+    for row in device.playlists:
+        parent = row.parent_id if row.parent_id in known else 0
+        children[parent].append(row)
+    for rows in children.values():
+        rows.sort(key=lambda row: (row.seq, row.export_id))
+    return children
+
+
+def _ordered_tracks(children: dict[int, list[DevicePlaylist]], by_id: dict[int, DeviceTrack]) -> list[int]:
+    seen: list[int] = []
+    stack = list(reversed(children.get(0, [])))
+    while stack:
+        row = stack.pop()
+        if row.folder:
+            stack.extend(reversed(children.get(row.export_id, [])))
+        for track_id in row.track_ids:
+            if track_id not in seen and track_id in by_id:
+                seen.append(track_id)
+    return seen
+
+
+def preview_import(library, volume: Path, device: DeviceLibrary, *, folder: str | Path | None = None) -> dict:
+    """What `import_library` would do, without touching the library or copying anything."""
+    custom = _custom_folder(folder)
+    root = custom if custom is not None else destination(Path.home() / "Music")
+    by_id = {track.export_id: track for track in device.tracks}
+    children = _children(device)
+    nodes = library.playlists()
+
+    tracks = []
+    for track_id in _ordered_tracks(children, by_id):
+        track = by_id[track_id]
+        if _content_id(library, track.master_id):
+            status = "reuse"
+        elif _audio(volume, track) is None:
+            status = "missing"
+        else:
+            status = "copy"
+        tracks.append(
+            {
+                "title": track.title or track.filename or "Untitled",
+                "artist": track.artist,
+                "status": status,
+            }
+        )
+
+    playlists = []
+
+    def walk(parent_export: int, parent: str | None, depth: int) -> None:
+        for row in children.get(parent_export, []):
+            name = row.name.strip() or "Untitled"
+            kind = "folder" if row.folder else "playlist"
+            found = None
+            if parent is not None:
+                found = next(
+                    (n for n in nodes if n["parentId"] == parent and n["kind"] == kind and (n["name"] or "Untitled") == name),
+                    None,
+                )
+            playlists.append(
+                {
+                    "name": name,
+                    "folder": row.folder,
+                    "depth": depth,
+                    "tracks": 0 if row.folder else len([t for t in row.track_ids if t in by_id]),
+                    "exists": found is not None,
+                }
+            )
+            if row.folder:
+                walk(row.export_id, found["id"] if found else None, depth + 1)
+
+    walk(0, "root", 0)
+    counts = {status: sum(1 for t in tracks if t["status"] == status) for status in ("reuse", "copy", "missing")}
+    return {
+        "destination": str(root),
+        "layout": "Artist/Album" if custom is not None else "Contents/Artist/Album",
+        "playlists": playlists,
+        "tracks": tracks,
+        "counts": counts,
+    }
+
+
+def _analysis_bytes(volume: Path, track: DeviceTrack) -> dict[str, bytes]:
+    if not track.analysis:
+        return {}
+    try:
+        base = volume_path(track.analysis, volume)
+    except ValueError:
+        return {}
+    files = {}
+    for kind in ("DAT", "EXT", "2EX"):
+        path = base.with_suffix(f".{kind}")
+        if path.is_file():
+            files[kind] = path.read_bytes()
+    return files
+
+
+def _ext_cues(ext: bytes | None) -> list[dict]:
+    """Cues from an ANLZ extended file, for sticks whose database holds none. Hot slot 1 is A."""
+    if not ext:
+        return []
+    out = []
+    for tag in waveform.tags_from_bytes(ext).get(waveform.HOT_CUE_TAG, []):
+        try:
+            entries = structs.AnlzTag.parse(bytes(tag)).content.entries
+        except Exception:
+            continue
+        for entry in entries:
+            slot = int(entry.hot_cue)
+            loop = int(entry.type) == 2
+            if slot:
+                kind = slot if slot < 4 else slot + 1
+            else:
+                kind = 4 if loop else 0
+            end = int(entry.loop_time)
+            out.append(
+                {
+                    "kind": kind,
+                    "start": int(entry.time),
+                    "end": end if loop and end >= 0 else None,
+                    "colorIndex": int(entry.color_id) or None,
+                    "comment": entry.comment or "",
+                    "activeLoop": False,
+                }
+            )
+    return out
+
+
+def _carry(library, volume: Path, track: DeviceTrack, content_id: str) -> None:
+    """Copy the device's analysis (beatgrid, waveform), cues and track numbers onto a new library row."""
+    anlz = _analysis_bytes(volume, track)
+    cues = [
+        {
+            "kind": cue.kind,
+            "start": cue.start_ms,
+            "end": cue.end_ms,
+            "colorIndex": cue.color_index,
+            "comment": cue.comment,
+            "activeLoop": cue.active_loop,
+        }
+        for cue in track.cues
+    ] or _ext_cues(anlz.get("EXT"))
+    fields = {"bpm": track.bpm_x100, "key": track.key, "rating": track.rating, "color": track.color}
+    library.apply_device_data(content_id, anlz, fields, cues)
+
+
+def import_device(
+    library, volume: Path, *, music: Path | None = None, folder: str | Path | None = None, on_progress=None
+) -> dict:
     """Recreate the stick's playlists in the open library."""
     from . import browse
 
@@ -190,7 +356,7 @@ def import_device(library, volume: Path, *, music: Path | None = None, on_progre
         raise RuntimeError(WRITE_BLOCKED)
 
     device = browse.load(volume)
-    return import_library(library, volume, device, music=music, on_progress=on_progress)
+    return import_library(library, volume, device, music=music, folder=folder, on_progress=on_progress)
 
 
 def import_library(
@@ -199,19 +365,15 @@ def import_library(
     device: DeviceLibrary,
     *,
     music: Path | None = None,
+    folder: str | Path | None = None,
     on_progress=None,
 ) -> dict:
     if not any(not row.folder for row in device.playlists):
         raise ValueError("This USB has no playlists to import")
-    root = destination(music if music is not None else Path.home() / "Music")
+    custom = _custom_folder(folder)
+    root = custom if custom is not None else destination(music if music is not None else Path.home() / "Music")
     by_id = {track.export_id: track for track in device.tracks}
-    children: dict[int, list[DevicePlaylist]] = defaultdict(list)
-    known = {row.export_id for row in device.playlists}
-    for row in device.playlists:
-        parent = row.parent_id if row.parent_id in known else 0
-        children[parent].append(row)
-    for rows in children.values():
-        rows.sort(key=lambda row: (row.seq, row.export_id))
+    children = _children(device)
 
     nodes = library.playlists()
     failed: list[dict] = []
@@ -235,7 +397,7 @@ def import_library(
             failed.append({"title": track.title or track.filename or "Untitled", "error": "Audio file is missing on the USB"})
             return None
         file_name = track.filename or audio.name
-        wanted = candidate(root, track.artist, track.album, file_name)
+        wanted = candidate(root, track.artist, track.album, file_name, contents=custom is None)
         try:
             placed, created = place_copy(audio, wanted)
         except OSError as err:
@@ -257,17 +419,15 @@ def import_library(
             copied += 1
         else:
             reused += 1
-        return str(result["ids"][0])
+        content_id = str(result["ids"][0])
+        if not result["skipped"]:
+            try:
+                _carry(library, volume, track, content_id)
+            except Exception:
+                log.exception("Could not carry the device data for %s", track.title)
+        return content_id
 
-    seen: list[int] = []
-    stack = list(reversed(children.get(0, [])))
-    while stack:
-        row = stack.pop()
-        if row.folder:
-            stack.extend(reversed(children.get(row.export_id, [])))
-        for track_id in row.track_ids:
-            if track_id not in seen and track_id in by_id:
-                seen.append(track_id)
+    seen = _ordered_tracks(children, by_id)
     total = len(seen)
     for index, track_id in enumerate(seen):
         track = by_id[track_id]

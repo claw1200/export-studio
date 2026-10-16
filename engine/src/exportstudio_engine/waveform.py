@@ -40,9 +40,16 @@ Tags = dict[str, list[memoryview]]
 
 
 def read_tags(path: Path) -> Tags:
-    data = memoryview(path.read_bytes())
+    try:
+        return tags_from_bytes(path.read_bytes())
+    except ValueError:
+        raise ValueError(f"Not an ANLZ file: {path}") from None
+
+
+def tags_from_bytes(raw: bytes) -> Tags:
+    data = memoryview(raw)
     if bytes(data[:4]) != b"PMAI":
-        raise ValueError(f"Not an ANLZ file: {path}")
+        raise ValueError("Not an ANLZ file")
     (file_header,) = struct.unpack_from(">I", data, 4)
     tags: Tags = {}
     pos = file_header
