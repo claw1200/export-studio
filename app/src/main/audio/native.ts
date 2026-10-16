@@ -93,6 +93,16 @@ export interface NativeLibrary {
   playlistMembers(): Promise<string>
   playlistTracks(id: string): Promise<string>
   historyTracks(id: string): Promise<string>
+  setWritable(on: boolean): Promise<string>
+  removeTracks(ids: string[]): Promise<string>
+  playlistAdd(id: string, trackIds: string[]): Promise<string>
+  playlistRemove(id: string, trackIds: string[]): Promise<string>
+  playlistMove(id: string, trackIds: string[], index: number): Promise<string>
+  playlistCreate(name: string, parentId: string | null, folder: boolean, trackIds: string[]): Promise<string>
+  playlistRename(id: string, name: string): Promise<string>
+  playlistDelete(id: string): Promise<string>
+  tagAdd(tagId: string, trackIds: string[]): Promise<string>
+  tagRemove(tagId: string, trackIds: string[]): Promise<string>
 }
 
 export interface NativeModule {

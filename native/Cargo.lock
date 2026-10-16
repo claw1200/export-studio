@@ -501,6 +501,7 @@ name = "es-node"
 version = "0.1.0"
 dependencies = [
  "es-analyse",
+ "es-anlz",
  "es-db",
  "es-deck",
  "es-index",

@@ -8,7 +8,7 @@ import { AudioBridge } from './audio/bridge'
 import { Engine } from './engine'
 import { buildMenu, registerFiles } from './files'
 import { handleMediaProtocol, registerMediaScheme } from './media'
-import { RustReads } from './rustReads'
+import { RustLibrary } from './rustLibrary'
 import { flushSettings, loadSettings, registerSettings } from './settings'
 
 const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'aac', 'mp4', 'flac', 'wav', 'aif', 'aiff', 'ogg', 'alac']
@@ -16,7 +16,10 @@ const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'aac', 'mp4', 'flac', 'wav', 'aif', 'aif
 const engine = new Engine()
 const audio = new AudioBridge(engine)
 const analysis = new AnalysisQueue(engine, () => audio.addon())
-const rustReads = new RustReads(() => audio.addon())
+const rustLibrary = new RustLibrary(
+  () => audio.addon(),
+  () => engine.call('library.reload')
+)
 registerMediaScheme()
 
 function createWindow(): BrowserWindow {
@@ -80,15 +83,18 @@ app.whenReady().then(() => {
 
   ipcMain.handle('engine:call', async (_e, method: string, params?: unknown) => {
     try {
-      if (rustReads.handles(method)) {
+      const args = params as Record<string, unknown> | undefined
+      const kind = rustLibrary.kind(method)
+      if (kind === 'write') return { ok: true, result: await rustLibrary.call(method, args) }
+      if (kind === 'read') {
         try {
-          return { ok: true, result: await rustReads.call(method, params as Record<string, unknown> | undefined) }
+          return { ok: true, result: await rustLibrary.call(method, args) }
         } catch (err) {
-          console.warn(`[rust-reads] ${method} fell back to the Python engine:`, (err as Error).message)
+          console.warn(`[rust-library] ${method} fell back to the Python engine:`, (err as Error).message)
         }
       }
       const result = await engine.call(method, params)
-      await rustReads.after(method, params as Record<string, unknown> | undefined)
+      await rustLibrary.after(method, args, result)
       return { ok: true, result }
     } catch (err) {
       const e = err as Error & { type?: string }
