@@ -16,11 +16,12 @@
   const { library, player, keybinds } = getApp()
 
   const track = $derived(player.track)
-  const gridEditable = $derived(library.writable && player.grid.canEdit)
+  const deviceTrack = $derived(player.track?.id.startsWith('usb:') ?? false)
+  const gridEditable = $derived(library.writable && player.grid.canEdit && !deviceTrack)
   const currentBpm = $derived(bpmAt(player.position, player.displayGrid, track?.bpm ?? 0))
 
   $effect(() => {
-    if (player.grid.editing && !library.writable) player.grid.cancel()
+    if (player.grid.editing && !gridEditable) player.grid.cancel()
   })
 
   async function saveGrid(): Promise<void> {
@@ -38,7 +39,9 @@
 
   const gridShortcut = $derived(keybinds.bindings['deck.gridEdit'][0])
   const gridTitle = $derived(
-    (!library.writable
+    (deviceTrack
+      ? 'USB tracks are read-only; sync to change them'
+      : !library.writable
       ? 'Unlock editing to change the beatgrid'
       : player.grid.canEdit
         ? 'Edit the beatgrid'

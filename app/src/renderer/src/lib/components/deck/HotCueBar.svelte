@@ -25,7 +25,7 @@
     }))
   })
   const memoryCount = $derived((player.detail?.cues ?? []).filter((c) => c.kind === 'memory').length)
-  const editable = $derived(library.writable && !!player.detail && !player.grid.editing)
+  const editable = $derived(library.writable && !!player.detail && !player.grid.editing && !player.track?.id.startsWith('usb:'))
   const placementLabel = $derived(player.cuePlacement === 'cuePoint' ? 'cue point' : 'playhead')
   /** Closes whenever editing turns on or off. */
   let pickerCueId = $derived.by((): string | null => {

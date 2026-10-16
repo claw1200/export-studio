@@ -108,15 +108,15 @@ export function trackMenu(library: Library, player: Player, tracks: Track[], act
   const presets = loadPresets()
   return tidy([
     tracks.length > 1 && { kind: 'header', label: `${tracks.length} tracks` },
-    {
+    !device && {
       label: single ? 'Edit info…' : `Edit info for ${tracks.length} tracks…`,
       icon: Pencil,
       shortcut: actions.shortcut('library.editInfo'),
       disabled: locked,
       onselect: () => actions.edit(tracks)
     },
-    SEPARATOR,
-    {
+    !device && SEPARATOR,
+    !device && {
       label: 'Add to playlist',
       icon: ListPlus,
       disabled: locked,
@@ -126,7 +126,7 @@ export function trackMenu(library: Library, player: Player, tracks: Track[], act
         ...playlistItems(library.playlistTree, (id) => void library.addToPlaylist(id, ids))
       ])
     },
-    playlist?.kind === 'playlist' && {
+    !device && playlist?.kind === 'playlist' && {
       label: 'Remove from playlist',
       icon: ListMinus,
       danger: true,
@@ -134,8 +134,8 @@ export function trackMenu(library: Library, player: Player, tracks: Track[], act
       disabled: locked,
       onselect: () => void library.removeFromPlaylist(playlist.id, ids)
     },
-    library.tagTree.length > 0 && { label: 'My Tag', icon: Tag, disabled: locked, items: tagItems(library, tracks) },
-    {
+    !device && library.tagTree.length > 0 && { label: 'My Tag', icon: Tag, disabled: locked, items: tagItems(library, tracks) },
+    !device && {
       label: 'Colour',
       icon: Palette,
       disabled: locked,
@@ -150,7 +150,7 @@ export function trackMenu(library: Library, player: Player, tracks: Track[], act
         }))
       ]
     },
-    {
+    !device && {
       label: 'Rating',
       icon: Star,
       disabled: locked,
@@ -210,8 +210,8 @@ export function trackMenu(library: Library, player: Player, tracks: Track[], act
       disabled: locked,
       onselect: () => actions.remove(tracks)
     },
-    locked && SEPARATOR,
-    locked && unlockEntry(library, player)
+    locked && !device && SEPARATOR,
+    locked && !device && unlockEntry(library, player)
   ])
 }
 
