@@ -13,6 +13,7 @@ use crate::{Error, Result};
 
 /// What rekordbox's own analysis marks a fully analysed track with.
 const ANALYSED: i64 = 105;
+const JOB_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone)]
 pub enum Progress {
@@ -145,6 +146,7 @@ fn job(share: &Path, volume: &Path, bundle: &Bundle, overwrite: bool) -> Result<
         .map(|t| json!({"id": num(&t.id), "seq": t.seq.max(0), "name": t.name, "attribute": t.attribute, "parent": t.parent_id.as_deref().map_or(0, num)}))
         .collect();
     Ok(json!({
+        "schemaVersion": JOB_SCHEMA_VERSION,
         "destination": volume.to_string_lossy(), "dbId": num(&bundle.db_id), "automatic": false,
         "settingsDir": find_settings().map(|p| p.to_string_lossy().into_owned()),
         "myTags": tags, "tracks": tracks, "playlists": playlists, "overwrite": overwrite,
@@ -240,5 +242,18 @@ fn run(binary: &Path, job: &Path, on_progress: &dyn Fn(Progress)) -> Result<Valu
             }
             Err(export_error(&kind, message))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn usb_job_declares_its_schema_version() {
+        let directory = tempfile::tempdir().unwrap();
+        let body = job(directory.path(), directory.path(), &Bundle::default(), false).unwrap();
+
+        assert_eq!(body["schemaVersion"], JOB_SCHEMA_VERSION);
     }
 }

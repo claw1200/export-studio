@@ -15,6 +15,8 @@ use rbl_export::{
 };
 use serde::Deserialize;
 
+const JOB_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Debug, thiserror::Error)]
 enum JobError {
     #[error("{0}")]
@@ -28,6 +30,7 @@ enum JobError {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Job {
+    schema_version: u32,
     destination: PathBuf,
     #[serde(default)]
     db_id: u64,
@@ -351,10 +354,20 @@ fn prepare(job: &Job) -> Result<(Vec<SourceTrack>, Vec<SourcePlaylist>, Vec<Sour
     Ok((tracks, playlists, tags, sync))
 }
 
+fn parse_job(bytes: &[u8]) -> Result<Job, JobError> {
+    let job: Job = serde_json::from_slice(bytes)
+        .map_err(|err| JobError::Message(format!("Export job is not valid JSON: {err}")))?;
+    if job.schema_version != JOB_SCHEMA_VERSION {
+        return Err(JobError::Message(format!(
+            "Unsupported export job schema version: {} (expected {})",
+            job.schema_version, JOB_SCHEMA_VERSION
+        )));
+    }
+    Ok(job)
+}
+
 fn run(job_path: &Path) -> Result<(), JobError> {
-    let job: Job = serde_json::from_slice(&fs::read(job_path)?).map_err(|err| {
-        JobError::Message(format!("Export job is not valid JSON: {err}"))
-    })?;
+    let job = parse_job(&fs::read(job_path)?)?;
     let (tracks, playlists, tags, sync) = prepare(&job)?;
     rbl_export::recover(&job.destination)?;
     let options = ExportOptions {
@@ -426,5 +439,41 @@ fn main() -> ExitCode {
             }));
             ExitCode::from(1)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_current_job_schema() {
+        let bytes = serde_json::json!({
+            "schemaVersion": JOB_SCHEMA_VERSION,
+            "destination": "/tmp",
+            "tracks": [],
+            "playlists": [],
+        })
+        .to_string();
+
+        assert!(parse_job(bytes.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn rejects_missing_or_unsupported_job_schema() {
+        let missing = br#"{"destination":"/tmp","tracks":[],"playlists":[]}"#;
+        let unsupported = serde_json::json!({
+            "schemaVersion": JOB_SCHEMA_VERSION + 1,
+            "destination": "/tmp",
+            "tracks": [],
+            "playlists": [],
+        })
+        .to_string();
+
+        assert!(parse_job(missing).is_err());
+        assert!(parse_job(unsupported.as_bytes())
+            .unwrap_err()
+            .to_string()
+            .contains("Unsupported export job schema version"));
     }
 }
