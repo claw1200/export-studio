@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use crate::usb::UsbOp;
 use es_db::{Library, TrackEdit};
@@ -191,6 +192,29 @@ pub struct Run {
 }
 
 impl Run {
+    fn profile_name(&self) -> &'static str {
+        match &self.op {
+            Op::Open(_) => "library.open",
+            Op::Reload => "library.reload",
+            Op::Info => "library.info",
+            Op::Tracks => "library.tracks",
+            Op::Playlists => "library.playlists",
+            Op::Histories => "library.histories",
+            Op::MyTags => "library.myTags",
+            Op::PlaylistMembers => "library.playlistMembers",
+            Op::DailyBackup => "backup.daily",
+            Op::BackupCreate => "backup.create",
+            Op::CueSetHot(_, _, _) => "cue.setHot",
+            Op::CueAddMemory(_, _) => "cue.addMemory",
+            Op::CueDelete(_, _) => "cue.delete",
+            Op::CueSetColor(_, _, _) => "cue.setColor",
+            Op::TrackDetail(_) => "track.detail",
+            Op::TrackPreviews(_) => "track.previews",
+            Op::Usb(UsbOp::List) => "usb.list",
+            _ => "library.other",
+        }
+    }
+
     /// Backup calls that need nothing but the library's location.
     fn backup_op(&self, service: &LibraryService) -> napi::Result<Value> {
         let emit = |event| self.core.emit_service_event(event);
@@ -455,8 +479,20 @@ impl Task for Run {
     type JsValue = napi::JsUnknown;
 
     fn compute(&mut self) -> napi::Result<Value> {
+        let profile = std::env::var_os("EXPORTSTUDIO_PROFILE_LIBRARY_OPEN").is_some();
+        let operation = self.profile_name();
+        let waiting = Instant::now();
         let mut service = self.core.service.lock().map_err(|_| failure("the library lock was poisoned"))?;
-        self.perform(&mut service)
+        let lock_wait_ms = waiting.elapsed().as_secs_f64() * 1000.0;
+        let started = Instant::now();
+        let result = self.perform(&mut service);
+        if profile {
+            eprintln!(
+                "[library-profile] native op={operation} lock_wait_ms={lock_wait_ms:.1} operation_ms={:.1}",
+                started.elapsed().as_secs_f64() * 1000.0,
+            );
+        }
+        result
     }
 
     fn resolve(&mut self, env: Env, output: Value) -> napi::Result<napi::JsUnknown> {

@@ -7,6 +7,7 @@ use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use chrono::{Local, NaiveDateTime, TimeZone};
 use serde_json::{json, Value};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
@@ -163,6 +164,51 @@ fn json_i64(value: &Value, key: &str) -> Option<i64> {
     value.get(key).and_then(Value::as_i64)
 }
 
+fn read_manifest(path: &Path) -> Result<Value> {
+    let mut zip = ZipArchive::new(File::open(path)?)?;
+    let mut text = String::new();
+    zip.by_name(MANIFEST)?.read_to_string(&mut text)?;
+    serde_json::from_str(&text).map_err(|error| Error::Message(error.to_string()))
+}
+
+fn is_automatic_archive_name(path: &Path) -> bool {
+    let Some(stem) = path.file_stem().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let Some(timestamped_reason) = stem.strip_prefix("exportstudio-") else {
+        return false;
+    };
+    let mut parts = timestamped_reason.splitn(3, '-');
+    let Some(date) = parts.next() else { return false };
+    let Some(time) = parts.next() else { return false };
+    let Some(reason) = parts.next() else { return false };
+    if date.len() != 8 || !date.bytes().all(|byte| byte.is_ascii_digit()) || time.len() != 6 || !time.bytes().all(|byte| byte.is_ascii_digit()) {
+        return false;
+    }
+    AUTO_REASONS.iter().any(|automatic| {
+        reason == *automatic
+            || reason
+                .strip_prefix(&format!("{automatic}-"))
+                .is_some_and(|suffix| suffix.parse::<u32>().is_ok())
+    })
+}
+
+fn automatic_archive_created(path: &Path) -> Option<f64> {
+    let stem = path.file_stem()?.to_str()?.strip_prefix("exportstudio-")?;
+    let mut parts = stem.splitn(3, '-');
+    let date = parts.next()?;
+    let time = parts.next()?;
+    let _reason = parts.next()?;
+    if !is_automatic_archive_name(path) {
+        return None;
+    }
+    let local = NaiveDateTime::parse_from_str(&format!("{date}-{time}"), "%Y%m%d-%H%M%S").ok()?;
+    Local
+        .from_local_datetime(&local)
+        .earliest()
+        .map(|created| created.timestamp_millis() as f64 / 1000.0)
+}
+
 fn temp_dir(prefix: &str) -> Result<PathBuf> {
     let base = std::env::temp_dir();
     for n in 0..1000u32 {
@@ -235,12 +281,7 @@ impl Backups {
             if path.extension().is_none_or(|e| e != "zip") {
                 continue;
             }
-            let manifest = (|| -> Result<Value> {
-                let mut zip = ZipArchive::new(File::open(&path)?)?;
-                let mut text = String::new();
-                zip.by_name(MANIFEST)?.read_to_string(&mut text)?;
-                serde_json::from_str(&text).map_err(|e| Error::Message(e.to_string()))
-            })();
+            let manifest = read_manifest(&path);
             let Ok(mut manifest) = manifest else { continue };
             let Some(map) = manifest.as_object_mut() else { continue };
             map.insert("id".into(), json!(path.file_stem().map(|s| s.to_string_lossy().into_owned())));
@@ -263,7 +304,39 @@ impl Backups {
 
     #[must_use]
     pub fn latest_automatic(&self) -> Option<Value> {
+        let Ok(entries) = fs::read_dir(&self.root) else { return None };
+        let mut candidates: Vec<PathBuf> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "zip") && is_automatic_archive_name(path))
+            .collect();
+        candidates.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
+
+        for path in candidates.into_iter().rev() {
+            let Ok(mut manifest) = read_manifest(&path) else { continue };
+            if !Self::is_automatic(&manifest) {
+                continue;
+            }
+            let Some(map) = manifest.as_object_mut() else { continue };
+            map.insert("id".into(), json!(path.file_stem().map(|name| name.to_string_lossy().into_owned())));
+            map.insert("path".into(), json!(path.to_string_lossy()));
+            map.insert("size".into(), json!(fs::metadata(&path).map_or(0, |metadata| metadata.len())));
+            map.insert("otherLibrary".into(), json!(false));
+            return Some(manifest);
+        }
+
         self.list(None).into_iter().find(Self::is_automatic)
+    }
+
+    /// Creation time from the timestamped filename, avoiding a scan of ZIP manifests.
+    #[must_use]
+    pub fn latest_automatic_created(&self) -> Option<f64> {
+        let Ok(entries) = fs::read_dir(&self.root) else { return None };
+        entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter_map(|path| automatic_archive_created(&path))
+            .max_by(f64::total_cmp)
     }
 
     /// Back up the library at `src`. An automatic backup is skipped (`None`) when nothing changed.

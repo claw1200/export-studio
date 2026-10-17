@@ -166,6 +166,7 @@ export class Library {
   private volumes = ''
   private running: boolean | null = null
   private notified = false
+  private lockRefreshPending = false
   private readonly listeners = new Set<Listener>()
 
   constructor(private readonly addon: () => NativeModule | null) {}
@@ -219,10 +220,28 @@ export class Library {
       if (this.volumes && key !== this.volumes) this.emit('usb.volumes', { volumes })
       this.volumes = key
       if (!this.opened) return
-      const info = (await lib.info()) as Info
+      let info = (await lib.info()) as Info
       if (info.writable && info.rekordboxRunning) {
-        this.emit('library.locked', await lib.setWritable(false))
-        this.notified = false
+        this.lockRefreshPending = true
+        try {
+          info = (await lib.setWritable(false)) as Info
+          this.lockRefreshPending = false
+          this.emit('library.locked', info)
+        } catch (e) {
+          info = (await lib.info()) as Info
+          this.emit('library.locked', info)
+          console.error('[library] lock snapshot refresh failed; will retry', e)
+        }
+        this.notified = info.sourceChanged
+      } else if (this.lockRefreshPending && !info.writable) {
+        try {
+          info = (await lib.setWritable(false)) as Info
+          this.lockRefreshPending = false
+          this.emit('library.locked', info)
+          this.notified = info.sourceChanged
+        } catch {
+          // Keep the pending refresh for the next watcher poll.
+        }
       } else if (this.running !== null && info.rekordboxRunning !== this.running) {
         this.emit('library.rekordbox', { running: info.rekordboxRunning })
       }
@@ -255,11 +274,13 @@ export class Library {
         this.opened = true
         this.running = null
         this.notified = false
+        this.lockRefreshPending = false
         this.startDaily()
         return info as T
       }
       if (method === 'library.reload') {
         const info = await this.library().reload()
+        this.lockRefreshPending = false
         this.emit('library.reloaded', {})
         return info as T
       }

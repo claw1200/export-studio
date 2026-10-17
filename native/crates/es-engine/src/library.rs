@@ -16,10 +16,12 @@ use crate::Result;
 /// One selected library and its current read snapshot.
 pub struct LibrarySession {
     database: Database,
+    live: Option<Database>,
     source: PathBuf,
     writable: bool,
     backed_up: bool,
     guard: Guard,
+    snapshot_refresh_pending: bool,
 }
 
 pub struct LibraryService {
@@ -181,7 +183,7 @@ impl LibraryService {
             .map(|session| {
                 (
                     session.source().to_path_buf(),
-                    session.is_writable(),
+                    session.is_writable() && !es_db::rekordbox_running(),
                     session.backed_up(),
                 )
             })
@@ -215,12 +217,11 @@ impl LibraryService {
             .session
             .as_ref()
             .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
-        let database = session.database();
         Ok(LibraryInfo {
             db_path: session.source().to_string_lossy().into_owned(),
-            snapshot_time: database.snapshot_time(),
+            snapshot_time: session.snapshot_time(),
             rekordbox_running: es_db::rekordbox_running(),
-            source_changed: database.source_changed(),
+            source_changed: session.source_changed(),
             writable: session.is_writable(),
         })
     }
@@ -732,20 +733,27 @@ impl LibraryService {
     }
 
     fn auto_due(&self) -> bool {
-        let interval = self.backups().settings()["interval"].as_i64().unwrap_or(12) as f64 * 3600.0;
-        match self
-            .backups()
-            .latest_automatic()
-            .and_then(|manifest| manifest["created"].as_f64())
-        {
+        let profile = std::env::var_os("EXPORTSTUDIO_PROFILE_LIBRARY_OPEN").is_some();
+        let settings_started = SystemTime::now();
+        let settings = self.backups().settings();
+        let interval = settings["interval"].as_i64().unwrap_or(12) as f64 * 3600.0;
+        let settings_ms = settings_started.elapsed().map_or(0.0, |duration| duration.as_secs_f64() * 1000.0);
+        let lookup_started = SystemTime::now();
+        let created = self.backups().latest_automatic_created();
+        let lookup_ms = lookup_started.elapsed().map_or(0.0, |duration| duration.as_secs_f64() * 1000.0);
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |duration| duration.as_secs_f64());
+        let due = match created {
             None => true,
-            Some(created) => {
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_or(0.0, |duration| duration.as_secs_f64());
-                now - created >= interval
-            }
+            Some(created) => now - created >= interval,
+        };
+        if profile {
+            eprintln!(
+                "[library-profile] backup.auto_due settings_ms={settings_ms:.1} latest_lookup_ms={lookup_ms:.1} interval_hours={:.1} latest_age_hours={:.2} due={due}",
+                interval / 3600.0,
+                created.map_or(-1.0, |created| (now - created) / 3600.0),
+            );
         }
+        due
     }
 
     fn back_up(
@@ -850,8 +858,7 @@ impl LibraryService {
         self.session
             .as_mut()
             .expect("session checked above")
-            .set_writable(writable);
-        Ok(())
+            .set_writable(writable)
     }
 }
 
@@ -864,18 +871,35 @@ impl Default for LibraryService {
 impl LibrarySession {
     pub fn open(source: PathBuf, writable: bool, backed_up: bool) -> Result<Self> {
         let database = Database::open_snapshot(&source)?;
+        let live = if writable {
+            Some(Database::open_live(&source, Guard::RefuseWhileRunning)?)
+        } else {
+            None
+        };
         Ok(Self {
             database,
+            live,
             source,
             writable,
             backed_up,
             guard: Guard::RefuseWhileRunning,
+            snapshot_refresh_pending: false,
         })
     }
 
     #[must_use]
     pub fn database(&self) -> &Database {
-        &self.database
+        self.live.as_ref().unwrap_or(&self.database)
+    }
+
+    #[must_use]
+    pub fn snapshot_time(&self) -> f64 {
+        self.database.snapshot_time()
+    }
+
+    #[must_use]
+    pub fn source_changed(&self) -> bool {
+        !self.writable && (self.snapshot_refresh_pending || self.database.source_changed())
     }
 
     #[must_use]
@@ -888,8 +912,26 @@ impl LibrarySession {
         self.writable
     }
 
-    pub fn set_writable(&mut self, writable: bool) {
-        self.writable = writable;
+    pub fn set_writable(&mut self, writable: bool) -> Result<()> {
+        if self.writable == writable && (writable || !self.snapshot_refresh_pending) {
+            return Ok(());
+        }
+        if writable {
+            if self.snapshot_refresh_pending {
+                self.database = Database::open_snapshot(&self.source)?;
+                self.snapshot_refresh_pending = false;
+            }
+            let live = Database::open_live(&self.source, self.guard)?;
+            self.live = Some(live);
+            self.writable = true;
+        } else {
+            self.live = None;
+            self.writable = false;
+            self.snapshot_refresh_pending = true;
+            self.database = Database::open_snapshot(&self.source)?;
+            self.snapshot_refresh_pending = false;
+        }
+        Ok(())
     }
 
     #[must_use]
@@ -908,11 +950,14 @@ impl LibrarySession {
                 "Unlock editing to make changes to the library".into(),
             ));
         }
-        let mut live = Database::open_live(&self.source, self.guard)?;
-        let out = work(&mut live)?;
-        drop(live);
-        self.database = Database::open_snapshot(&self.source)?;
-        Ok(out)
+        if self.guard == Guard::RefuseWhileRunning && es_db::rekordbox_running() {
+            return Err(es_db::Error::RekordboxRunning.into());
+        }
+        let live = self
+            .live
+            .as_mut()
+            .ok_or_else(|| crate::Error::Other("The writable library connection is unavailable".into()))?;
+        work(live)
     }
 }
 
@@ -1010,10 +1055,12 @@ mod tests {
         let mut service = LibraryService::with_backup_root(directory.join("backups"));
         service.session = Some(LibrarySession {
             database: Database::open_snapshot(path).unwrap(),
+            live: Some(Database::open_live(path, Guard::Off).unwrap()),
             source: path.to_path_buf(),
             writable: true,
             backed_up: true,
             guard: Guard::Off,
+            snapshot_refresh_pending: false,
         });
         service
     }
@@ -1098,6 +1145,51 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "profiles startup reads from the installed library without writing to it"]
+    fn profile_installed_library_open_and_initial_reads() {
+        let source = Database::installed_path().expect("no home directory");
+        let directory = tempfile::tempdir().unwrap();
+        let mut service = LibraryService::with_backup_root(directory.path().join("backups"));
+        let total = std::time::Instant::now();
+
+        let stage = std::time::Instant::now();
+        service.open(source, false, false).unwrap();
+        eprintln!("[library-profile] service.open_ms={:.1}", stage.elapsed().as_secs_f64() * 1000.0);
+
+        let stage = std::time::Instant::now();
+        let tracks = service.tracks().unwrap();
+        eprintln!("[library-profile] tracks_ms={:.1} rows={}", stage.elapsed().as_secs_f64() * 1000.0, tracks.len());
+
+        let stage = std::time::Instant::now();
+        let playlists = service.playlists().unwrap();
+        eprintln!("[library-profile] playlists_ms={:.1} rows={}", stage.elapsed().as_secs_f64() * 1000.0, playlists.len());
+
+        let stage = std::time::Instant::now();
+        let histories = service.histories().unwrap();
+        eprintln!("[library-profile] histories_ms={:.1} rows={}", stage.elapsed().as_secs_f64() * 1000.0, histories.len());
+
+        let stage = std::time::Instant::now();
+        let tags = service.my_tags().unwrap();
+        eprintln!("[library-profile] my_tags_ms={:.1} rows={}", stage.elapsed().as_secs_f64() * 1000.0, tags.len());
+
+        let stage = std::time::Instant::now();
+        let members = service.playlist_members().unwrap();
+        eprintln!("[library-profile] playlist_members_ms={:.1} rows={}", stage.elapsed().as_secs_f64() * 1000.0, members.len());
+
+        let stage = std::time::Instant::now();
+        let volumes = es_device::volumes::list(None);
+        eprintln!("[library-profile] usb_list_ms={:.1} volumes={}", stage.elapsed().as_secs_f64() * 1000.0, volumes.len());
+
+        let stage = std::time::Instant::now();
+        let backup_created = service.daily_backup(&|_| {}).unwrap();
+        eprintln!(
+            "[library-profile] daily_backup_ms={:.1} due={backup_created}",
+            stage.elapsed().as_secs_f64() * 1000.0
+        );
+        eprintln!("[library-profile] open_and_hydration_total_ms={:.1}", total.elapsed().as_secs_f64() * 1000.0);
+    }
+
+    #[test]
     fn playlist_service_write_commits_and_refreshes_its_snapshot() {
         let directory = tempfile::tempdir().unwrap();
         let path = fixture::build(directory.path(), 1).unwrap();
@@ -1138,5 +1230,57 @@ mod tests {
 
         assert_eq!(result.tracks[0].title, "Updated");
         assert!(result.tag_errors.is_empty());
+    }
+
+    #[test]
+    fn memory_cue_write_uses_live_session_until_relocked() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = fixture::build(directory.path(), 1).unwrap();
+        {
+            let connection = fixture::connect(&path).unwrap();
+            let journal_mode: String = connection
+                .query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
+            Rows(&connection).track("track-1", "Test track").unwrap();
+        }
+        let mut service = writable_fixture_service(directory.path(), &path);
+        let snapshot_time = service.session().unwrap().snapshot_time();
+
+        let cues = service.cue_add_memory("track-1", 500).unwrap();
+
+        assert_eq!(cues.len(), 1);
+        assert_eq!(service.session().unwrap().snapshot_time(), snapshot_time);
+        assert!(!service.session().unwrap().source_changed());
+
+        service.set_writable(false, &|_| {}).unwrap();
+        assert_eq!(service.cues("track-1").unwrap().len(), 1);
+        assert!(!service.session().unwrap().source_changed());
+    }
+
+    #[test]
+    fn failed_relock_snapshot_refresh_can_be_retried() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = fixture::build(directory.path(), 1).unwrap();
+        {
+            let connection = fixture::connect(&path).unwrap();
+            Rows(&connection).track("track-1", "Test track").unwrap();
+        }
+        let mut service = writable_fixture_service(directory.path(), &path);
+        let missing_path = directory.path().join("temporarily-missing.db");
+        service.session.as_mut().unwrap().source = missing_path;
+
+        assert!(service
+            .session_mut()
+            .unwrap()
+            .set_writable(false)
+            .is_err());
+        assert!(service.session().unwrap().source_changed());
+        assert!(!service.session().unwrap().is_writable());
+
+        service.session.as_mut().unwrap().source = path;
+        service.session_mut().unwrap().set_writable(false).unwrap();
+        assert!(!service.session().unwrap().source_changed());
+        assert_eq!(service.tracks().unwrap().len(), 1);
     }
 }
