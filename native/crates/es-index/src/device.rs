@@ -173,7 +173,7 @@ fn device_cues(track: &Track, ext: Option<&Tags>) -> Vec<Cue> {
         .enumerate()
         .map(|(index, c): (usize, &DeviceCue)| {
             let hot = c.kind > 0;
-            Cue {
+            let mut cue = Cue {
                 id: format!("{}:{}", track.export_id, index + 1),
                 kind: if hot { "hot" } else { "memory" },
                 slot: c.kind,
@@ -181,9 +181,12 @@ fn device_cues(track: &Track, ext: Option<&Tags>) -> Vec<Cue> {
                 end: c.end_ms,
                 color: None,
                 color_index: c.color_index,
+                color_code: None,
                 comment: c.comment.clone(),
-                rgb: if hot { u32::try_from(c.kind).ok().zip(u32::try_from(c.start_ms).ok()).and_then(|k| colors.get(&k).cloned()) } else { None },
-            }
+                rgb: None,
+            };
+            cue.apply_analysis_color(&colors);
+            cue
         })
         .collect();
     out.sort_by_key(|c| (c.kind != "hot", c.slot, c.start));

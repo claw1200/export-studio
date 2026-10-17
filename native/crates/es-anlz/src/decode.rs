@@ -159,6 +159,7 @@ pub struct ExtendedCue {
     pub start_ms: u32,
     pub loop_end_ms: Option<u32>,
     pub color_id: u8,
+    pub color_code: Option<u8>,
     pub comment: String,
     pub rgb: [u8; 3],
 }
@@ -189,13 +190,16 @@ pub fn extended_cues(ext: &Tags) -> Vec<ExtendedCue> {
                 .map(|c| u16::from_be_bytes([c[0], c[1]]))
                 .take_while(|u| *u != 0)
                 .collect();
-            let rgb = tag.get(comment_end + 1..comment_end + 4).map_or([0; 3], |s| [s[0], s[1], s[2]]);
+            let entry_end = at.saturating_add(entry as usize).min(tag.len());
+            let colour = tag.get(comment_end..entry_end).unwrap_or_default();
+            let rgb = colour.get(1..4).map_or([0; 3], |s| [s[0], s[1], s[2]]);
             out.push(ExtendedCue {
                 slot,
                 is_loop: tag.get(at + 16) == Some(&2),
                 start_ms: start,
                 loop_end_ms: (end != u32::MAX).then_some(end),
                 color_id: tag.get(at + 28).copied().unwrap_or(0),
+                color_code: colour.first().copied(),
                 comment: String::from_utf16_lossy(&units),
                 rgb,
             });
@@ -208,13 +212,22 @@ pub fn extended_cues(ext: &Tags) -> Vec<ExtendedCue> {
     out
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HotCueColor {
+    pub code: Option<u8>,
+    pub rgb: String,
+}
+
 /// The colour of each hot cue, keyed by slot and start time, from the extended cue list (`PCO2`).
 #[must_use]
-pub fn hot_cue_colors(ext: &Tags) -> HashMap<(u32, u32), String> {
+pub fn hot_cue_colors(ext: &Tags) -> HashMap<(u32, u32), HotCueColor> {
     extended_cues(ext)
         .into_iter()
         .filter(|cue| cue.slot != 0)
-        .map(|cue| ((cue.slot, cue.start_ms), format!("#{:02x}{:02x}{:02x}", cue.rgb[0], cue.rgb[1], cue.rgb[2])))
+        .map(|cue| ((cue.slot, cue.start_ms), HotCueColor {
+            code: cue.color_code,
+            rgb: format!("#{:02x}{:02x}{:02x}", cue.rgb[0], cue.rgb[1], cue.rgb[2]),
+        }))
         .collect()
 }
 
@@ -306,7 +319,33 @@ mod tests {
         header.extend(0u16.to_be_bytes());
         header.extend(0u32.to_be_bytes());
         let ext = file(&[tag("PCO2", &[header[..4].to_vec(), 1u16.to_be_bytes().to_vec(), 0u16.to_be_bytes().to_vec()].concat(), &entry)]);
-        assert_eq!(hot_cue_colors(&ext).get(&(2, 1500)).map(String::as_str), Some("#102030"));
+        assert_eq!(hot_cue_colors(&ext).get(&(2, 1500)), Some(&HotCueColor { code: Some(46), rgb: "#102030".into() }));
+        let cue = &extended_cues(&ext)[0];
+        assert_eq!(cue.color_id, 0);
+        assert_eq!(cue.color_code, Some(46));
+    }
+
+    #[test]
+    fn extended_cue_colour_code_follows_the_comment_and_stays_within_its_entry() {
+        for (colour, expected) in [(vec![0, 255, 0, 23], Some(0)), (vec![8, 0, 196, 255], Some(8)), (vec![], None)] {
+            let mut entry = vec![0; 44];
+            entry[..4].copy_from_slice(b"PCP2");
+            entry[4..8].copy_from_slice(&16u32.to_be_bytes());
+            entry[12..16].copy_from_slice(&1u32.to_be_bytes());
+            entry[28] = 5;
+            entry[40..44].copy_from_slice(&4u32.to_be_bytes());
+            entry.extend([0, b'A', 0, 0]);
+            entry.extend(&colour);
+            let length = u32::try_from(entry.len()).unwrap();
+            entry[8..12].copy_from_slice(&length.to_be_bytes());
+            entry.extend([46, 0x10, 0x20, 0x30]);
+            let ext = file(&[tag("PCO2", &[0, 0, 0, 1, 0, 1, 0, 0], &entry)]);
+            let cues = extended_cues(&ext);
+            assert_eq!(cues[0].color_id, 5);
+            assert_eq!(cues[0].color_code, expected);
+            assert_eq!(cues[0].comment, "A");
+            assert_eq!(cues[0].rgb, if colour.is_empty() { [0; 3] } else { [colour[1], colour[2], colour[3]] });
+        }
     }
 }
 

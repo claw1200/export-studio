@@ -315,7 +315,7 @@ fn carry(lib: &mut Library, share: &Path, volume: &Path, track: &DeviceTrack, co
                         kind: library_kind(c.slot, c.is_loop),
                         start_ms: i64::from(c.start_ms),
                         end_ms: c.loop_end_ms.filter(|_| c.is_loop).map(i64::from),
-                        color_index: Some(i64::from(c.color_id)).filter(|c| *c != 0),
+                        color_index: c.color_code.map(i64::from).filter(|c| *c != 0),
                         comment: c.comment,
                         active_loop: false,
                     })

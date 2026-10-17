@@ -248,3 +248,58 @@ fn a_renamed_library_playlist_still_counts_as_the_one_on_the_stick() {
     assert!(w.lib.playlists().unwrap().iter().all(|n| n.name != "Set"));
     assert_eq!(out.tracks, 2);
 }
+
+#[test]
+fn both_usb_libraries_preserve_selected_and_unset_hot_cue_colours() {
+    for kind in [es_device::LibraryKind::OneLibrary, es_device::LibraryKind::DeviceLibrary] {
+        let Some(mut w) = world() else { return };
+        let job_path = w.dir.path().join("job.json");
+        let mut job: serde_json::Value = serde_json::from_slice(&std::fs::read(&job_path).unwrap()).unwrap();
+        w.volume = w.dir.path().join("COLOUR-STICK");
+        std::fs::create_dir_all(&w.volume).unwrap();
+        job["destination"] = json!(w.volume);
+        let analysis = w.dir.path().join("source/ANLZ0000.EXT");
+        let mut bytes = b"PMAI".to_vec();
+        bytes.extend(28u32.to_be_bytes());
+        bytes.extend(28u32.to_be_bytes());
+        bytes.extend([0; 16]);
+        std::fs::write(&analysis, &bytes).unwrap();
+        std::fs::write(analysis.with_extension("DAT"), &bytes).unwrap();
+        for track in job["tracks"].as_array_mut().unwrap() {
+            track["analysis"] = json!([analysis.with_extension("DAT"), analysis]);
+            track["cues"] = json!([
+                { "kind": 0, "timeMs": 50, "color": 5 },
+                { "kind": 1, "timeMs": 100, "colorCode": 46, "comment": "Selected" },
+                { "kind": 2, "timeMs": 200, "colorCode": 0 },
+                { "kind": 5, "timeMs": 300, "colorCode": 8, "comment": "Slot D" },
+            ]);
+        }
+        std::fs::write(&job_path, job.to_string()).unwrap();
+        let exported = Command::new(exporter().unwrap()).arg(&job_path).output().unwrap();
+        assert!(exported.status.success(), "{}", String::from_utf8_lossy(&exported.stdout));
+
+        let device = es_device::read::read_kind(&w.volume, kind).unwrap().unwrap();
+        let share = w.dir.path().join("lib/share");
+        let opts = options(&w, PlaylistPolicy::SkipExisting);
+        let result = import_device(&mut w.lib, &share, &w.volume, &device, &opts, &|_| {}).unwrap();
+        assert_eq!(result.copied, 2);
+        assert!(result.failed.is_empty(), "{:?}", result.failed);
+
+        let track = w.lib.tracks(None).unwrap().into_iter().find(|t| t.title == "First").unwrap();
+        let cues = es_index::detail::cues_for(&w.lib, &share, &track.id).unwrap();
+        let selected = cues.iter().find(|c| c.slot == 1).unwrap();
+        assert_eq!((selected.color_index, selected.color_code, selected.rgb.as_deref()), (Some(46), Some(46), Some("#ff005c")));
+        let unset = cues.iter().find(|c| c.slot == 2).unwrap();
+        assert_eq!((unset.color_index, unset.color_code, unset.rgb.as_deref()), (None, Some(0), Some("#00c4ff")));
+        let slot_d = cues.iter().find(|c| c.slot == 5).unwrap();
+        assert_eq!((slot_d.color_index, slot_d.color_code, slot_d.rgb.as_deref()), (Some(8), Some(8), Some("#00c4ff")));
+        assert_eq!(cues.iter().find(|c| c.slot == 0).unwrap().color_index, None);
+
+        w.lib.write(|tx| tx.set_cue_color(&track.id, &selected.id, None)).unwrap();
+        let previews = es_index::detail::previews(&w.lib, &share, &[track.id]).unwrap();
+        let cleared = previews[0].cues.iter().find(|c| c.slot == 1).unwrap();
+        assert_eq!((cleared.color_index, cleared.color_code, cleared.rgb.as_deref()), (None, Some(46), Some("#ff005c")));
+        let slot_d = previews[0].cues.iter().find(|c| c.slot == 5).unwrap();
+        assert_eq!(slot_d.color_code, Some(8));
+    }
+}
