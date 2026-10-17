@@ -1458,7 +1458,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-anlz"
-version = "1.2.0"
+version = "1.9.0"
 dependencies = [
  "rbl-core",
  "serde",
@@ -1468,7 +1468,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-core"
-version = "1.2.0"
+version = "1.9.0"
 dependencies = [
  "chrono",
  "dirs",
@@ -1484,7 +1484,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-onelibrary"
-version = "1.2.0"
+version = "1.9.0"
 dependencies = [
  "flate2",
  "rbl-anlz",
@@ -1497,7 +1497,7 @@ dependencies = [
 
 [[package]]
 name = "rbl-pdb"
-version = "1.2.0"
+version = "1.9.0"
 dependencies = [
  "thiserror 2.0.21",
  "tracing",

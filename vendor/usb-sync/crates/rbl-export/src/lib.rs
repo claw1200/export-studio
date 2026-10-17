@@ -192,6 +192,12 @@ pub struct SourcePlaylist {
     pub folder: bool,
     /// Indices into the track slice.
     pub track_indices: Vec<usize>,
+    /// When the library playlist's entries last changed, in milliseconds
+    /// since the epoch (`rbl_db::export_info::playlist_entries_changed`):
+    /// the value rekordbox's sync record keeps as its `Timestamp`. On a
+    /// stick rekordbox synced, it tells whether the library's playlist
+    /// changed since (#471). `None` when not known.
+    pub entries_changed_ms: Option<u64>,
 }
 
 /// Where an export has got to, reported after each track.
@@ -895,11 +901,6 @@ pub struct ExportOptions<'a> {
     /// their place, instead of being taken off. Export Playlist and Export
     /// Track add to a device as rekordbox's do; a SYNC leaves this off.
     pub keep_unlisted: bool,
-    /// Replace cue points and beat grids on the USB with this library's.
-    /// A sync normally stops when those changed on the device since the last
-    /// sync. With this set, those device edits are removed and the library's
-    /// cues and grids are written.
-    pub overwrite: bool,
 }
 
 /// Export with optional conversion of audio outside the common CDJ formats.
@@ -947,7 +948,7 @@ fn export_cancellable_inner(
     let _inspection = incremental::Inspection::new();
     let started = std::time::Instant::now();
     let requested_tracks = tracks;
-    let &ExportOptions { defaults, sync, compatibility, root, keep_unlisted: _, settings_files, cache, expected_volume, verify_all, overwrite } = options;
+    let &ExportOptions { defaults, sync, compatibility, root, keep_unlisted: _, settings_files, cache, expected_volume, verify_all } = options;
     if let Some(volume) = expected_volume { volume.check(destination)?; }
     if destination.exists() && !destination.is_dir() {
         return Err(ExportError::NotADirectory(destination.to_owned()));
@@ -1013,7 +1014,7 @@ fn export_cancellable_inner(
             });
         }
     }
-    let before = if generation_matches {
+    let mut before = if generation_matches {
         previous.as_ref().and_then(|m| m.baseline.clone()).map_or_else(|| snapshot::Snapshot::read(destination), Ok)?
     } else { snapshot::Snapshot::read(destination)? };
     let trusted = incremental::trusted_paths(destination, previous.as_ref())?;
@@ -1025,17 +1026,25 @@ fn export_cancellable_inner(
             old.db_id = db_id;
         }
     }
-    let rewritten = reconcile::rewritten(destination, &before, previous.as_ref(), tracks, playlists, db_id);
+    let playlist_record = reconcile::playlist_namespace(destination, &mut before, previous.as_ref(), db_id);
+    let rewritten = reconcile::rewritten(playlist_record.as_ref(), &before, previous.as_ref(), tracks, playlists, db_id);
     before.check_baseline_except(previous.as_ref(), db_id, &rewritten)?;
     // Read every analysis file the stick names only once the sync is going
     // ahead: on a large stick that is most of what preparing takes, and a
     // refused sync should say so at once (#331).
     let analysis_before = snapshot::analysis_stamp(destination, &before)?;
-    let plan = plan::from_baseline(destination, &before, previous.as_ref(), tracks, playlists, options)?;
+    // What the library's playlists hold now, for the record: the next sync
+    // tells by it whether each changed since (#429).
+    let library_entries: BTreeMap<u64, Vec<String>> = playlists
+        .iter()
+        .filter(|p| !p.folder && !p.device_only && p.id != 0 && p.id < reconcile::DEVICE_PLAYLIST_ID_BASE)
+        .map(|p| (p.id, p.track_indices.iter().filter_map(|i| tracks.get(*i)).map(|t| track_key(t.id, &t.source_path.to_string_lossy())).collect()))
+        .collect();
+    let plan = plan::from_baseline(destination, &before, previous.as_ref(), tracks, playlists, options, playlist_record.as_ref())?;
     if !plan.unknown_size && fs2::available_space(destination)? < plan.peak_bytes {
         return Err(ExportError::Conflict(format!("Not enough temporary space to sync safely: approximately {} bytes required while the previous library is retained", plan.peak_bytes)));
     }
-    let (mut tracks, playlists) = (plan.tracks, plan.playlists);
+    let (mut tracks, playlists, device_additions) = (plan.tracks, plan.playlists, plan.device_additions);
     let mut source_contents_unchanged = BTreeSet::new();
     let mut inspected_source_hashes = BTreeMap::new();
     let recorded_sources: BTreeMap<_, _> = previous.as_ref().into_iter().flat_map(|m| &m.tracks).map(|t| (t.key(), t)).collect();
@@ -1114,6 +1123,10 @@ fn export_cancellable_inner(
     if ids.iter().collect::<BTreeSet<_>>().len() != ids.len() || playlists.iter().any(|p| p.track_indices.iter().any(|i| *i >= tracks.len()) || (p.folder && !p.track_indices.is_empty())) {
         return Err(ExportError::Conflict("Duplicate tracks or invalid playlist membership".into()));
     }
+    // Before anything is copied: a player's cue on a track this sync takes
+    // off the stick stops it, and should at once rather than after every
+    // copy. The same check runs again on what was written.
+    before.check_removed_cues(previous.as_ref(), &ids.iter().copied().collect(), &[])?;
     // Entries are taken out as they are matched; whatever is left at the end
     // is what the selection no longer holds.
     let mut stale: BTreeMap<String, &ManifestTrack> = previous
@@ -1481,15 +1494,32 @@ fn export_cancellable_inner(
             let loaded = incremental::load_analysis(track);
             let missing = track.analysis_source.as_ref().is_some_and(|p| !p.is_file());
             if missing || loaded.is_err() {
-                let retained = carried.filter(|c| (unchanged || retained_audio || in_place || adopted || moved.is_some())
-                    && !c.anlz_dir.is_empty() && c.analysis_extensions.iter().all(|e| trusted.contains(&format!("{}/ANLZ0000.{e}", c.anlz_dir.trim_start_matches('/')))));
+                let retained = carried.filter(|c| (unchanged || retained_audio || in_place || adopted || moved.is_some()) && !c.anlz_dir.is_empty());
+                let (kept, is_kept) = match retained {
+                    Some(c) => {
+                        let fallback = SourceTrack { analysis_source: Some(under(destination, &format!("{}/ANLZ0000.DAT", c.anlz_dir))), ..Default::default() };
+                        if c.analysis_extensions.iter().all(|e| trusted.contains(&format!("{}/ANLZ0000.{e}", c.anlz_dir.trim_start_matches('/')))) {
+                            (incremental::load_analysis(&fallback)?, true)
+                        } else {
+                            // Changed since the last sync, most likely by a
+                            // player's cue or grid edit. The library has no
+                            // analysis to replace it with, so dropping it
+                            // would delete the track's waveforms, beat grid
+                            // and cues from the stick for nothing (#522).
+                            // Keep it whenever it still reads as analysis;
+                            // the library's cues, if any, still go over it
+                            // below.
+                            let kept = incremental::load_analysis(&fallback).unwrap_or_default();
+                            let is_kept = !kept.is_empty();
+                            (kept, is_kept)
+                        }
+                    }
+                    None => (Vec::new(), false),
+                };
                 let detail = loaded.as_ref().err().map(ToString::to_string);
                 report.warnings.push(ExportWarning { track_id: track.id, title: track.title.clone(),
-                    reason: if retained.is_some() { "analysis-kept" } else { "analysis-unavailable" }.into(), detail });
-                if let Some(c) = retained {
-                    let fallback = SourceTrack { analysis_source: Some(under(destination, &format!("{}/ANLZ0000.DAT", c.anlz_dir))), ..Default::default() };
-                    incremental::load_analysis(&fallback)?
-                } else { Vec::new() }
+                    reason: if is_kept { "analysis-kept" } else { "analysis-unavailable" }.into(), detail });
+                kept
             } else { loaded? }
         };
         let track = &hydrated;
@@ -1533,11 +1563,12 @@ fn export_cancellable_inner(
             }).collect::<std::io::Result<Vec<_>>>()?)
         };
         let analysis = exported_analysis.as_deref().unwrap_or(&track.analysis);
-        if let Some(c) = carried.filter(|c| {
-            !overwrite && !c.analysis_extensions.iter().all(|e| trusted.contains(&format!("{}/ANLZ0000.{e}", c.anlz_dir.trim_start_matches('/'))))
-        }) {
-            snapshot::check_analysis(destination, c, analysis)?;
-        }
+        // The stick's cues and beat grid may have been edited on a player
+        // since the last sync. An export goes from the computer to the USB,
+        // so the library's win and replace them; bringing a player's edits
+        // into the library is the import's job, chosen by the user (#439,
+        // #522). This used to stop the run here, part-way through copying,
+        // and asked for an import the user may not want.
         let mut analysis_hash: u64 = analysis_reused.map_or(0, |c| c.analysis);
         for (extension, bytes) in analysis.iter().filter(|_| analysis_reused.is_none()) {
             analysis_hash = analysis_hash.rotate_left(7)
@@ -1853,7 +1884,7 @@ fn export_cancellable_inner(
     // The sync record, so rekordbox's Sync Manager opens on this selection
     // too. A playlist that is not the library's has no id to record.
     if let Some(sync) = sync {
-        let ticked: Vec<u64> = playlists.iter().filter(|p| !p.folder).map(|p| p.id).filter(|&id| id != 0 && id < reconcile::DEVICE_PLAYLIST_ID_BASE).collect();
+        let ticked: Vec<u64> = playlists.iter().filter(|p| !p.folder && !p.device_only).map(|p| p.id).filter(|&id| id != 0 && id < reconcile::DEVICE_PLAYLIST_ID_BASE).collect();
         let kept = sync_record::read(destination).map(|r| r.timestamps).unwrap_or_default();
         let device_ids = playlists.iter().zip(&playlist_ids).map(|(p, id)| (p.id, *id)).collect();
         let bytes = sync_record::render_with_ids(sync, &ticked, rbl_core::time::unix_millis(), &kept, &device_ids);
@@ -1877,7 +1908,7 @@ fn export_cancellable_inner(
     let named: Vec<String> = recorded.iter().map(|track| track.audio.clone()).collect();
     let after = snapshot::Snapshot::read_at(publication.stage(), root_name)?;
     before.check_retained_history(&after)?;
-    before.check_changes(previous.as_ref(), &after, overwrite)?;
+    before.check_changes_except(previous.as_ref(), &after, &device_additions)?;
     progress(&ExportProgress { stage: "verifying", done: 0, total: 0, title: String::new(), reused: report.reused, copied: report.tracks_added + report.tracks_updated, converted: report.converted, ..Default::default() });
     let verified_reused: BTreeSet<String> = trusted.iter().filter(|p| !publication.stage().join(p).is_file()).cloned().collect();
     let verified = verification::verify_staged_incremental(publication.stage(), destination, &after, &absent_audio, &verified_reused)?;
@@ -1907,14 +1938,17 @@ fn export_cancellable_inner(
         playlists: playlists
             .iter()
             .enumerate()
-            .map(|(i, p)| manifest::ManifestPlaylist { library_id: p.id, name: p.name.clone(), export_id: playlist_ids[i], folder: p.folder, device_only: p.device_only })
+            .map(|(i, p)| manifest::ManifestPlaylist {
+                library_id: p.id, name: p.name.clone(), export_id: playlist_ids[i], folder: p.folder, device_only: p.device_only,
+                library_entries: if p.device_only { None } else { library_entries.get(&p.id).cloned() },
+            })
             .collect(),
         loose,
     };
     let structure = incremental::manifest_structure(&manifest)?;
     if let Some(g) = &mut manifest.generation { g.structure = structure; }
     manifest.save_at(publication.stage(), root_name)
-    .map_err(context("Could not write the sync manifest".to_owned()))?;
+    .map_err(context("Could not write the rbxport manifest".to_owned()))?;
     let named: Vec<&str> = named.iter().map(String::as_str).collect();
     let mut files = staged_files(publication.stage(), &named)?;
     files.extend(moved_audio);

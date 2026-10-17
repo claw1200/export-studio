@@ -78,8 +78,8 @@ export const api = {
   usbLibraries: (volumeId: string) => call<DeviceLibraryView[]>('usb.libraries', { volumeId }),
   usbSelection: (volumeId: string) => call<{ playlistIds: string[] }>('usb.selection', { volumeId }),
   usbTracks: (volumeId: string, playlistId: string | null) => call<Track[]>('usb.tracks', { volumeId, playlistId }),
-  usbSync: (volumeId: string, playlistIds: string[], overwrite = false) =>
-    call<{ volumeId: string; tracks: number; playlists: number }>('usb.sync', { volumeId, playlistIds, overwrite }),
+  usbSync: (volumeId: string, playlistIds: string[]) =>
+    call<{ volumeId: string; tracks: number; playlists: number }>('usb.sync', { volumeId, playlistIds }),
   usbImportPreview: (volumeId: string, folder: string | null, policy: PlaylistPolicy = 'skipExisting') =>
     call<UsbImportPreview>('usb.importPreview', {
       volumeId,

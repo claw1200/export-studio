@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/chrisle/rbxport",
+  "commit": "7fb4dad3f88a2cc0cecec0e718b4dde408fd7448",
+  "version": "1.9.0",
+  "license": "GPL-2.0-or-later",
+  "previousCommit": null,
+  "previousCommitNote": "The previous mixed snapshot declared 1.2.0 but was refreshed in Export Studio commit f4a4568351d27cbb9aa3f9f61bd3a583b9c1d805; its exact upstream revision is unknown.",
+  "productionCrates": ["rbl-core", "rbl-pdb", "rbl-anlz", "rbl-audio", "rbl-onelibrary", "rbl-export"],
+  "testSupportCrates": ["rbl-db", "rbl-index", "rbl-analysis", "rbl-devices"],
+  "downstreamChanges": [
+    "Keep .exportstudio-publication journal and exportstudio manifest/recovery paths in rbl-export sources and fixtures.",
+    "Use an export-only workspace with upstream test-support crates; keep the existing thin-LTO release profile.",
+    "es-usb is an Export Studio helper, not an upstream crate; schemaVersion 2 adopts library-wins cue/grid semantics."
+  ]
+}

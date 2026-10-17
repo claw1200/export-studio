@@ -708,7 +708,6 @@ impl LibraryService {
         &self,
         volume: &Path,
         playlist_ids: &[String],
-        overwrite: bool,
         emit: &impl Fn(ServiceEvent),
     ) -> Result<crate::sync::Outcome> {
         let database = self
@@ -716,7 +715,7 @@ impl LibraryService {
             .as_ref()
             .ok_or_else(|| crate::Error::Other("Library not open".into()))?
             .database();
-        crate::sync::sync_volume(database, volume, playlist_ids, overwrite, &|progress| {
+        crate::sync::sync_volume(database, volume, playlist_ids, &|progress| {
             emit(ServiceEvent::UsbSyncProgress(progress));
         })
     }

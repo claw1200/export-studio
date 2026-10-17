@@ -102,6 +102,9 @@ pub struct MonoStream {
     /// silence still to hand out when positive, decoded frames still to drop
     /// when negative. See [`rekordbox_lead`].
     lead: i64,
+    /// How many frames the container says the file holds, lead included,
+    /// when it says.
+    expected: Option<u64>,
 }
 
 /// Source-rate frames rekordbox's timeline for a file runs ahead of what
@@ -147,7 +150,15 @@ impl MonoStream {
             .channels
             .map_or(2, |c| u16::try_from(c.count()).unwrap_or(2));
         let lead = rekordbox_lead(path, track.codec_params.codec);
-        Ok(Self { format, decoder, track_id, sample_rate, source_channels, buffer: None, mono: Vec::new(), lead })
+        let expected = track.codec_params.n_frames.map(|frames| frames.saturating_add_signed(lead));
+        Ok(Self { format, decoder, track_id, sample_rate, source_channels, buffer: None, mono: Vec::new(), lead, expected })
+    }
+
+    /// How many samples the stream is expected to hand out in all, from the
+    /// container's frame count; `None` when the container does not declare
+    /// one. An estimate: a damaged or truncated file can end sooner.
+    pub fn expected_frames(&self) -> Option<u64> {
+        self.expected
     }
 
     /// The rate of the samples handed out so far, or the one the container
@@ -403,6 +414,21 @@ mod tests {
         // The tone should survive round-tripping through 16-bit.
         let peak = audio.samples.iter().fold(0.0_f32, |a, s| a.max(s.abs()));
         assert!((peak - 0.5).abs() < 0.01, "peak was {peak}");
+    }
+
+    #[test]
+    fn a_stream_knows_its_length_before_it_is_decoded() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tone.wav");
+        write_wav(&path, 8_000, 2, &vec![0.25; 2 * 12_000]);
+
+        let mut stream = MonoStream::open(&path).unwrap();
+        assert_eq!(stream.expected_frames(), Some(12_000));
+        let mut handed_out = 0;
+        while let Some(chunk) = stream.next_chunk() {
+            handed_out += chunk.len();
+        }
+        assert_eq!(handed_out, 12_000, "the estimate is what the stream then hands out");
     }
 
     #[test]

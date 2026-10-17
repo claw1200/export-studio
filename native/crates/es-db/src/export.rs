@@ -65,6 +65,7 @@ pub struct ExportPlaylist {
     pub seq: i64,
     pub folder: bool,
     pub track_ids: Vec<String>,
+    pub entries_changed_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,6 +134,14 @@ impl Library {
         let mut playlists = Vec::new();
         let mut seen: Vec<String> = Vec::new();
         let mut known = BTreeSet::new();
+        let mut revisions = self.conn().prepare(
+            "SELECT CASE WHEN COUNT(*) = 0 OR COUNT(stamp) != COUNT(*) THEN NULL ELSE MAX(stamp) END \
+             FROM (SELECT CASE WHEN rb_local_deleted != 0 \
+                 THEN CAST(ROUND(unixepoch(updated_at, 'subsec') * 1000) AS INTEGER) \
+                 ELSE MAX(CAST(ROUND(unixepoch(created_at, 'subsec') * 1000) AS INTEGER), \
+                          CAST(ROUND(unixepoch(updated_at, 'subsec') * 1000) AS INTEGER)) END AS stamp \
+                 FROM djmdSongPlaylist WHERE PlaylistID = ?1)",
+        )?;
         for node in ordered {
             let members = match node.kind {
                 PlaylistKind::Folder => Vec::new(),
@@ -150,6 +159,9 @@ impl Library {
                 seq: node.seq,
                 folder: node.kind == PlaylistKind::Folder,
                 track_ids: members,
+                entries_changed_ms: revisions
+                    .query_row([&node.id], |row| row.get::<_, Option<i64>>(0))?
+                    .and_then(|stamp| u64::try_from(stamp).ok()),
             });
         }
         let tracks = self.export_tracks(&seen)?;
@@ -265,5 +277,39 @@ impl Library {
             }
         }
         Ok(ids.iter().filter_map(|id| by_id.remove(id)).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fixture::{self, Rows};
+    use crate::Guard;
+
+    #[test]
+    fn playlist_revision_includes_deletions_and_rejects_unknown_timestamps() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = fixture::build(directory.path(), 1).unwrap();
+        let library = Library::open_live(&path, Guard::Off).unwrap();
+        let connection = library.conn();
+        Rows(connection).playlist("10", "Mix", 0).unwrap();
+        Rows(connection).track("1", "Track").unwrap();
+        Rows(connection).song("10", "1", 1).unwrap();
+        let revision = || library.export_bundle(&["10".into()]).unwrap().playlists[0].entries_changed_ms;
+        connection.execute_batch(
+            "UPDATE djmdSongPlaylist SET created_at = '2026-10-12 23:06:11.399 +00:00', \
+             updated_at = '2026-10-13 01:06:11.399 +02:00'",
+        ).unwrap();
+        let original = revision().unwrap();
+        assert_eq!(original % 1000, 399);
+        connection.execute_batch(
+            "UPDATE djmdSongPlaylist SET rb_local_deleted = 1, \
+             updated_at = '2026-10-12 23:06:12.155 +00:00'",
+        ).unwrap();
+        assert_eq!(revision(), Some(original + 756));
+        connection.execute_batch("UPDATE djmdSongPlaylist SET updated_at = 'unknown'").unwrap();
+        assert_eq!(revision(), None);
+        connection.execute_batch("DELETE FROM djmdSongPlaylist").unwrap();
+        assert_eq!(revision(), None);
     }
 }

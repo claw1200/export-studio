@@ -90,7 +90,7 @@ export interface EngineCommandParams {
   'track.relocate': { moves: Record<string, string> }
   'usb.eject': { volumeId: string }
   'usb.format': { volumeId: string }
-  'usb.sync': { volumeId: string; playlistIds: string[]; overwrite?: boolean }
+  'usb.sync': { volumeId: string; playlistIds: string[] }
   'usb.import': { volumeId: string; folder?: string | null; policy?: PlaylistPolicy }
 }
 

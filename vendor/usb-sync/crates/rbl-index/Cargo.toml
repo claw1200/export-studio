@@ -1,0 +1,26 @@
+[package]
+name = "rbl-index"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "In-memory columnar index over the rekordbox library."
+
+[lints]
+workspace = true
+
+[dependencies]
+rbl-core = { path = "../rbl-core" }
+rbl-db = { path = "../rbl-db" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+memchr = "2"
+crc32fast = "1"
+parking_lot = "0.12"
+rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
+
+[dev-dependencies]
+# For the Explorer example, which lists a real folder against the real library.
+rbl-devices = { path = "../rbl-devices" }
+tempfile = "3"

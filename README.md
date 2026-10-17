@@ -81,6 +81,9 @@ Tested on vast rekordbox libraries, it almost always matches or improves on reko
 
 Playlists you pick are checked before they replace what is on the stick. Playlists, history, and tracks this app did not create are left in place.
 
+Sync uses the library's cues and beat grids in place of USB edits. If the library
+has no analysis for a track, usable analysis already on the device is retained.
+
 DeviceLibrary and OneLibrary are both written to the device, so that compatibility is preserved across all players.
 
 <img src="preview/images/usb_sync.webp" alt="Choosing which playlists to copy onto a USB stick." height="480">

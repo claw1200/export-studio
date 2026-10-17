@@ -14,6 +14,62 @@ fn sql(e: impl std::fmt::Display) -> ExportError {
     ExportError::OneLibrary(e.to_string())
 }
 
+/// Establish one playlist ID namespace before planning or checking removals.
+/// [OBS: fixture] the two USB databases can describe the same tree with different
+/// IDs. Each sync file is interpreted against its own database, never the other.
+/// Existing rbxport baselines already use one namespace and keep their edit checks.
+pub(crate) fn playlist_namespace(root: &Path, before: &mut Snapshot, previous: Option<&Manifest>, db_id: u64) -> Option<SyncRecord> {
+    let dir = crate::export_root(root).join("rekordbox");
+    let read = |name: &str, library: &Library| std::fs::read(dir.join(name)).ok()
+        .and_then(|bytes| crate::sync_record::parse(&bytes))
+        .filter(|r| r.db_id == db_id && db_id != 0)
+        .map(|mut r| {
+            let mut counts = BTreeMap::<u32, usize>::new();
+            for id in r.device_ids.values() { *counts.entry(*id).or_default() += 1; }
+            r.device_ids.retain(|master, id| counts.get(id) == Some(&1) && library.playlists.iter().any(|p| p.id == *id && p.folder == r.folders.contains(master)));
+            r
+        });
+    let legacy_record = before.legacy.as_ref().and_then(|library| read("playlists3.sync", library));
+    let plus_record = before.one.as_ref().and_then(|library| read("playlists3Plus.sync", library));
+    if previous.and_then(|m| m.baseline.as_ref()).is_some() {
+        return plus_record.or(legacy_record);
+    }
+    let (Some(legacy), Some(one)) = (&mut before.legacy, &before.one) else {
+        return plus_record.or(legacy_record);
+    };
+    let mut pairs = BTreeMap::new();
+    if let (Some(left), Some(right)) = (&legacy_record, &plus_record) {
+        let unique = |record: &SyncRecord, id: u32| record.device_ids.values().filter(|value| **value == id).count() == 1;
+        // Place parents first, so a same-named row in another folder cannot
+        // silently stand in for this row. Conflicting contents remain separate.
+        loop {
+            let count = pairs.len();
+            for (master, id) in &left.device_ids {
+                let Some(other_id) = right.device_ids.get(master) else { continue };
+                if pairs.contains_key(id) || !unique(left, *id) || !unique(right, *other_id) { continue; }
+                let Some(a) = legacy.playlists.iter().find(|p| p.id == *id) else { continue };
+                let Some(b) = one.playlists.iter().find(|p| p.id == *other_id) else { continue };
+                let same_parent = (a.parent == 0 && b.parent == 0) || pairs.get(&a.parent) == Some(&b.parent);
+                if same_parent && a.name == b.name && a.folder == b.folder && a.tracks == b.tracks {
+                    pairs.insert(*id, *other_id);
+                }
+            }
+            if pairs.len() == count { break; }
+        }
+    }
+    let floor = previous.into_iter().flat_map(|m| &m.playlists).map(|p| p.export_id).max().unwrap_or(0);
+    let ids = crate::snapshot::legacy_playlist_ids_with(legacy, one, floor, &pairs);
+    for node in &mut legacy.playlists {
+        node.id = ids.get(&node.id).copied().unwrap_or(node.id);
+        if node.parent != 0 { node.parent = ids.get(&node.parent).copied().unwrap_or(node.parent); }
+    }
+    plus_record.or_else(|| legacy_record.map(|mut record| {
+        record.device_ids = record.device_ids.into_iter().filter_map(|(master, id)| ids.get(&id).map(|mapped| (master, *mapped))).collect();
+        record
+    }))
+}
+
+#[allow(clippy::too_many_arguments, reason = "shared validated playlist record accompanies the snapshot")]
 pub fn prepare(
     root: &Path,
     before: &Snapshot,
@@ -22,10 +78,13 @@ pub fn prepare(
     playlists: &[SourcePlaylist],
     db_id: u64,
     keep_unlisted: bool,
-) -> Result<(Vec<SourceTrack>, Vec<SourcePlaylist>)> {
+    record: Option<&SyncRecord>,
+) -> Result<Prepared> {
+    // The library's entries, by track key, before any track is tied to the
+    // device row it came from.
+    let keys: Vec<String> = tracks.iter().map(|t| crate::track_key(t.id, &t.source_path.to_string_lossy())).collect();
     let mut tracks = tracks.to_vec();
     let mut playlists = playlists.to_vec();
-    let record = crate::sync_record::read(root).filter(|r| r.db_id == db_id && db_id != 0);
     // A playlist carried under a new id must not take one an earlier export
     // recorded: that would read as the library's playlist, and be taken off.
     // Nor one the stick held at that export and has since deleted: that
@@ -44,16 +103,218 @@ pub fn prepare(
         .max()
         .unwrap_or(0);
     let Some(current) = before.merged_library_above(recorded) else {
-        return Ok((tracks, playlists));
+        return Ok(Prepared { tracks, playlists, device_additions: BTreeSet::new() });
     };
     let existing_sources = sources(root, before)?;
     identify_tracks(&mut tracks, before, previous, db_id, &existing_sources);
-    identify_playlists(&mut playlists, previous, record.as_ref());
-    retain_device_only(root, &current, &mut tracks, &mut playlists, before, previous, &existing_sources, record.as_ref(), keep_unlisted)?;
+    identify_playlists(&mut playlists, previous, record, before);
+    let (mut additions, dropped) = device_additions(before, previous, &keys, &playlists);
+    if previous.is_none() {
+        additions.extend(rekordbox_device_additions(before, record, &tracks, &playlists));
+    }
+    let kept: BTreeSet<u32> = additions.values().flatten().flatten().copied().collect();
+    retain_device_only(root, &current, &mut tracks, &mut playlists, before, previous, &existing_sources, record, keep_unlisted, &kept, &dropped)?;
+    keep_device_additions(&tracks, &mut playlists, &additions)?;
     if keep_unlisted {
         keep_stick_order(&mut playlists, previous);
     }
-    Ok((tracks, playlists))
+    Ok(Prepared { tracks, playlists, device_additions: additions.into_keys().collect() })
+}
+
+/// What [`prepare`] makes of a selection.
+#[derive(Debug)]
+pub struct Prepared {
+    pub tracks: Vec<SourceTrack>,
+    pub playlists: Vec<SourcePlaylist>,
+    /// The device ids of the selected playlists the stick holds with
+    /// entries added on the stick (see [`device_additions`]): each is
+    /// written either as the stick has it or as the library has it, and
+    /// either way on purpose, so the check for device edits a sync would
+    /// overwrite leaves them out.
+    pub device_additions: BTreeSet<u32>,
+}
+
+/// The selected playlists whose copy on the stick is the library's, as the
+/// last sync wrote it, with entries added on the stick, by device id; and
+/// for each, the entries to write: the stick's (`Some`) while the library's
+/// playlist is unchanged since that sync, and the library's (`None`) once it
+/// has changed.
+///
+/// That is what rekordbox's sync does with a track added to a synced
+/// playlist in its Devices tree [OBS rekordbox 7.2.14.0323 for Windows,
+/// chris-win11 2026-10-12, #309, `docs/reference/usb-export-db.md` "What a
+/// later sync does to a playlist edited on the device"]: a sync with the
+/// library's playlist unchanged keeps the added entry; one after the
+/// library's playlist changed rewrites it from the library, and the added
+/// track stays on the stick in no playlist. It never adds the entry to the
+/// library. Its record keeps the time the library playlist's entries last
+/// changed; [ASSUME] it rewrites a playlist when that time has moved. The
+/// library's entries are compared here instead, as the last sync recorded
+/// them (`ManifestPlaylist::library_entries`). An older record has none; the
+/// build that wrote it put every selected playlist on the stick as the
+/// library had it, so the stick's copy at that sync stands in.
+///
+/// Only an addition was observed: the stick's playlist must hold the
+/// library's entries in their order, with the same name and place as the
+/// last sync left it, and both of the stick's libraries must agree on it.
+/// A playlist edited any other way on the stick (an entry of the library's
+/// removed or moved, a rename, an edit in one library alone, as a player
+/// makes) is left out, and the sync stops on it as before [UNKNOWN: what
+/// rekordbox does with those].
+///
+/// Also returns the device ids of the added entries a playlist rewritten from
+/// the library takes out. rekordbox leaves such a track on the stick, in no
+/// playlist; so does [`retain_device_only`], even when it is one an earlier
+/// export put there for a playlist this sync no longer selects (#471).
+fn device_additions(
+    before: &Snapshot,
+    previous: Option<&Manifest>,
+    keys: &[String],
+    playlists: &[SourcePlaylist],
+) -> (BTreeMap<u32, Option<Vec<u32>>>, BTreeSet<u32>) {
+    let mut out = BTreeMap::new();
+    let mut dropped = BTreeSet::new();
+    let Some((previous, baseline)) = previous.and_then(|m| m.baseline.as_ref().map(|b| (m, b))) else { return (out, dropped) };
+    // A library track's device id, as the last sync recorded it: the track
+    // it exported before one it only carried.
+    let mut export_ids: BTreeMap<String, u32> = BTreeMap::new();
+    for carried in [false, true] {
+        for t in previous.tracks.iter().filter(|t| (t.preserved == Some(true)) == carried) {
+            export_ids.entry(t.key()).or_insert(t.export_id);
+        }
+    }
+    let keys_by_id: BTreeMap<u32, String> = export_ids.iter().map(|(key, id)| (*id, key.clone())).collect();
+    for p in playlists.iter().filter(|p| !p.folder && !p.device_only && p.device_id != 0 && p.id != 0 && p.id < DEVICE_PLAYLIST_ID_BASE) {
+        let Some(recorded) = previous.playlists.iter().find(|m| m.export_id == p.device_id && m.library_id == p.id && !m.device_only && !m.folder) else { continue };
+        let Some((stick, at_sync)) = stick_copy(before, baseline, p.device_id) else { continue };
+        let library_then: Option<Vec<String>> = recorded.library_entries.clone()
+            .or_else(|| at_sync.iter().map(|id| keys_by_id.get(id).cloned()).collect());
+        let Some(library_then) = library_then else { continue };
+        // The library's entries at that sync, as the stick numbers them.
+        let Some(written) = library_then.iter().map(|key| export_ids.get(key).copied()).collect::<Option<Vec<u32>>>() else { continue };
+        if stick == written || !is_subsequence(&written, &stick) {
+            continue;
+        }
+        let library_now: Option<Vec<&String>> = p.track_indices.iter().map(|i| keys.get(*i)).collect();
+        let unchanged = library_now.is_some_and(|now| now.len() == library_then.len() && now.iter().zip(&library_then).all(|(a, b)| *a == b));
+        if !unchanged {
+            dropped.extend(stick.iter().filter(|id| !written.contains(id)));
+        }
+        out.insert(p.device_id, unchanged.then_some(stick));
+    }
+    (out, dropped)
+}
+
+/// How far apart, in milliseconds, the `Timestamp` rekordbox's sync record
+/// keeps for a playlist and the library entries' latest change time
+/// (`SourcePlaylist::entries_changed_ms`) may be and still be the same
+/// change. rekordbox recorded `1791846371399` for an entry created at
+/// `.399` (0 ms) and `1791847083155` for one created at `.154` (1 ms)
+/// [OBS #309]: its own clock against the millisecond the row keeps. Any
+/// library edit made since is later than the sync that wrote the record,
+/// which takes far longer than this.
+const SAME_CHANGE_MS: u64 = 2;
+
+/// [`device_additions`] for a stick rekordbox synced and rbxport has not:
+/// with no record of its own, it goes by rekordbox's. Its sync record keeps,
+/// for each ticked playlist, the time the library playlist's entries last
+/// changed [OBS rekordbox 7.2.14, #309]. While the library's time is still
+/// that one, the playlist is written as the stick has it, entries added on
+/// the stick included, as rekordbox's own sync keeps them; once it has
+/// moved, from the library, as before.
+///
+/// As for a stick rbxport synced, only an addition counts: the stick's
+/// playlist must hold the library's entries now, in their order, and both
+/// of its libraries must agree on it. Anything else is written from the
+/// library, as a first sync from here always has [UNKNOWN: what rekordbox
+/// does with a removal, a reorder or an edit in one library].
+fn rekordbox_device_additions(
+    before: &Snapshot,
+    record: Option<&SyncRecord>,
+    tracks: &[SourceTrack],
+    playlists: &[SourcePlaylist],
+) -> BTreeMap<u32, Option<Vec<u32>>> {
+    let mut out = BTreeMap::new();
+    let Some(record) = record else { return out };
+    for p in playlists.iter().filter(|p| !p.folder && !p.device_only && p.device_id != 0 && p.id != 0 && p.id < DEVICE_PLAYLIST_ID_BASE) {
+        let (Some(recorded), Some(changed)) = (record.timestamps.get(&p.id), p.entries_changed_ms) else { continue };
+        if recorded.abs_diff(changed) > SAME_CHANGE_MS {
+            continue;
+        }
+        let Some(stick) = stick_now(before, p.device_id) else { continue };
+        // The library's entries as the stick numbers them; one the stick
+        // does not hold means the library's playlist has changed after all.
+        let Some(library) = p.track_indices.iter().map(|i| tracks.get(*i).and_then(|t| t.device.as_ref()).map(|d| d.id)).collect::<Option<Vec<u32>>>() else { continue };
+        if stick == library || !is_subsequence(&library, &stick) {
+            continue;
+        }
+        out.insert(p.device_id, Some(stick));
+    }
+    out
+}
+
+/// The stick's playlist `id`, when every library the stick holds has it,
+/// as a playlist, with the same entries.
+fn stick_now(before: &Snapshot, id: u32) -> Option<Vec<u32>> {
+    let mut found: Option<Vec<u32>> = None;
+    for library in [&before.legacy, &before.one].into_iter().flatten() {
+        let now = library.playlists.iter().find(|p| p.id == id)?;
+        if now.folder || found.as_ref().is_some_and(|tracks| *tracks != now.tracks) {
+            return None;
+        }
+        found.get_or_insert_with(|| now.tracks.clone());
+    }
+    found
+}
+
+/// The stick's playlist `id` now and as the last sync left it, when every
+/// library the stick holds has it with the same entries now, and with the
+/// name and place it had then.
+fn stick_copy(before: &Snapshot, baseline: &Snapshot, id: u32) -> Option<(Vec<u32>, Vec<u32>)> {
+    let mut found: Option<(Vec<u32>, Vec<u32>)> = None;
+    for (now, then) in [(&before.legacy, &baseline.legacy), (&before.one, &baseline.one)] {
+        let Some(now) = now else { continue };
+        let now = now.playlists.iter().find(|p| p.id == id)?;
+        let then = then.as_ref()?.playlists.iter().find(|p| p.id == id)?;
+        if now.name != then.name || now.parent != then.parent || now.folder || then.folder {
+            return None;
+        }
+        if found.as_ref().is_some_and(|(tracks, _)| *tracks != now.tracks) {
+            return None;
+        }
+        found.get_or_insert_with(|| (now.tracks.clone(), then.tracks.clone()));
+    }
+    found
+}
+
+/// Whether `part`'s entries are all in `whole`, in the same order.
+fn is_subsequence(part: &[u32], whole: &[u32]) -> bool {
+    let mut rest = whole.iter();
+    part.iter().all(|id| rest.any(|other| other == id))
+}
+
+/// Points each playlist [`device_additions`] keeps as the stick has it at
+/// the stick's entries. [`retain_device_only`] has already carried every
+/// track they name.
+fn keep_device_additions(
+    tracks: &[SourceTrack],
+    playlists: &mut [SourcePlaylist],
+    additions: &BTreeMap<u32, Option<Vec<u32>>>,
+) -> Result<()> {
+    let mut positions: BTreeMap<u32, usize> = BTreeMap::new();
+    for (i, track) in tracks.iter().enumerate() {
+        if let Some(device) = &track.device {
+            positions.entry(device.id).or_insert(i);
+        }
+    }
+    for playlist in playlists.iter_mut() {
+        let Some(Some(entries)) = additions.get(&playlist.device_id) else { continue };
+        playlist.track_indices = entries
+            .iter()
+            .map(|id| positions.get(id).copied().ok_or_else(|| ExportError::Conflict(format!("Playlist '{}' on the USB names a track it no longer holds", playlist.name))))
+            .collect::<Result<_>>()?;
+    }
+    Ok(())
 }
 
 /// The stick's rows [`prepare`] will tie to the selection, and so write afresh
@@ -61,7 +322,7 @@ pub fn prepare(
 /// master ids, and the device playlists `identify_playlists` names. Worked
 /// out from the snapshot alone, before any analysis file is read.
 pub fn rewritten(
-    root: &Path,
+    record: Option<&SyncRecord>,
     before: &Snapshot,
     previous: Option<&Manifest>,
     tracks: &[SourceTrack],
@@ -86,9 +347,8 @@ pub fn rewritten(
             }
         }
     }
-    let record = crate::sync_record::read(root).filter(|r| r.db_id == db_id && db_id != 0);
     let mut playlists = playlists.to_vec();
-    identify_playlists(&mut playlists, previous, record.as_ref());
+    identify_playlists(&mut playlists, previous, record, before);
     out.playlists = playlists.iter().map(|p| p.device_id).filter(|id| *id != 0).collect();
     out
 }
@@ -165,6 +425,7 @@ fn identify_playlists(
     playlists: &mut [SourcePlaylist],
     previous: Option<&Manifest>,
     record: Option<&SyncRecord>,
+    before: &Snapshot,
 ) {
     for p in playlists {
         if p.device_id != 0 {
@@ -174,10 +435,11 @@ fn identify_playlists(
             .and_then(|m| {
                 m.playlists
                     .iter()
-                    .find(|old| old.library_id == p.id && p.id != 0 && !old.device_only)
+                    .find(|old| old.library_id == p.id && p.id != 0 && p.id < DEVICE_PLAYLIST_ID_BASE)
             })
             .map(|p| p.export_id)
             .or_else(|| record.and_then(|r| r.device_ids.get(&p.id).copied()))
+            .filter(|id| before.legacy.iter().chain(&before.one).any(|library| library.playlists.iter().any(|node| node.id == *id && node.folder == p.folder)))
             .unwrap_or(0);
     }
 }
@@ -189,6 +451,13 @@ fn identify_playlists(
 /// A playlist an earlier export put there (`owned`) is taken off unless
 /// `keep_unlisted`, in which case it stays as the stick has it and is still
 /// recorded as the library's, under the library id it was exported from.
+///
+/// `kept` names the tracks of selected playlists written as the stick has
+/// them ([`device_additions`]), which are carried too. `dropped` names the
+/// entries added on the stick that a playlist rewritten from the library
+/// takes out: those tracks stay on the stick as the stick's, as rekordbox
+/// leaves them, even one an earlier export put there for a playlist no
+/// longer selected, which the #317 cleanup would otherwise take off.
 #[allow(clippy::too_many_arguments, reason = "everything reconciliation already gathered, passed through")]
 fn retain_device_only(
     root: &Path,
@@ -200,22 +469,18 @@ fn retain_device_only(
     existing_sources: &BTreeMap<u32, SourceTrack>,
     record: Option<&SyncRecord>,
     keep_unlisted: bool,
+    kept: &BTreeSet<u32>,
+    dropped: &BTreeSet<u32>,
 ) -> Result<()> {
     // Device playlist id -> the library id it was exported from.
-    let owned: BTreeMap<u32, u64> = previous.map_or_else(
-        || {
-            record
-                .map(|r| r.device_ids.iter().map(|(library, device)| (*device, *library)).collect())
-                .unwrap_or_default()
-        },
-        |m| {
-            m.playlists
-                .iter()
-                .filter(|p| !p.device_only && p.export_id != 0)
-                .map(|p| (p.export_id, p.library_id))
-                .collect()
-        },
-    );
+    // A foreign sync record establishes correspondence, not permission to
+    // delete unchecked playlists on the first adoption. Only our own baseline
+    // establishes ownership; carried playlists remain device-only thereafter.
+    let owned: BTreeMap<u32, u64> = previous
+        .filter(|m| m.baseline.is_some())
+        .into_iter().flat_map(|m| &m.playlists)
+        .filter(|p| !p.device_only && p.export_id != 0)
+        .map(|p| (p.export_id, p.library_id)).collect();
     // Kept as the library's: owned, with a library id the selection does not
     // already use for another playlist.
     let kept_owned: BTreeMap<u32, u64> = if keep_unlisted {
@@ -232,12 +497,22 @@ fn retain_device_only(
         .iter()
         .filter(|p| (!owned.contains_key(&p.id) || kept_owned.contains_key(&p.id)) && !playlists.iter().any(|n| n.device_id == p.id))
         .collect();
-    let retained_id = |device: u32| kept_owned.get(&device).copied().unwrap_or(DEVICE_PLAYLIST_ID_BASE + u64::from(device));
+    // Preserve a known correspondence without granting deletion ownership.
+    // This lets a later selection adopt a carried playlist instead of duplicating it.
+    let identities: BTreeMap<u32, u64> = record.into_iter().flat_map(|r| &r.device_ids)
+        .map(|(master, device)| (*device, *master))
+        .chain(previous.into_iter().flat_map(|m| &m.playlists)
+            .filter(|p| p.library_id != 0 && p.library_id < DEVICE_PLAYLIST_ID_BASE)
+            .map(|p| (p.export_id, p.library_id)))
+        .filter(|(_, master)| !playlists.iter().any(|p| p.id == *master)).collect();
+    let retained_id = |device: u32| kept_owned.get(&device).or_else(|| identities.get(&device)).copied().unwrap_or(DEVICE_PLAYLIST_ID_BASE + u64::from(device));
     let mut needed: BTreeSet<u32> = retained
         .iter()
         .flat_map(|p| &p.tracks)
         .copied()
         .chain(before.history.iter().flat_map(|h| &h.tracks).copied())
+        .chain(kept.iter().copied())
+        .chain(dropped.iter().copied())
         .collect();
     // What an earlier export put there itself. A track it only carried
     // (`preserved`) is still another writer's: counting it as ours would keep
@@ -246,21 +521,15 @@ fn retain_device_only(
     let previously_owned: BTreeSet<u32> = previous
         .map(|m| m.tracks.iter().filter(|t| !crate::carried_entry(root, t)).map(|t| t.export_id).collect())
         .unwrap_or_default();
-    // A track no remaining playlist and no play history names is not part of
-    // this sync. One an earlier sync already snapshotted can be taken off:
-    // that baseline is what makes the loss visible. A track with no baseline
-    // stays, so a first sync does not drop a stick it has never recorded.
-    let snapshotted: BTreeSet<u32> = previous
-        .and_then(|m| m.baseline.as_ref())
-        .into_iter()
-        .flat_map(|b| b.legacy.iter().chain(b.one.iter()))
-        .flat_map(|lib| lib.tracks.iter().map(|t| t.id))
-        .collect();
+    // Tracks that arrived through another writer belong to the USB, not to our
+    // previous selection. Retain them even when no playlist references them,
+    // as rekordbox does: its export only adds and updates the tracks it is
+    // given and never revisits the rest of the device library.
     needed.extend(
         current
             .tracks
             .iter()
-            .filter(|t| !previously_owned.contains(&t.id) && !snapshotted.contains(&t.id))
+            .filter(|t| !previously_owned.contains(&t.id))
             .map(|t| t.id),
     );
     let mut positions: BTreeMap<u32, usize> = tracks
@@ -282,9 +551,10 @@ fn retain_device_only(
             .clone();
         // A track an earlier export put there that a device playlist or the
         // history still names: carried for now, but still ours to take off
-        // once nothing names it.
+        // once nothing names it. One the stick added to a playlist this sync
+        // rewrites is the stick's from now on.
         if let Some(device) = track.device.as_mut() {
-            device.exported = previously_owned.contains(&id);
+            device.exported = previously_owned.contains(&id) && !dropped.contains(&id);
         }
         positions.insert(id, tracks.len());
         tracks.push(track);
@@ -333,6 +603,7 @@ fn retain_device_only(
                     })
                 })
                 .collect::<Result<_>>()?,
+            entries_changed_ms: None,
         });
     }
     Ok(())
@@ -584,6 +855,7 @@ pub fn all(
                         })
                     })
                     .collect::<Result<_>>()?,
+                entries_changed_ms: None,
             })
         })
         .collect::<Result<_>>()?;

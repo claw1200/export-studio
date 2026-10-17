@@ -310,9 +310,9 @@ pub fn is_device_changed(error: &std::io::Error) -> bool {
 
 /// What a staging directory's name starts with, so a stage left behind by
 /// an export that could not clean up after itself is recognizably ours.
-const STAGE_PREFIX: &str = ".exportstudio-staging-";
+const STAGE_PREFIX: &str = ".rbxport-staging-";
 /// What a finished journal is renamed to before its images are deleted.
-const RETIRED_PREFIX: &str = ".exportstudio-retired-";
+const RETIRED_PREFIX: &str = ".rbxport-retired-";
 
 pub fn same_root(left: &Path, right: &Path) -> std::io::Result<bool> {
     same_file::is_same_file(left, right)
@@ -1017,14 +1017,14 @@ pub fn read_lock(root: &Path) -> std::io::Result<std::fs::File> {
         .truncate(false)
         .read(true)
         .write(true)
-        .open(root.join(".exportstudio-write.lock"))?;
+        .open(root.join(".rbxport-write.lock"))?;
     fs2::FileExt::lock_shared(&file)?;
     Ok(file)
 }
 
 /// Read-only lease against our writer. Discovery never creates a lock file.
 pub fn read_lease(root: &Path) -> std::io::Result<Option<std::fs::File>> {
-    let file = match std::fs::File::open(root.join(".exportstudio-write.lock")) {
+    let file = match std::fs::File::open(root.join(".rbxport-write.lock")) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
@@ -1039,7 +1039,7 @@ fn lock(root: &Path) -> std::io::Result<std::fs::File> {
         .write(true)
         .create(true)
         .truncate(false)
-        .open(root.join(".exportstudio-write.lock"))
+        .open(root.join(".rbxport-write.lock"))
         .map_err(at("open the write lock on", root))?;
     fs2::FileExt::lock_exclusive(&file).map_err(at("lock", root))?;
     Ok(file)
@@ -1767,7 +1767,7 @@ mod tests {
             .unwrap()
             .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
-        assert!(left.iter().all(|n| n == "PIONEER" || n == ".exportstudio-write.lock"), "{left:?}");
+        assert!(left.iter().all(|n| n == "PIONEER" || n == ".rbxport-write.lock"), "{left:?}");
     }
 
     #[test]

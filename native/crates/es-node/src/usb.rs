@@ -24,7 +24,7 @@ pub(crate) enum UsbOp {
     Media(String),
     ImportPreview { volume: String, folder: Option<String>, policy: Option<String> },
     Import { volume: String, folder: Option<String>, policy: Option<String> },
-    Sync { volume: String, playlists: Vec<String>, overwrite: bool },
+    Sync { volume: String, playlists: Vec<String> },
 }
 
 type Signature = Vec<Option<(SystemTime, u64)>>;
@@ -225,10 +225,10 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
                 "failed": outcome.failed.iter().map(|(title, error)| json!({ "title": title, "error": error })).collect::<Vec<_>>(),
             }))
         }
-        UsbOp::Sync { volume, playlists, overwrite } => {
+        UsbOp::Sync { volume, playlists } => {
             let volume = listed(volume)?;
             let emit = |event| core.emit_service_event(event);
-            let result = service.usb_sync(&volume, playlists, *overwrite, &emit);
+            let result = service.usb_sync(&volume, playlists, &emit);
             core.devices.forget(&volume);
             let result = result.map_err(failure)?;
             publish_volumes(core);

@@ -93,7 +93,7 @@ const WRITES: CommandHandlers = {
   'track.relocate': (lib, p) => lib.trackRelocate(JSON.stringify(p?.moves ?? {})),
   'usb.eject': (lib, p) => lib.usbEject(text(p?.volumeId)),
   'usb.format': (lib, p) => lib.usbFormat(text(p?.volumeId)),
-  'usb.sync': (lib, p) => lib.usbSync(text(p?.volumeId), list(p?.playlistIds), Boolean(p?.overwrite)),
+  'usb.sync': (lib, p) => lib.usbSync(text(p?.volumeId), list(p?.playlistIds)),
   'usb.import': (lib, p) =>
     lib.usbImport(
       text(p?.volumeId),

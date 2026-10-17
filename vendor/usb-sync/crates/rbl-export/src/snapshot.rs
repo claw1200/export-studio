@@ -200,7 +200,14 @@ impl Snapshot {
         }
         Ok(())
     }
-    pub fn check_changes(&self, previous: Option<&Manifest>, next: &Self, overwrite: bool) -> Result<()> {
+    pub fn check_changes(&self, previous: Option<&Manifest>, next: &Self) -> Result<()> {
+        self.check_changes_except(previous, next, &BTreeSet::new())
+    }
+
+    /// [`Self::check_changes`], leaving out the playlists, by device id,
+    /// that the sync rewrites on purpose although the stick added entries
+    /// to them (`reconcile::Prepared::device_additions`, #429).
+    pub fn check_changes_except(&self, previous: Option<&Manifest>, next: &Self, device_additions: &BTreeSet<u32>) -> Result<()> {
         for (label, current, target, baseline) in [
             (
                 "Device Library",
@@ -223,7 +230,7 @@ impl Snapshot {
                 let Some(target) = target else {
                     return Err(ExportError::Conflict(format!("Missing {label} output")));
                 };
-                check_database_changes(label, current, target, baseline)?;
+                check_database_changes(label, current, target, baseline, device_additions)?;
             }
         }
         if let Some(baseline) = previous.and_then(|m| m.baseline.as_ref()) {
@@ -236,8 +243,8 @@ impl Snapshot {
                     && !next.my_tags.contains(tag)
                 {
                     return Err(ExportError::Conflict(format!(
-                        "My Tag '{}' changed on the USB",
-                        tag.name
+                        "My Tag '{name}' changed on the USB",
+                        name = tag.name
                     )));
                 }
             }
@@ -251,18 +258,34 @@ impl Snapshot {
                 }
             }
         }
-        // Overwrite replaces the library's cues on purpose, including rows
-        // OneLibrary stored after the last sync.
-        if !overwrite
-            && !self.cues.is_empty()
-            && previous
-                .and_then(|m| m.baseline.as_ref())
-                .is_some_and(|b| b.cues != self.cues)
-            && self.cues != next.cues
-        {
-            return Err(ExportError::Conflict("OneLibrary contains cue records that this export would replace. Import the cues in rekordbox first.".into()));
-        }
-        Ok(())
+        let kept: BTreeSet<u32> = next.one.iter().flat_map(|l| &l.tracks).map(|t| t.id).collect();
+        self.check_removed_cues(previous, &kept, &next.cues)
+    }
+
+    /// Stops a sync that would take a track off the stick while it holds a
+    /// cue row a player added or changed since the last sync.
+    ///
+    /// An export goes from the computer to the USB, so the library's cues
+    /// win for every track it leaves on the stick: a cue row a player added
+    /// or edited there is replaced on purpose (#439, #522). A track the sync
+    /// takes off the stick is different: nothing replaces its row, so the
+    /// cue would be gone from both sides. `kept` holds the stick content ids
+    /// the sync leaves on the USB; `written` the cue rows it writes (empty
+    /// before anything is written). The way out has to work without this
+    /// record changing: neither rbx's import nor rekordbox's touches it, so
+    /// the message names the track and asks to keep it or delete it on
+    /// purpose.
+    pub fn check_removed_cues(&self, previous: Option<&Manifest>, kept: &BTreeSet<u32>, written: &[String]) -> Result<()> {
+        let Some(baseline) = previous.and_then(|m| m.baseline.as_ref()) else { return Ok(()) };
+        // A row of an unknown shape cannot be placed on a kept track, so it
+        // counts as lost.
+        let lost = self.cues.iter().filter(|row| !baseline.cues.contains(row) && !written.contains(row))
+            .map(|row| cue_content(row))
+            .find(|id| !id.is_some_and(|id| kept.contains(&id)));
+        let Some(id) = lost else { return Ok(()) };
+        let title = id.and_then(|id| self.one.iter().flat_map(|l| &l.tracks).find(|t| t.id == id))
+            .map_or_else(|| format!("USB track {}", id.unwrap_or_default()), |t| t.title.clone());
+        Err(ExportError::Conflict(format!("'{title}' has cue points added or changed on a player, and this sync would take it off the USB. Keep a playlist that holds it in the sync, or delete the track from the USB in rekordbox, then sync again.")))
     }
     pub fn check_retained_history(&self, next: &Self) -> Result<()> {
         let tracks = next.one.as_ref().map(|l| &l.tracks);
@@ -370,12 +393,17 @@ fn first_difference(legacy: &Library, one: &Library, rewritten: &Rewritten) -> O
 /// not found that way takes a new id above `floor` and every id either
 /// library uses.
 pub(crate) fn legacy_playlist_ids(legacy: &Library, one: &Library, floor: u32) -> BTreeMap<u32, u32> {
+    legacy_playlist_ids_with(legacy, one, floor, &BTreeMap::new())
+}
+
+/// Explicit pairs have already been checked against both sync records and trees.
+pub(crate) fn legacy_playlist_ids_with(legacy: &Library, one: &Library, floor: u32, pairs: &BTreeMap<u32, u32>) -> BTreeMap<u32, u32> {
     let same = |a: &Playlist, b: &Playlist| a.name == b.name && a.folder == b.folder;
     let by_id: BTreeMap<u32, &Playlist> = one.playlists.iter().map(|p| (p.id, p)).collect();
-    let mut ids = BTreeMap::new();
-    let mut claimed = BTreeSet::new();
+    let mut ids = pairs.clone();
+    let mut claimed: BTreeSet<u32> = pairs.values().copied().collect();
     for p in &legacy.playlists {
-        if by_id.get(&p.id).is_some_and(|other| same(p, other)) {
+        if !ids.contains_key(&p.id) && !claimed.contains(&p.id) && by_id.get(&p.id).is_some_and(|other| same(p, other)) {
             ids.insert(p.id, p.id);
             claimed.insert(p.id);
         }
@@ -530,7 +558,7 @@ fn read_one_into(out: &mut Snapshot, path: &Path) -> Result<()> {
         .map_err(sql)?;
     if integrity != "ok" {
         return Err(ExportError::Conflict(format!(
-            "OneLibrary integrity check failed: {integrity}"
+            "OneLibrary integrity check failed: {integrity}",
         )));
     }
     let version: String = conn
@@ -693,6 +721,7 @@ fn check_database_changes(
     current: &Library,
     target: &Library,
     baseline: Option<&Library>,
+    device_additions: &BTreeSet<u32>,
 ) -> Result<()> {
     let originals: BTreeMap<_, _> = baseline.into_iter().flat_map(|b| &b.tracks).map(|t| (t.id, t)).collect();
     let targets: BTreeMap<_, _> = target.tracks.iter().map(|t| (t.id, t)).collect();
@@ -712,14 +741,14 @@ fn check_database_changes(
         });
         if original.is_some() && !unchanged && next != Some(track) {
             return Err(ExportError::Conflict(format!(
-                "{label}: '{}' changed on the USB. Import its changes before syncing.",
-                track.title
+                "{label}: '{title}' changed on the USB. Import its changes before syncing.",
+                title = track.title
             )));
         }
         if original.is_none() && next.is_none() {
             return Err(ExportError::Conflict(format!(
-                "{label}: device-only track '{}' would be lost",
-                track.title
+                "{label}: device-only track '{title}' would be lost",
+                title = track.title
             )));
         }
     }
@@ -734,13 +763,13 @@ fn check_database_changes(
                 && a.folder == b.folder
                 && a.tracks == b.tracks
         };
-        if original.is_some_and(|b| !same(b, playlist)) && !next.is_some_and(|n| same(n, playlist)) {
-            return Err(ExportError::Conflict(format!("{label}: playlist '{}' changed on the USB. Import or reconcile it before syncing.", playlist.name)));
+        if original.is_some_and(|b| !same(b, playlist)) && !next.is_some_and(|n| same(n, playlist)) && !device_additions.contains(&playlist.id) {
+            return Err(ExportError::Conflict(format!("{label}: playlist '{name}' changed on the USB. Import or reconcile it before syncing.", name = playlist.name)));
         }
         if original.is_none() && next.is_none() {
             return Err(ExportError::Conflict(format!(
-                "Device-only playlist '{}' would be lost",
-                playlist.name
+                "Device-only playlist '{name}' would be lost",
+                name = playlist.name
             )));
         }
     }
@@ -769,45 +798,14 @@ impl Library {
     }
 }
 
-pub fn check_analysis(
-    root: &Path,
-    old: &crate::ManifestTrack,
-    desired: &[(String, Vec<u8>)],
-) -> Result<()> {
-    if old.anlz_dir.is_empty() {
-        return Ok(());
-    }
-    let mut current = Vec::new();
-    for extension in ["DAT", "EXT", "2EX"] {
-        let path = root
-            .join(old.anlz_dir.trim_start_matches('/'))
-            .join(format!("ANLZ0000.{extension}"));
-        match std::fs::read(path) {
-            Ok(bytes) => current.push((extension.to_owned(), bytes)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
-        }
-    }
-    // Missing files are repairable. Changed valid files may be player edits.
-    if !current.is_empty() && analysis_hash(&current) != old.analysis && current != desired {
-        // Only compare the musical edits; a path/header rewrite or corruption can be repaired.
-        let musical = |bytes: &[u8]| {
-            rbl_anlz::parse(bytes).ok().map(|a| a.sections.into_iter()
-                .filter(|s| s.is_cue_list() || s.as_beat_grid().is_some()).collect::<Vec<_>>())
-        };
-        for (extension, bytes) in &current {
-            if old.analysis_hashes.get(extension).is_some_and(|h| *h == crate::manifest::hash(bytes)) {
-                continue;
-            }
-            // Compare only surviving companions. A missing EXT is repairable,
-            // not evidence that the user deleted all of its cue points.
-            let target = desired.iter().find(|(e, _)| e == extension).map(|(_, b)| b.as_slice()).unwrap_or_default();
-            if musical(bytes).is_some() && musical(bytes) != musical(target) {
-                return Err(ExportError::Conflict("USB cues or beat grids changed since the last sync. Import the USB cues/grids before exporting.".into()));
-            }
-        }
-    }
-    Ok(())
+/// The `content_id` of one row of [`Snapshot::cues`]. Each row is the
+/// `{:?}|` of every column of `SELECT * FROM cue`, and `content_id` is the
+/// second column in both rekordbox's `exportLibrary.db` schema [OBS
+/// alphatheta-docs platform/rekordbox-onelibrary-reference.md] and this
+/// exporter's (`rbl_onelibrary::build`). `None` when the row does not have
+/// that shape.
+fn cue_content(row: &str) -> Option<u32> {
+    row.split('|').nth(1)?.strip_prefix("Integer(")?.strip_suffix(')')?.parse().ok()
 }
 pub fn analysis_hash(files: &[(String, Vec<u8>)]) -> u64 {
     files.iter().fold(0_u64, |h, (e, b)| {

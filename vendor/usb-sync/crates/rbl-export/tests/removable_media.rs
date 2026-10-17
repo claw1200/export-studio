@@ -211,9 +211,7 @@ fn clear_test_output(mount: &Path) {
     for entry in std::fs::read_dir(mount).unwrap() {
         let entry = entry.unwrap();
         let name = entry.file_name().to_string_lossy().into_owned();
-        let ours = TEST_OUTPUT.contains(&name.as_str())
-            || (name.starts_with(".rbxport-") && name != DISPOSABLE_MARKER)
-            || name.starts_with(".exportstudio-");
+        let ours = TEST_OUTPUT.contains(&name.as_str()) || (name.starts_with(".rbxport-") && name != DISPOSABLE_MARKER);
         if !ours {
             continue;
         }
@@ -265,7 +263,7 @@ fn leftovers(root: &Path) -> Vec<String> {
     std::fs::read_dir(root)
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .filter(|n| n.starts_with(".exportstudio-staging-") || n.starts_with(".exportstudio-retired-") || n.starts_with(".tmp") || n == ".exportstudio-publication")
+        .filter(|n| n.starts_with(".rbxport-staging-") || n.starts_with(".rbxport-retired-") || n.starts_with(".tmp") || n == ".exportstudio-publication")
         .collect()
 }
 

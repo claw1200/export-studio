@@ -13,7 +13,7 @@ use crate::{Error, Result};
 
 /// What rekordbox's own analysis marks a fully analysed track with.
 const ANALYSED: i64 = 105;
-const JOB_SCHEMA_VERSION: u32 = 1;
+const JOB_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone)]
 pub enum Progress {
@@ -125,7 +125,7 @@ fn track_job(share: &Path, track: &ExportTrack) -> Value {
     })
 }
 
-fn job(share: &Path, volume: &Path, bundle: &Bundle, overwrite: bool) -> Result<Value> {
+fn job(share: &Path, volume: &Path, bundle: &Bundle) -> Result<Value> {
     let tracks: Vec<Value> = bundle.tracks.iter().map(|t| track_job(share, t)).collect();
     let known: std::collections::HashSet<i64> = bundle.tracks.iter().map(|t| num(&t.id)).collect();
     let mut playlists = Vec::new();
@@ -137,6 +137,7 @@ fn job(share: &Path, volume: &Path, bundle: &Bundle, overwrite: bool) -> Result<
         playlists.push(json!({
             "id": num(&row.id), "name": row.name, "parentId": row.parent_id.as_deref().map_or(0, num),
             "folder": row.folder, "trackIds": members,
+            "entriesChangedMs": row.entries_changed_ms,
         }));
     }
     let tags: Vec<Value> = bundle
@@ -149,7 +150,7 @@ fn job(share: &Path, volume: &Path, bundle: &Bundle, overwrite: bool) -> Result<
         "schemaVersion": JOB_SCHEMA_VERSION,
         "destination": volume.to_string_lossy(), "dbId": num(&bundle.db_id), "automatic": false,
         "settingsDir": find_settings().map(|p| p.to_string_lossy().into_owned()),
-        "myTags": tags, "tracks": tracks, "playlists": playlists, "overwrite": overwrite,
+        "myTags": tags, "tracks": tracks, "playlists": playlists,
     }))
 }
 
@@ -194,11 +195,10 @@ pub fn sync_volume(
     lib: &Library,
     volume: &Path,
     playlist_ids: &[String],
-    overwrite: bool,
     on_progress: &dyn Fn(Progress),
 ) -> Result<Outcome> {
     let publisher = CommandPublisher::discover()?;
-    sync_volume_with_publisher(lib, volume, playlist_ids, overwrite, &publisher, on_progress)
+    sync_volume_with_publisher(lib, volume, playlist_ids, &publisher, on_progress)
 }
 
 /// Build and validate the library export, then publish it through the selected device boundary.
@@ -206,7 +206,6 @@ pub fn sync_volume_with_publisher(
     lib: &Library,
     volume: &Path,
     playlist_ids: &[String],
-    overwrite: bool,
     publisher: &impl UsbPublisher,
     on_progress: &dyn Fn(Progress),
 ) -> Result<Outcome> {
@@ -222,7 +221,7 @@ pub fn sync_volume_with_publisher(
             return Err(Error::Other(format!("Audio file is missing: {}", track.folder_path)));
         }
     }
-    let body = job(&lib.share_dir(), &volume, &bundle, overwrite)?;
+    let body = job(&lib.share_dir(), &volume, &bundle)?;
     let result = publisher.publish(&body, on_progress)?;
     let tracks = result.get("tracks").and_then(Value::as_i64).unwrap_or(0);
     let playlists = result.get("playlists").and_then(Value::as_i64).unwrap_or(0);
@@ -297,9 +296,10 @@ mod tests {
     #[test]
     fn usb_job_declares_its_schema_version() {
         let directory = tempfile::tempdir().unwrap();
-        let body = job(directory.path(), directory.path(), &Bundle::default(), false).unwrap();
+        let body = job(directory.path(), directory.path(), &Bundle::default()).unwrap();
 
         assert_eq!(body["schemaVersion"], JOB_SCHEMA_VERSION);
+        assert!(body.get("overwrite").is_none());
     }
 
     #[test]
@@ -318,7 +318,6 @@ mod tests {
             &library,
             &volume,
             &["playlist-1".into()],
-            false,
             &FakePublisher,
             &|_| {},
         )

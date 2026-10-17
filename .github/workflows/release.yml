@@ -124,11 +124,12 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: native
+          workspaces: |
+            native
+            vendor/usb-sync
 
-      - name: Test audio engine
-        working-directory: native
-        run: cargo test --workspace
+      - name: Test exporter and native engine
+        run: node app/scripts/test-native.mjs
 
       - name: Install app dependencies
         working-directory: app
@@ -194,11 +195,12 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: native
+          workspaces: |
+            native
+            vendor/usb-sync
 
-      - name: Test audio engine
-        working-directory: native
-        run: cargo test --workspace
+      - name: Test exporter and native engine
+        run: node app/scripts/test-native.mjs
 
       - name: Install app dependencies
         working-directory: app

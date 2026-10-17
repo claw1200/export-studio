@@ -37,7 +37,6 @@
   let notice = $state<string | null>(null)
   let query = $state('')
   let ejectAfter = $state(false)
-  let overwrite = $state(false)
   let refreshToken = $state(0)
   let deviceToken = $state(0)
   let confirm = $state<'format' | null>(null)
@@ -320,7 +319,7 @@
     try {
       for (const id of targets) {
         activeDevice = id
-        const ok = await library.syncTo(id, playlistIds, overwrite)
+        const ok = await library.syncTo(id, playlistIds)
         if (!ok) {
           error = library.syncError
           return
@@ -675,15 +674,11 @@
             disabled={locked || pending || selectedIds.length === 0 || checked.size === 0}
             class="h-8 rounded-md bg-accent px-3 text-[12.5px] font-medium text-bg hover:bg-accent/90 disabled:opacity-40"
           >
-            {overwrite ? 'Sync anyway' : 'Sync'}
+            Sync
           </button>
           <label class="flex items-start gap-2 text-[12px] leading-snug text-muted">
             <input type="checkbox" class="mt-0.5" bind:checked={ejectAfter} disabled={locked || !canEject} />
             Eject after syncing
-          </label>
-          <label class="flex items-start gap-2 text-[12px] leading-snug text-muted">
-            <input type="checkbox" class="mt-0.5" bind:checked={overwrite} disabled={locked} />
-            <span>Overwrite USB cues and beat grids</span>
           </label>
           {#if locked}
             <p class="text-[11px] leading-snug text-muted">{phaseLabel()}</p>

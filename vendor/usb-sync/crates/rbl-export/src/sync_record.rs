@@ -143,6 +143,8 @@ pub fn render_with_ids(source: &SyncSource, ticked: &[u64], synced_at_ms: u64, k
 /// What a record on a stick says, read back.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyncRecord {
+    /// Master IDs explicitly marked as folders in this record.
+    pub folders: BTreeSet<u64>,
     pub device_ids: BTreeMap<u64, u32>,
     /// `DBID` of the library that synced the stick.
     pub db_id: u64,
@@ -175,11 +177,15 @@ pub fn parse(bytes: &[u8]) -> Option<SyncRecord> {
     let automatic = attribute(header, "AutomaticSync") == Some("1");
     let mut ticked = Vec::new();
     let mut device_ids = BTreeMap::new();
+    let mut folders = BTreeSet::new();
     let mut timestamps = BTreeMap::new();
     for node in text.split("<NODE ").skip(1) {
         let node = &node[..node.find('>').unwrap_or(node.len())];
         if let (Some(id), Some(device)) = (attribute(node, "Id").and_then(|s| u64::from_str_radix(s,16).ok()), attribute(node, "Dev_ID").and_then(|s| s.parse::<u32>().ok())) {
-            if id != 0 && device != 0 { device_ids.insert(id, device); }
+            if id != 0 && device != 0 {
+                device_ids.insert(id, device);
+                if attribute(node, "Attribute") == Some("1") { folders.insert(id); }
+            }
         }
         if attribute(node, "Attribute") == Some("1") || attribute(node, "CheckType") != Some("1") {
             continue;
@@ -191,7 +197,7 @@ pub fn parse(bytes: &[u8]) -> Option<SyncRecord> {
             }
         }
     }
-    Some(SyncRecord { device_ids, db_id, automatic, ticked, timestamps })
+    Some(SyncRecord { folders, device_ids, db_id, automatic, ticked, timestamps })
 }
 
 /// The value of `name="…"` in one tag, if there.

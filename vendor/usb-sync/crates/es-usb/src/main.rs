@@ -15,7 +15,7 @@ use rbl_export::{
 };
 use serde::Deserialize;
 
-const JOB_SCHEMA_VERSION: u32 = 1;
+const JOB_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, thiserror::Error)]
 enum JobError {
@@ -28,7 +28,7 @@ enum JobError {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Job {
     schema_version: u32,
     destination: PathBuf,
@@ -42,9 +42,6 @@ struct Job {
     my_tags: Vec<JobTag>,
     tracks: Vec<JobTrack>,
     playlists: Vec<JobPlaylist>,
-    /// Replace cue points and beat grids edited on the USB with the library's.
-    #[serde(default)]
-    overwrite: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -172,6 +169,8 @@ struct JobPlaylist {
     folder: bool,
     #[serde(default)]
     track_ids: Vec<u64>,
+    #[serde(default)]
+    entries_changed_ms: Option<u64>,
 }
 
 fn emit(value: &serde_json::Value) -> io::Result<()> {
@@ -324,6 +323,7 @@ fn prepare(job: &Job) -> Result<(Vec<SourceTrack>, Vec<SourcePlaylist>, Vec<Sour
             parent_id: playlist.parent_id,
             folder: playlist.folder,
             track_indices,
+            entries_changed_ms: playlist.entries_changed_ms,
         });
     }
 
@@ -373,7 +373,6 @@ fn run(job_path: &Path) -> Result<(), JobError> {
     let options = ExportOptions {
         sync: Some(&sync),
         keep_unlisted: false,
-        overwrite: job.overwrite,
         ..Default::default()
     };
     let report = export_cancellable(
@@ -475,5 +474,16 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("Unsupported export job schema version"));
+    }
+
+    #[test]
+    fn rejects_legacy_jobs_and_obsolete_overwrite_option() {
+        let mut job = serde_json::json!({
+            "schemaVersion": 1, "destination": "/tmp", "tracks": [], "playlists": [],
+        });
+        assert!(parse_job(job.to_string().as_bytes()).is_err());
+        job["schemaVersion"] = serde_json::json!(JOB_SCHEMA_VERSION);
+        job["overwrite"] = serde_json::json!(false);
+        assert!(parse_job(job.to_string().as_bytes()).is_err());
     }
 }
