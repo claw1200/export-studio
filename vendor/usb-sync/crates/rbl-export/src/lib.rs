@@ -22,6 +22,7 @@ pub mod plan;
 pub mod sync_record;
 pub mod snapshot;
 mod reconcile;
+pub mod review;
 mod verification;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -879,6 +880,7 @@ impl CompatibilityFormat {
 
 #[derive(Default)]
 pub struct ExportOptions<'a> {
+    pub review: Option<&'a review::Decisions>,
     pub defaults: Option<&'a rbl_onelibrary::settings::StickSettings>,
     pub sync: Option<&'a SyncSource>,
     pub compatibility: Option<CompatibilityFormat>,
@@ -947,7 +949,8 @@ fn export_cancellable_inner(
     let _inspection = incremental::Inspection::new();
     let started = std::time::Instant::now();
     let requested_tracks = tracks;
-    let &ExportOptions { defaults, sync, compatibility, root, keep_unlisted: _, settings_files, cache, expected_volume, verify_all, overwrite } = options;
+    let requested_playlists = playlists;
+    let &ExportOptions { defaults, sync, compatibility, root, keep_unlisted: _, settings_files, cache, expected_volume, verify_all, overwrite, review: _ } = options;
     if let Some(volume) = expected_volume { volume.check(destination)?; }
     if destination.exists() && !destination.is_dir() {
         return Err(ExportError::NotADirectory(destination.to_owned()));
@@ -1001,6 +1004,7 @@ fn export_cancellable_inner(
         .is_some_and(|g| g.transform_version == incremental::TRANSFORM_VERSION && g.databases == database_signatures);
     if let Some(old) = previous.as_ref().filter(|_| generation_matches) {
         if old.generation.as_ref().is_some_and(|g| g.request == request && g.inputs == source_revisions)
+            && options.review.map_or(true, |review| review.resolutions.is_empty())
             && settings_files.is_empty() && incremental::receipts_match(destination, old.generation.as_ref().ok_or_else(|| ExportError::Conflict("Missing generation receipt".into()))?)? {
             return Ok(ExportReport {
                 verified: true, up_to_date: true, tracks: old.tracks.len(), playlists: old.playlists.len(),
@@ -1035,6 +1039,8 @@ fn export_cancellable_inner(
     if !plan.unknown_size && fs2::available_space(destination)? < plan.peak_bytes {
         return Err(ExportError::Conflict(format!("Not enough temporary space to sync safely: approximately {} bytes required while the previous library is retained", plan.peak_bytes)));
     }
+    let review_baseline = plan.review_baseline;
+    let exclusions = plan.exclusions;
     let (mut tracks, playlists) = (plan.tracks, plan.playlists);
     let mut source_contents_unchanged = BTreeSet::new();
     let mut inspected_source_hashes = BTreeMap::new();
@@ -1853,7 +1859,7 @@ fn export_cancellable_inner(
     // The sync record, so rekordbox's Sync Manager opens on this selection
     // too. A playlist that is not the library's has no id to record.
     if let Some(sync) = sync {
-        let ticked: Vec<u64> = playlists.iter().filter(|p| !p.folder).map(|p| p.id).filter(|&id| id != 0 && id < reconcile::DEVICE_PLAYLIST_ID_BASE).collect();
+        let ticked: Vec<u64> = requested_playlists.iter().filter(|p| !p.folder).map(|p| p.id).filter(|&id| id != 0 && id < reconcile::DEVICE_PLAYLIST_ID_BASE).collect();
         let kept = sync_record::read(destination).map(|r| r.timestamps).unwrap_or_default();
         let device_ids = playlists.iter().zip(&playlist_ids).map(|(p, id)| (p.id, *id)).collect();
         let bytes = sync_record::render_with_ids(sync, &ticked, rbl_core::time::unix_millis(), &kept, &device_ids);
@@ -1877,7 +1883,7 @@ fn export_cancellable_inner(
     let named: Vec<String> = recorded.iter().map(|track| track.audio.clone()).collect();
     let after = snapshot::Snapshot::read_at(publication.stage(), root_name)?;
     before.check_retained_history(&after)?;
-    before.check_changes(previous.as_ref(), &after, overwrite)?;
+    before.check_changes(review_baseline.as_ref(), &after, overwrite)?;
     progress(&ExportProgress { stage: "verifying", done: 0, total: 0, title: String::new(), reused: report.reused, copied: report.tracks_added + report.tracks_updated, converted: report.converted, ..Default::default() });
     let verified_reused: BTreeSet<String> = trusted.iter().filter(|p| !publication.stage().join(p).is_file()).cloned().collect();
     let verified = verification::verify_staged_incremental(publication.stage(), destination, &after, &absent_audio, &verified_reused)?;
@@ -1892,6 +1898,7 @@ fn export_cancellable_inner(
         rbl_core::durable::write(&path, bytes)?;
     }
     let mut manifest = Manifest {
+        exclusions,
         generation: Some(incremental::Generation {
             structure: String::new(),
             device_sources: reconcile::capture_sources(publication.stage(), &after)?,

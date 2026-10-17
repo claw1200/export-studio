@@ -7,6 +7,8 @@
   import { suspendModal } from '$lib/modal'
   import { buildTree, type TreeNode } from '$lib/library/tree'
   import type { DeviceLibraryView, Volume } from '$lib/types'
+  import type { SyncDecisions, SyncReview } from '../../../../preload/engine'
+  import SyncReviewPanel from './SyncReviewPanel.svelte'
 
   const COLLECTION_ID = 'collection'
 
@@ -44,6 +46,10 @@
   let formatId = $state<string | null>(null)
   let batch = $state(false)
   let activeDevice = $state<string | null>(null)
+  let review = $state.raw<SyncReview | null>(null)
+  let reviewing = $state(false)
+  let resolutions = $state<SyncDecisions['resolutions']>({})
+  let reviewRevision = $state(0)
 
   const selectedIds = $derived.by(() => {
     const present = new Set(library.devices.map((item) => item.id))
@@ -55,6 +61,68 @@
   const pending = $derived(volumeId !== '' && loadedFor !== volumeId)
   const locked = $derived(library.syncing || batch)
   const canEject = $derived(selectedIds.some((id) => library.devices.some((item) => item.id === id && item.ejectable)))
+  const unresolved = $derived(review?.conflicts.filter((item) => !resolutions[item.key]).length ?? 0)
+
+  $effect(() => {
+    const key = reviewKey
+    if (!volumeId || pending || checked.size === 0) {
+      review = null
+      reviewing = false
+      return undefined
+    }
+    const id = volumeId
+    const ids = [...checked]
+    let cancelled = false
+    reviewing = true
+    review = null
+    resolutions = {}
+    void api.usbSyncReview(id, ids)
+      .then((result) => {
+        if (!cancelled && key === reviewKey) review = result
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) error = reason instanceof Error ? reason.message : 'Could not review USB changes'
+      })
+      .finally(() => {
+        if (!cancelled) reviewing = false
+      })
+    return (): void => {
+      cancelled = true
+    }
+  })
+
+  function chooseResolution(key: string, action: string): void {
+    const next = { ...resolutions }
+    if (action === 'restore' || action === 'keep') next[key] = action
+    else delete next[key]
+    const item = review?.conflicts.find((row) => row.key === key)
+    if (item && item.entity !== 'track') {
+      const node = find(tree, String(item.libraryId))
+      if (item.entity === 'folder' && node) {
+        for (const child of review?.conflicts ?? []) {
+          if (child.entity !== 'track' && find(node.children, String(child.libraryId))) {
+            if (action === 'restore' || action === 'keep') next[child.key] = action
+            else delete next[child.key]
+          }
+        }
+      }
+      if (action === 'restore') {
+        for (const parent of review?.conflicts ?? []) {
+          if (parent.entity !== 'folder' || next[parent.key] !== 'keep') continue
+          const folder = find(tree, String(parent.libraryId))
+          if (folder && find(folder.children, String(item.libraryId))) next[parent.key] = 'restore'
+        }
+      }
+    }
+    resolutions = next
+  }
+
+  function resolveAll(action: 'restore' | 'keep'): void {
+    resolutions = {
+      ...resolutions,
+      ...Object.fromEntries((review?.conflicts ?? []).map((item) => [item.key, action]))
+    }
+  }
 
   function collect(node: TreeNode, into: Set<string>): void {
     if (node.kind !== 'folder') into.add(node.id)
@@ -91,11 +159,12 @@
     if (loadedFor !== volumeId) return new SvelteSet<string>()
     return userTicks ?? baseSelection()
   })
+  const reviewKey = $derived(JSON.stringify([volumeId, [...checked].sort(), refreshToken, reviewRevision]))
 
   function leafStats(nodes: TreeNode[], selected: SvelteSet<string>): { total: number; picked: number } {
     let total = 0
     let picked = 0
-    const walk = (list: TreeNode[]) => {
+    const walk = (list: TreeNode[]): void => {
       for (const node of list) {
         if (node.kind !== 'folder') {
           total += 1
@@ -311,7 +380,7 @@
   async function submit(): Promise<void> {
     const targets = [...selectedIds]
     const playlistIds = [...checked]
-    if (locked || pending || !targets.length || !playlistIds.length) return
+    if (locked || pending || reviewing || !review || unresolved || !targets.length || !playlistIds.length) return
     error = null
     notice = null
     confirm = null
@@ -320,9 +389,11 @@
     try {
       for (const id of targets) {
         activeDevice = id
-        const ok = await library.syncTo(id, playlistIds, overwrite)
+        const decisions = review.recoveryRequired ? undefined : { token: review.token, resolutions: { ...resolutions } }
+        const ok = await library.syncTo(id, playlistIds, overwrite, decisions)
         if (!ok) {
           error = library.syncError
+          reviewRevision += 1
           return
         }
       }
@@ -341,6 +412,7 @@
         }
       }
       notice = ejected ? 'Sync finished and the device was ejected' : 'Sync finished'
+      reviewRevision += 1
     } finally {
       activeDevice = null
       batch = false
@@ -499,7 +571,10 @@
       </button>
     </header>
     <div class="min-h-0 flex-1 overflow-y-auto p-5">
-    <div class="grid grid-cols-2 items-start gap-4">
+    {#if review && (review.conflicts.length || review.exclusions.length)}
+      <SyncReviewPanel {review} {resolutions} {locked} onchoose={chooseResolution} onchooseall={resolveAll} />
+    {/if}
+    <div class="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
       <section class="min-w-0">
         <h2 class="text-[13.5px] font-semibold">Playlists</h2>
         <p class="mt-1 text-[12px] text-muted">
@@ -672,10 +747,10 @@
         <div class="mt-3 flex flex-col gap-2.5">
           <button
             value="confirm"
-            disabled={locked || pending || selectedIds.length === 0 || checked.size === 0}
+            disabled={locked || pending || reviewing || !review || unresolved > 0 || selectedIds.length === 0 || checked.size === 0}
             class="h-8 rounded-md bg-accent px-3 text-[12.5px] font-medium text-bg hover:bg-accent/90 disabled:opacity-40"
           >
-            {overwrite ? 'Sync anyway' : 'Sync'}
+            {review?.recoveryRequired ? 'Recover and Sync' : 'Sync'}
           </button>
           <label class="flex items-start gap-2 text-[12px] leading-snug text-muted">
             <input type="checkbox" class="mt-0.5" bind:checked={ejectAfter} disabled={locked || !canEject} />
@@ -685,7 +760,11 @@
             <input type="checkbox" class="mt-0.5" bind:checked={overwrite} disabled={locked} />
             <span>Overwrite USB cues and beat grids</span>
           </label>
-          {#if locked}
+          {#if review?.recoveryRequired}
+            <p class="text-[11px] leading-snug text-warn">An interrupted sync needs recovery before USB changes can be reviewed.</p>
+          {:else if reviewing}
+            <p class="text-[11px] leading-snug text-muted">Checking USB changes</p>
+          {:else if locked}
             <p class="text-[11px] leading-snug text-muted">{phaseLabel()}</p>
           {:else if notice}
             <p class="text-[12.5px] text-ok">{notice}</p>

@@ -64,6 +64,17 @@ fn a_playlist_synced_to_a_stick_reads_back_with_its_tracks() {
     assert_eq!(device.tracks.len(), 2);
     let mix = device.playlists.iter().find(|p| p.name == "Mix").unwrap();
     assert_eq!(mix.track_ids.len(), 2);
+
+    let paths = ["PIONEER/rekordbox/export.pdb", "PIONEER/rekordbox/exportLibrary.db", "PIONEER/exportstudio/manifest.json"];
+    let before: Vec<_> = paths.iter().map(|path| std::fs::read(volume.join(path)).unwrap()).collect();
+    let review = es_engine::sync::review_volume(&lib, &volume, &["10".to_owned()]).unwrap();
+    assert_eq!(review["recoveryRequired"], false);
+    assert!(review["conflicts"].as_array().unwrap().is_empty());
+    assert!(!review["token"].as_str().unwrap().is_empty());
+    let after: Vec<_> = paths.iter().map(|path| std::fs::read(volume.join(path)).unwrap()).collect();
+    assert_eq!(after, before, "review must not publish or rewrite USB data");
+    let decisions = serde_json::json!({ "token": review["token"], "resolutions": {} });
+    es_engine::sync::sync_volume_reviewed(&lib, &volume, &["10".to_owned()], false, Some(&decisions), &|_| {}).unwrap();
 }
 
 #[test]

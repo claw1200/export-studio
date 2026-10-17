@@ -15,7 +15,7 @@ use rbl_export::{
 };
 use serde::Deserialize;
 
-const JOB_SCHEMA_VERSION: u32 = 1;
+const JOB_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, thiserror::Error)]
 enum JobError {
@@ -45,6 +45,9 @@ struct Job {
     /// Replace cue points and beat grids edited on the USB with the library's.
     #[serde(default)]
     overwrite: bool,
+    #[serde(default)]
+    preview: bool,
+    review: Option<rbl_export::review::Decisions>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -357,7 +360,7 @@ fn prepare(job: &Job) -> Result<(Vec<SourceTrack>, Vec<SourcePlaylist>, Vec<Sour
 fn parse_job(bytes: &[u8]) -> Result<Job, JobError> {
     let job: Job = serde_json::from_slice(bytes)
         .map_err(|err| JobError::Message(format!("Export job is not valid JSON: {err}")))?;
-    if job.schema_version != JOB_SCHEMA_VERSION {
+    if job.schema_version != JOB_SCHEMA_VERSION && !(job.schema_version == 1 && !job.preview && job.review.is_none()) {
         return Err(JobError::Message(format!(
             "Unsupported export job schema version: {} (expected {})",
             job.schema_version, JOB_SCHEMA_VERSION
@@ -369,8 +372,14 @@ fn parse_job(bytes: &[u8]) -> Result<Job, JobError> {
 fn run(job_path: &Path) -> Result<(), JobError> {
     let job = parse_job(&fs::read(job_path)?)?;
     let (tracks, playlists, tags, sync) = prepare(&job)?;
+    if job.preview {
+        let review = rbl_export::review::inspect(&job.destination, &tracks, &playlists, job.db_id)?;
+        emit(&serde_json::json!({ "event": "result", "review": review }))?;
+        return Ok(());
+    }
     rbl_export::recover(&job.destination)?;
     let options = ExportOptions {
+        review: job.review.as_ref(),
         sync: Some(&sync),
         keep_unlisted: false,
         overwrite: job.overwrite,
@@ -457,6 +466,17 @@ mod tests {
         .to_string();
 
         assert!(parse_job(bytes.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn legacy_jobs_cannot_request_preview_or_resolution_semantics() {
+        let mut job = serde_json::json!({ "schemaVersion": 1, "destination": "/tmp", "tracks": [], "playlists": [] });
+        assert!(parse_job(job.to_string().as_bytes()).is_ok());
+        job["preview"] = serde_json::json!(true);
+        assert!(parse_job(job.to_string().as_bytes()).is_err());
+        job["preview"] = serde_json::json!(false);
+        job["review"] = serde_json::json!({ "token": "old", "resolutions": {} });
+        assert!(parse_job(job.to_string().as_bytes()).is_err());
     }
 
     #[test]

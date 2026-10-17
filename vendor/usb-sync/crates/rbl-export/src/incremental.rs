@@ -128,8 +128,9 @@ pub fn digest(value: &impl Serialize) -> Result<String> {
 }
 
 pub fn manifest_structure(manifest: &Manifest) -> Result<String> {
-    digest(&(manifest.db_id, &manifest.tracks, &manifest.playlists, &manifest.loose, &manifest.baseline,
-        manifest.generation.as_ref().map(|g| &g.device_sources)))
+    let original = digest(&(manifest.db_id, &manifest.tracks, &manifest.playlists, &manifest.loose, &manifest.baseline,
+        manifest.generation.as_ref().map(|g| &g.device_sources)))?;
+    if manifest.exclusions.is_empty() { Ok(original) } else { digest(&(original, &manifest.exclusions)) }
 }
 
 pub fn request(tracks: &[SourceTrack], playlists: &[SourcePlaylist], tags: &[SourceMyTag], options: &ExportOptions<'_>) -> Result<String> {

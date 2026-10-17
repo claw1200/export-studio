@@ -1,4 +1,5 @@
 import { api } from './api'
+import type { SyncDecisions } from '../../../preload/engine'
 import { browserPreviews } from './browserPreview.svelte'
 import { clearDetailCache } from './deck/session.svelte'
 import { cueStats, newestFirst, type SortKey, sortTracks, type TrackSort } from './library/sort'
@@ -872,7 +873,7 @@ export class Library {
     return this.devicePlaylists[volumeId]
   }
 
-  async syncTo(volumeId: string, playlistIds: string[], overwrite = false): Promise<boolean> {
+  async syncTo(volumeId: string, playlistIds: string[], overwrite = false, review?: SyncDecisions): Promise<boolean> {
     if (this.syncing) return false
     if (!playlistIds.length) {
       this.syncError = 'Select a playlist to sync'
@@ -882,7 +883,7 @@ export class Library {
     this.syncError = null
     this.syncProgress = { phase: 'reading' }
     try {
-      await api.usbSync(volumeId, playlistIds, overwrite)
+      await api.usbSync(volumeId, playlistIds, overwrite, review)
       const refreshPlaylists = volumeId in this.devicePlaylists
       const playlists = { ...this.devicePlaylists }
       delete playlists[volumeId]
@@ -936,7 +937,8 @@ export class Library {
       delete playlists[volumeId]
       this.devicePlaylists = playlists
       await this.refreshDevices()
-      if (this.source.type === 'device' && this.source.volumeId === volumeId) await this.setSource({ type: 'collection' })
+      if (this.source.type === 'device' && this.source.volumeId === volumeId)
+        await this.setSource({ type: 'collection' })
       return true
     } catch (e) {
       this.syncError = (e as Error).message

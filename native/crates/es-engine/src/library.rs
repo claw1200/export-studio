@@ -709,6 +709,7 @@ impl LibraryService {
         volume: &Path,
         playlist_ids: &[String],
         overwrite: bool,
+        review: Option<&Value>,
         emit: &impl Fn(ServiceEvent),
     ) -> Result<crate::sync::Outcome> {
         let database = self
@@ -716,9 +717,14 @@ impl LibraryService {
             .as_ref()
             .ok_or_else(|| crate::Error::Other("Library not open".into()))?
             .database();
-        crate::sync::sync_volume(database, volume, playlist_ids, overwrite, &|progress| {
+        crate::sync::sync_volume_reviewed(database, volume, playlist_ids, overwrite, review, &|progress| {
             emit(ServiceEvent::UsbSyncProgress(progress));
         })
+    }
+
+    pub fn usb_sync_review(&self, volume: &Path, playlist_ids: &[String]) -> Result<Value> {
+        let database = self.session.as_ref().ok_or_else(|| crate::Error::Other("Library not open".into()))?.database();
+        crate::sync::review_volume(database, volume, playlist_ids)
     }
 
     fn backups(&self) -> &Backups {

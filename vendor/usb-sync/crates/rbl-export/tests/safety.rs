@@ -94,6 +94,89 @@ fn edit(root: &Path, sql: &str) {
         .unwrap();
     conn.execute_batch(sql).unwrap();
 }
+
+#[test]
+fn reviewed_playlist_deletions_can_be_restored_or_kept_on_this_usb() {
+    use rbl_export::device_library::{self, Edit, Format};
+    use rbl_export::review::{self, Action, Decisions};
+    for format in [Format::DeviceLibrary, Format::OneLibrary] {
+        for action in [Action::Restore, Action::Keep] {
+            let src = tempfile::tempdir().unwrap();
+            let usb = common::stick();
+            let tracks = vec![track(src.path(), 1)];
+            let playlists = vec![playlist(10, &[0])];
+            sync(usb.path(), &tracks, &playlists).unwrap();
+            let id = Manifest::load(usb.path()).unwrap().playlists[0].export_id;
+            device_library::apply(usb.path(), format, &Edit::Delete { id }).unwrap();
+            let review = review::inspect(usb.path(), &tracks, &playlists, 123).unwrap();
+            assert_eq!(review.conflicts.len(), 1);
+            assert_eq!(review.conflicts[0].name, "Playlist 10");
+            assert_eq!(review.conflicts[0].library_id, 10);
+            let blocked = sync(usb.path(), &tracks, &playlists).unwrap_err().to_string();
+            assert!(blocked.contains("Playlist 10"), "{blocked}");
+            let decisions = Decisions { token: review.token, resolutions: [(review.conflicts[0].key.clone(), action)].into() };
+            let sync_source = SyncSource { db_id: 123, tree: vec![], automatic: false };
+            rbl_export::export_with_options(usb.path(), &tracks, &playlists, &[], &rbl_export::ExportOptions { sync: Some(&sync_source), review: Some(&decisions), ..Default::default() }, &mut |_| {}).unwrap();
+            assert!(verify(usb.path()).unwrap().is_ok());
+            let saved = Manifest::load(usb.path()).unwrap();
+            assert_eq!(saved.exclusions.len(), usize::from(action == Action::Keep));
+            sync(usb.path(), &tracks, &playlists).unwrap();
+            let now = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
+            assert_eq!(now.one.unwrap().playlists.len(), usize::from(action == Action::Restore));
+            assert_eq!(now.legacy.unwrap().playlists.len(), usize::from(action == Action::Restore));
+            if action == Action::Keep {
+                let review = review::inspect(usb.path(), &tracks, &playlists, 123).unwrap();
+                assert!(review.conflicts.is_empty());
+                let decisions = Decisions { token: review.token, resolutions: [(review.exclusions[0].key.clone(), Action::Restore)].into() };
+                rbl_export::export_with_options(usb.path(), &tracks, &playlists, &[], &rbl_export::ExportOptions { sync: Some(&sync_source), review: Some(&decisions), ..Default::default() }, &mut |_| {}).unwrap();
+                assert!(Manifest::load(usb.path()).unwrap().exclusions.is_empty());
+                assert_eq!(rbl_export::snapshot::Snapshot::read(usb.path()).unwrap().one.unwrap().playlists.len(), 1);
+            }
+        }
+    }
+}
+
+#[test]
+fn reviewed_track_deletions_preserve_shared_playlist_membership_and_can_be_restored() {
+    use rbl_export::review::{self, Action, Decisions};
+    for action in [Action::Keep, Action::Restore] {
+        let src = tempfile::tempdir().unwrap();
+        let usb = common::stick();
+        let tracks = vec![track(src.path(), 1), track(src.path(), 2)];
+        let playlists = vec![playlist(10, &[0, 1]), playlist(20, &[0])];
+        sync(usb.path(), &tracks, &playlists).unwrap();
+        let id = Manifest::load(usb.path()).unwrap().tracks.iter().find(|t| t.library_id == 1).unwrap().export_id;
+        edit(usb.path(), &format!("DELETE FROM playlist_content WHERE content_id={id}; DELETE FROM cue WHERE content_id={id}; DELETE FROM content WHERE content_id={id}"));
+        let review = review::inspect(usb.path(), &tracks, &playlists, 123).unwrap();
+        assert_eq!(review.conflicts.len(), 1);
+        assert_eq!(review.conflicts[0].name, "Track 1");
+        let decisions = Decisions { token: review.token, resolutions: [(review.conflicts[0].key.clone(), action)].into() };
+        let sync_source = SyncSource { db_id: 123, tree: vec![], automatic: false };
+        rbl_export::export_with_options(usb.path(), &tracks, &playlists, &[], &rbl_export::ExportOptions { sync: Some(&sync_source), review: Some(&decisions), ..Default::default() }, &mut |_| {}).unwrap();
+        let after = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
+        assert_eq!(after.one.as_ref().unwrap().tracks.len(), if action == Action::Restore { 2 } else { 1 });
+        assert_eq!(after.one, after.legacy);
+        sync(usb.path(), &tracks, &playlists).unwrap();
+        assert!(verify(usb.path()).unwrap().is_ok());
+    }
+}
+
+#[test]
+fn stale_sync_reviews_do_not_authorize_usb_changes() {
+    let src = tempfile::tempdir().unwrap();
+    let usb = common::stick();
+    let tracks = vec![track(src.path(), 1)];
+    let playlists = vec![playlist(10, &[0])];
+    sync(usb.path(), &tracks, &playlists).unwrap();
+    let review = rbl_export::review::inspect(usb.path(), &tracks, &playlists, 123).unwrap();
+    edit(usb.path(), "UPDATE content SET title='Edited elsewhere'");
+    let before = std::fs::read(usb.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap();
+    let decisions = rbl_export::review::Decisions { token: review.token, resolutions: Default::default() };
+    let sync_source = SyncSource { db_id: 123, tree: vec![], automatic: false };
+    let result = rbl_export::export_with_options(usb.path(), &tracks, &playlists, &[], &rbl_export::ExportOptions { sync: Some(&sync_source), review: Some(&decisions), overwrite: true, ..Default::default() }, &mut |_| {});
+    assert!(result.unwrap_err().to_string().contains("changed"));
+    assert_eq!(std::fs::read(usb.path().join("PIONEER/rekordbox/exportLibrary.db")).unwrap(), before);
+}
 #[test]
 fn missing_source_leaves_every_existing_database_and_audio_unchanged() {
     let src = tempfile::tempdir().unwrap();

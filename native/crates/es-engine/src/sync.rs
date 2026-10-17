@@ -13,7 +13,7 @@ use crate::{Error, Result};
 
 /// What rekordbox's own analysis marks a fully analysed track with.
 const ANALYSED: i64 = 105;
-const JOB_SCHEMA_VERSION: u32 = 1;
+const JOB_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone)]
 pub enum Progress {
@@ -210,6 +210,23 @@ pub fn sync_volume_with_publisher(
     publisher: &impl UsbPublisher,
     on_progress: &dyn Fn(Progress),
 ) -> Result<Outcome> {
+    sync_with_review(lib, volume, playlist_ids, overwrite, None, publisher, on_progress)
+}
+
+pub fn review_volume(lib: &Library, volume: &Path, playlist_ids: &[String]) -> Result<Value> {
+    let volume = volume.canonicalize().map_err(|e| Error::Other(e.to_string()))?;
+    let bundle = lib.export_bundle(playlist_ids)?;
+    let mut body = job(&lib.share_dir(), &volume, &bundle, false)?;
+    body["preview"] = json!(true);
+    let result = CommandPublisher::discover()?.publish(&body, &|_| {})?;
+    result.get("review").cloned().ok_or_else(|| Error::Other("The USB export program needs rebuilding before changes can be reviewed. Run npm run build:native.".into()))
+}
+
+pub fn sync_volume_reviewed(lib: &Library, volume: &Path, playlist_ids: &[String], overwrite: bool, review: Option<&Value>, on_progress: &dyn Fn(Progress)) -> Result<Outcome> {
+    sync_with_review(lib, volume, playlist_ids, overwrite, review, &CommandPublisher::discover()?, on_progress)
+}
+
+fn sync_with_review(lib: &Library, volume: &Path, playlist_ids: &[String], overwrite: bool, review: Option<&Value>, publisher: &impl UsbPublisher, on_progress: &dyn Fn(Progress)) -> Result<Outcome> {
     let volume = volume
         .canonicalize()
         .map_err(|_| Error::Other(format!("Volume is not mounted: {}", volume.display())))?;
@@ -222,7 +239,8 @@ pub fn sync_volume_with_publisher(
             return Err(Error::Other(format!("Audio file is missing: {}", track.folder_path)));
         }
     }
-    let body = job(&lib.share_dir(), &volume, &bundle, overwrite)?;
+    let mut body = job(&lib.share_dir(), &volume, &bundle, overwrite)?;
+    if let Some(review) = review { body["review"] = review.clone(); }
     let result = publisher.publish(&body, on_progress)?;
     let tracks = result.get("tracks").and_then(Value::as_i64).unwrap_or(0);
     let playlists = result.get("playlists").and_then(Value::as_i64).unwrap_or(0);

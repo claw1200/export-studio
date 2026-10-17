@@ -4,6 +4,8 @@ use crate::{incremental, snapshot::Snapshot, ExportOptions, Manifest, SourceTrac
 
 #[derive(Debug)]
 pub struct SyncPlan {
+    pub exclusions: Vec<crate::review::Exclusion>,
+    pub review_baseline: Option<Manifest>,
     pub tracks: Vec<SourceTrack>,
     pub playlists: Vec<SourcePlaylist>,
     pub estimate: crate::estimate::Estimate,
@@ -28,8 +30,8 @@ pub fn preview(destination: &Path, tracks: &[SourceTrack], playlists: &[SourcePl
         g.request == incremental::request(tracks, playlists, tags, options).unwrap_or_default()
             && g.databases == signatures && incremental::inputs(tracks).is_ok_and(|inputs| inputs == g.inputs)
             && incremental::receipts_match(destination, g).unwrap_or(false)
-    }) && options.settings_files.is_empty()) {
-        return Ok(SyncPlan { tracks: tracks.to_vec(), playlists: playlists.to_vec(),
+    }) && options.settings_files.is_empty() && options.review.map_or(true, |review| review.resolutions.is_empty())) {
+        return Ok(SyncPlan { exclusions: manifest.exclusions.clone(), review_baseline: Some(manifest.clone()), tracks: tracks.to_vec(), playlists: playlists.to_vec(),
             estimate: crate::estimate::Estimate { tracks_kept: manifest.tracks.len(), reuse_bytes: manifest.tracks.iter().map(|t| t.copy_stamp.map_or(t.size, |s| s.0)).sum(), ..Default::default() },
             database_bytes: 0, asset_bytes: 0, peak_bytes: 0, net_additional_bytes: 0,
             approximate: false, unknown_size: false, kept_existing: manifest.generation.as_ref().map_or(0, |g| g.kept_existing) });
@@ -44,7 +46,9 @@ pub fn preview(destination: &Path, tracks: &[SourceTrack], playlists: &[SourcePl
 
 pub(crate) fn from_baseline(destination: &Path, before: &Snapshot, previous: Option<&Manifest>, tracks: &[SourceTrack], playlists: &[SourcePlaylist], options: &ExportOptions<'_>) -> Result<SyncPlan> {
     let db_id = options.sync.map_or(0, |s| s.db_id);
-    let (tracks, playlists) = crate::reconcile::prepare(destination, before, previous, tracks, playlists, db_id, options.keep_unlisted)?;
+    let prepared = crate::review::resolve(destination, before, previous, tracks, playlists, db_id, options.review)?;
+    let (tracks, playlists) = crate::reconcile::prepare(destination, before, previous, &prepared.tracks, &prepared.playlists, db_id, options.keep_unlisted)?;
+    let (tracks, playlists) = crate::review::filter(&tracks, &playlists, &prepared.exclusions, db_id);
     let estimate = crate::estimate::estimate_inspected(destination, db_id, &tracks, false, options.compatibility, Some(before), options.cache);
     let trusted = incremental::trusted_paths(destination, previous)?;
     let recorded: std::collections::HashMap<_, _> = previous.into_iter().flat_map(|m| &m.tracks).map(|t| (t.key(), t)).collect();
@@ -97,7 +101,7 @@ pub(crate) fn from_baseline(destination: &Path, before: &Snapshot, previous: Opt
             && incremental::revision(&t.source_path).is_ok_and(|r| r.is_some_and(|r| r.size == old.size)))
     });
     let unknown_size = uncertain_revisions || estimate.uncertain_adoption_bytes > 0 || (options.compatibility.is_some() && tracks.iter().any(|t| t.duration_sec == 0 && !t.device.as_ref().is_some_and(|d| d.preserve)));
-    Ok(SyncPlan { tracks, playlists, approximate: true, estimate, database_bytes, asset_bytes, peak_bytes,
+    Ok(SyncPlan { exclusions: prepared.exclusions, review_baseline: prepared.previous, tracks, playlists, approximate: true, estimate, database_bytes, asset_bytes, peak_bytes,
         net_additional_bytes: i64::try_from(net).unwrap_or(if net < 0 { i64::MIN } else { i64::MAX }), unknown_size, kept_existing })
 }
 

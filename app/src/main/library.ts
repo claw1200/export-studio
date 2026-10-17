@@ -38,6 +38,7 @@ const READS: CommandHandlers = {
   'usb.playlists': (lib, p) => lib.usbPlaylists(text(p?.volumeId)),
   'usb.libraries': (lib, p) => lib.usbLibraries(text(p?.volumeId)),
   'usb.selection': (lib, p) => lib.usbSelection(text(p?.volumeId)),
+  'usb.syncReview': (lib, p) => lib.usbSyncReview(text(p?.volumeId), list(p?.playlistIds)),
   'usb.tracks': (lib, p) => lib.usbTracks(text(p?.volumeId), p?.playlistId == null ? null : text(p.playlistId)),
   'usb.detail': (lib, p) => lib.usbDetail(text(p?.id)),
   'usb.importPreview': (lib, p) =>
@@ -93,7 +94,7 @@ const WRITES: CommandHandlers = {
   'track.relocate': (lib, p) => lib.trackRelocate(JSON.stringify(p?.moves ?? {})),
   'usb.eject': (lib, p) => lib.usbEject(text(p?.volumeId)),
   'usb.format': (lib, p) => lib.usbFormat(text(p?.volumeId)),
-  'usb.sync': (lib, p) => lib.usbSync(text(p?.volumeId), list(p?.playlistIds), Boolean(p?.overwrite)),
+  'usb.sync': (lib, p) => lib.usbSync(text(p?.volumeId), list(p?.playlistIds), Boolean(p?.overwrite), p?.review),
   'usb.import': (lib, p) =>
     lib.usbImport(
       text(p?.volumeId),

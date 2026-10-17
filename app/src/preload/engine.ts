@@ -1,6 +1,32 @@
 export type PlaylistPolicy = 'skipExisting' | 'merge' | 'createNew'
 export type ConvertMode = 'copy' | 'update' | 'update_delete'
 
+export interface SyncReviewItem {
+  key: string
+  entity: 'track' | 'playlist' | 'folder'
+  libraryId: number
+  name: string
+  path: string
+}
+
+export interface SyncConflict extends SyncReviewItem {
+  format: string
+  deviceId: number
+  artist: string
+}
+
+export interface SyncReview {
+  recoveryRequired: boolean
+  token: string
+  conflicts: SyncConflict[]
+  exclusions: SyncReviewItem[]
+}
+
+export interface SyncDecisions {
+  token: string
+  resolutions: Record<string, 'restore' | 'keep'>
+}
+
 export interface TrackEditFields {
   title?: string
   comment?: string
@@ -90,7 +116,8 @@ export interface EngineCommandParams {
   'track.relocate': { moves: Record<string, string> }
   'usb.eject': { volumeId: string }
   'usb.format': { volumeId: string }
-  'usb.sync': { volumeId: string; playlistIds: string[]; overwrite?: boolean }
+  'usb.sync': { volumeId: string; playlistIds: string[]; overwrite?: boolean; review?: SyncDecisions }
+  'usb.syncReview': { volumeId: string; playlistIds: string[] }
   'usb.import': { volumeId: string; folder?: string | null; policy?: PlaylistPolicy }
 }
 

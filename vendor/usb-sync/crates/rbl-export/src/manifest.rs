@@ -24,6 +24,8 @@ pub const MANIFEST_VERSION: u32 = 2;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     #[serde(default)]
+    pub exclusions: Vec<crate::review::Exclusion>,
+    #[serde(default)]
     pub generation: Option<crate::incremental::Generation>,
     #[serde(default)]
     pub db_id: u64,
@@ -220,6 +222,7 @@ mod tests {
     fn a_saved_record_reads_back() {
         let dir = tempfile::tempdir().unwrap();
         let manifest = Manifest {
+            exclusions: Vec::new(),
             generation: None,
             db_id: 0, baseline: None,
             version: MANIFEST_VERSION,

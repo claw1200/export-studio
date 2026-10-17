@@ -81,6 +81,10 @@ Tested on vast rekordbox libraries, it almost always matches or improves on reko
 
 Playlists you pick are checked before they replace what is on the stick. Playlists, history, and tracks this app did not create are left in place.
 
+If a track, playlist, or folder was deleted on the USB since the last sync, the sync dialog names it and lets you restore it from the library or keep it deleted on that USB. Exclusions are saved for that device and can be reversed under **Excluded on this USB**. Your computer library is not changed.
+
+**Restore all from library** resolves all listed deletions after confirmation. **Overwrite USB cues and beat grids** remains a separate option; neither choice bypasses device ownership or export verification checks.
+
 DeviceLibrary and OneLibrary are both written to the device, so that compatibility is preserved across all players.
 
 <img src="preview/images/usb_sync.webp" alt="Choosing which playlists to copy onto a USB stick." height="480">
