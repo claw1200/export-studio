@@ -28,19 +28,18 @@ I would eventally like to add support for Serato and other DJ software libraries
 
 | Feature                           | Export Studio | rekordbox |
 | --------------------------------- | ------------ | --------- |
+| Standard beatgrid editing         | 🟢           | ✅         |
+| Track Analysis                    | 🟢           | ✅         |
+| USB sync / export                 | 🟢           | ✅         |
 | Lightweight and responsive UI     | 🟢           | ❌         |
 | High-resolution waveforms         | 🟢           | ❌         |
 | Backups                           | 🟢           | ❌         |
-| Hardware compatibility checks     | 🟢           | ❌         |
-| Standard beatgrid editing         | 🟢           | ✅         |
-| Track Analysis                    | 🟢           | ✅         |
-| USB sync                          | 🟢           | ✅         |
-| Dynamic beatgrid editing          | 🟡           | ✅         |
-| Duel Player                       | 🟡           | ✅         |
-| Phrase analysis                   | 🟡           | ✅         |
-| Playlist conversion               | 🟡           | ❌         |
+| Track compatibility checks        | 🟢           | ❌         |
+| Track format conversion           | 🟢           | ❌         |
+| Views (duplicates, unsorted, etc) | 🟢           | ❌         |
 | Support Serato Library            | 🟡           | ❌         |
-| Streaming                         | ⚫️           | ✅         |
+| Dynamic beatgrid editing          | 🟡           | ✅         |
+| Track Streaming                   | ⚫️           | ✅         |
 
 - 🟢 Comparable or better
 - 🟡 Planned / Working on it
