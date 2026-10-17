@@ -14,13 +14,13 @@ Builds can be downloaded from the [releases page](https://github.com/claw1200/ex
 
 ## Why Export Studio?
 
-Export Studio is a library browser for rekordbox, with with a fundemtaly different vision to other alternate tools.
+Export Studio is a library browser for rekordbox, with with a fundamentally different vision to other alternate tools.
 
-Export Studio looks to compltly overhaul the avalible feature set of a library manager, not just to strip down Rekordbox to its essentials. I beleive that rekordbox does not just need optimization, but a redesign from the ground up, hence why I have chosen not to copy the old interface and workflow.
+Export Studio looks to completely overhaul the available feature set of a library manager, not just to strip down rekordbox to its essentials. I believe that rekordbox does not just need optimization, but a redesign from the ground up, hence why I have chosen not to copy the old interface and workflow.
 
 ## Roadmap and Vision
 
-I would eventally like to add support for Serato and other DJ software libraries, so that DJs using these programs can also export a rekordbox USB for their DJ sets. However, I want to get full feature parity with rekordbox before I add support for other libraries.
+I would eventually like to add support for Serato and other DJ software libraries, so that DJs using these programs can also export a rekordbox USB for their DJ sets. However, I want to get full feature parity with rekordbox before I add support for other libraries.
 
 
 ## Key Features
