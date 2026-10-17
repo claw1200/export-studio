@@ -126,7 +126,9 @@ export const MEMORY_CUE_DEFAULT = '#ff3b4e'
 /** A cue's colour as rekordbox shows it: its own, or the default for its kind. */
 export function cueColor(cue: Cue): string {
   if (cue.kind === 'hot') {
-    return hotCuePaletteColor(cue.colorIndex) ?? cue.rgb ?? (cue.end != null ? LOOP_DEFAULT : HOT_CUE_DEFAULT)
+    const fallback = cue.end != null ? LOOP_DEFAULT : HOT_CUE_DEFAULT
+    if (!cue.colorIndex && cue.colorCode != null) return fallback
+    return hotCuePaletteColor(cue.colorIndex) ?? cue.rgb ?? fallback
   }
   if (cue.color != null && TRACK_COLORS[cue.color]) return TRACK_COLORS[cue.color].hex
   return MEMORY_CUE_DEFAULT

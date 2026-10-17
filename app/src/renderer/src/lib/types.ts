@@ -131,6 +131,7 @@ export interface Cue {
   end: number | null
   color: number | null
   colorIndex: number | null
+  colorCode?: number | null
   comment: string
   rgb?: string | null
 }
