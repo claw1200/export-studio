@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use es_device::{paths::pioneer_dir, volumes, Device, LibraryKind, Volume};
+use rb_device::{paths::pioneer_dir, volumes, Device, LibraryKind, Volume};
 use es_engine::device_import::{self, PlaylistPolicy, TrackStatus};
 use serde_json::{json, Value};
 
@@ -56,7 +56,7 @@ impl Devices {
                 return Ok(device.clone());
             }
         }
-        let device = es_device::read::read(volume).map_err(failure)?.map(Arc::new);
+        let device = rb_device::read::read(volume).map_err(failure)?.map(Arc::new);
         cache.insert(key, (now, device.clone()));
         Ok(device)
     }
@@ -154,7 +154,7 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
             let volume = mounted(volume)?;
             let mut found = Vec::new();
             for kind in [LibraryKind::DeviceLibrary, LibraryKind::OneLibrary] {
-                if let Some(device) = es_device::read::read_kind(&volume, kind).map_err(failure)? {
+                if let Some(device) = rb_device::read::read_kind(&volume, kind).map_err(failure)? {
                     found.push(es_index::device::library_view(kind, &device));
                 }
             }
@@ -162,7 +162,7 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
         }
         UsbOp::Selection(volume) => {
             let (ids, db_id) = service.playlist_selection().map_err(failure)?;
-            json_of(&json!({ "playlistIds": es_device::selection::recorded_playlist_ids(&mounted(volume)?, &ids, db_id) }))
+            json_of(&json!({ "playlistIds": rb_device::selection::recorded_playlist_ids(&mounted(volume)?, &ids, db_id) }))
         }
         UsbOp::Tracks(volume, playlist) => {
             let volume = mounted(volume)?;

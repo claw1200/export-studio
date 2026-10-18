@@ -15,9 +15,9 @@ pub mod sync;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
-    Db(#[from] es_db::Error),
+    Db(#[from] rb_library::Error),
     #[error(transparent)]
-    Device(#[from] es_device::Error),
+    Device(#[from] rb_device::Error),
     #[error(transparent)]
     Backup(#[from] es_backup::Error),
     #[error("{0}")]

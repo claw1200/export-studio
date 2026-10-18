@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use es_anlz::decode::{self, Tags};
-use es_anlz::write::{build_beatgrid, clear_extended_beatgrid, patch_tags, path_tag};
-use es_db::{ConversionTarget, Library, Stream};
+use rb_anlz::decode::{self, Tags};
+use rb_anlz::write::{build_beatgrid, clear_extended_beatgrid, patch_tags, path_tag};
+use rb_library::{ConversionTarget, Library, Stream};
 
 use crate::import::file_type_code;
 use crate::{Error, Result};
@@ -340,7 +340,7 @@ fn convert_one(lib: &mut Library, share: &Path, id: &str, preset: &Preset, mode:
         let info = es_tags::read(&target).map_err(|e| Error::Other(e.to_string()))?;
         let offset = delay_offset_ms(&source, &target);
         let nonzero = |v: i64| (v != 0).then_some(v);
-        let old_files: Vec<PathBuf> = files.analysis_path.as_deref().map(|rel| es_anlz::files(share, rel)).unwrap_or_default().into_iter().filter(|p| p.is_file()).collect();
+        let old_files: Vec<PathBuf> = files.analysis_path.as_deref().map(|rel| rb_anlz::files(share, rel)).unwrap_or_default().into_iter().filter(|p| p.is_file()).collect();
         let carries = old_files.iter().any(|p| p.extension().is_some_and(|e| e == "DAT"));
         let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let extension = target.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();

@@ -5,8 +5,8 @@ use std::path::Path;
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
-use es_anlz::decode::{self, Tags};
-use es_db::{Error, Library, Result};
+use rb_anlz::decode::{self, Tags};
+use rb_library::{Error, Library, Result};
 use serde::Serialize;
 
 /// The waveform sample rate the interface assumes, in columns per second.
@@ -90,7 +90,7 @@ fn b64(bytes: &[u8]) -> String {
 }
 
 fn tags(share: &Path, relative: Option<&str>, suffix: &str) -> Option<Tags> {
-    let path = es_anlz::file(share, relative?, suffix)?;
+    let path = rb_anlz::file(share, relative?, suffix)?;
     Tags::read(&path).ok()
 }
 
@@ -215,7 +215,7 @@ impl Preview {
             heights: o.colour_length.map(|_| b64(&o.heights)),
             colors: o.colour_length.map(|_| b64(&o.colors)),
         });
-        Self { id: id.to_owned(), memory, hot, phrase: ext.is_some_and(|e| e.first(es_anlz::PHRASE_TAG).is_some()), cues, waveform }
+        Self { id: id.to_owned(), memory, hot, phrase: ext.is_some_and(|e| e.first(rb_anlz::PHRASE_TAG).is_some()), cues, waveform }
     }
 }
 

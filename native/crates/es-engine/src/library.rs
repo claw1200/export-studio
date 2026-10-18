@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use es_backup::Backups;
-use es_db::{Guard, Library as Database, TrackEdit, Tx};
+use rb_library::{Guard, Library as Database, TrackEdit, Tx};
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -157,7 +157,7 @@ impl LibraryService {
 
     fn with_backup_root(root: PathBuf) -> Self {
         let verify = |path: &Path| {
-            es_db::verify(path)
+            rb_library::verify(path)
                 .map(|counts| es_backup::Counts {
                     tracks: counts.tracks,
                     playlists: counts.playlists,
@@ -166,7 +166,7 @@ impl LibraryService {
         };
         Self {
             session: None,
-            backups: Backups::new(root, verify, es_db::rekordbox_running),
+            backups: Backups::new(root, verify, rb_library::rekordbox_running),
         }
     }
 
@@ -183,7 +183,7 @@ impl LibraryService {
             .map(|session| {
                 (
                     session.source().to_path_buf(),
-                    session.is_writable() && !es_db::rekordbox_running(),
+                    session.is_writable() && !rb_library::rekordbox_running(),
                     session.backed_up(),
                 )
             })
@@ -220,7 +220,7 @@ impl LibraryService {
         Ok(LibraryInfo {
             db_path: session.source().to_string_lossy().into_owned(),
             snapshot_time: session.snapshot_time(),
-            rekordbox_running: es_db::rekordbox_running(),
+            rekordbox_running: rb_library::rekordbox_running(),
             source_changed: session.source_changed(),
             writable: session.is_writable(),
         })
@@ -349,7 +349,7 @@ impl LibraryService {
         Ok(inspected)
     }
 
-    fn edit<T>(&mut self, change: impl FnOnce(&mut Tx<'_>) -> es_db::Result<T>) -> Result<T> {
+    fn edit<T>(&mut self, change: impl FnOnce(&mut Tx<'_>) -> rb_library::Result<T>) -> Result<T> {
         let session = self
             .session
             .as_mut()
@@ -467,7 +467,7 @@ impl LibraryService {
             .share_dir();
         for item in &removed {
             if let Some(path) = &item.analysis_path {
-                if let Err(error) = es_anlz::discard(&es_anlz::files(&share, path)) {
+                if let Err(error) = rb_anlz::discard(&rb_anlz::files(&share, path)) {
                     eprintln!(
                         "[es-engine] could not delete analysis files for {}: {error}",
                         item.id
@@ -599,7 +599,7 @@ impl LibraryService {
         &mut self,
         id: &str,
         grid: &crate::analysis::Grid,
-        cues: &[es_db::CueMove],
+        cues: &[rb_library::CueMove],
     ) -> Result<BeatgridResult> {
         let session = self
             .session
@@ -677,7 +677,7 @@ impl LibraryService {
     pub fn device_import(
         &mut self,
         volume: &Path,
-        device: &es_device::Device,
+        device: &rb_device::Device,
         options: &crate::device_import::Options,
         emit: &impl Fn(ServiceEvent),
     ) -> Result<crate::device_import::Outcome> {
@@ -849,7 +849,7 @@ impl LibraryService {
             return Ok(false);
         };
         let due = self.backups().settings()["auto"].as_bool().unwrap_or(true) && self.auto_due();
-        if due && !es_db::rekordbox_running() {
+        if due && !rb_library::rekordbox_running() {
             self.back_up(session.source(), "daily", emit)?;
         }
         Ok(due)
@@ -863,7 +863,7 @@ impl LibraryService {
             && !session.backed_up()
             && self.backups().settings()["auto"].as_bool().unwrap_or(true)
         {
-            if es_db::rekordbox_running() {
+            if rb_library::rekordbox_running() {
                 return Err(crate::Error::Other(
                     "Close rekordbox before editing the library".into(),
                 ));
@@ -889,7 +889,7 @@ impl Default for LibraryService {
     }
 }
 
-fn open_snapshot(source: &Path) -> es_db::Result<Database> {
+fn open_snapshot(source: &Path) -> rb_library::Result<Database> {
     let started = std::time::Instant::now();
     let result = Database::open_snapshot(source);
     if std::env::var_os("EXPORTSTUDIO_PROFILE_LIBRARY_OPEN").is_some() {
@@ -980,8 +980,8 @@ impl LibrarySession {
                 "Unlock editing to make changes to the library".into(),
             ));
         }
-        if self.guard == Guard::RefuseWhileRunning && es_db::rekordbox_running() {
-            return Err(es_db::Error::RekordboxRunning.into());
+        if self.guard == Guard::RefuseWhileRunning && rb_library::rekordbox_running() {
+            return Err(rb_library::Error::RekordboxRunning.into());
         }
         let live = self
             .live
@@ -1079,7 +1079,7 @@ impl<'a> LibraryRead<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use es_db::fixture::{self, Rows};
+    use rb_library::fixture::{self, Rows};
 
     fn writable_fixture_service(directory: &Path, path: &Path) -> LibraryService {
         let mut service = LibraryService::with_backup_root(directory.join("backups"));
@@ -1207,7 +1207,7 @@ mod tests {
         eprintln!("[library-profile] playlist_members_ms={:.1} rows={}", stage.elapsed().as_secs_f64() * 1000.0, members.len());
 
         let stage = std::time::Instant::now();
-        let volumes = es_device::volumes::list(None);
+        let volumes = rb_device::volumes::list(None);
         eprintln!("[library-profile] usb_list_ms={:.1} volumes={}", stage.elapsed().as_secs_f64() * 1000.0, volumes.len());
 
         let stage = std::time::Instant::now();

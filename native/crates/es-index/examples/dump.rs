@@ -1,7 +1,7 @@
 //! Prints the installed library's rows as JSON, for comparing against another reader.
 //! `cargo run -p es-index --example dump -- tracks|playlists|histories|tags`
 
-use es_db::Library;
+use rb_library::Library;
 
 fn main() {
     let what = std::env::args().nth(1).unwrap_or_else(|| "tracks".into());

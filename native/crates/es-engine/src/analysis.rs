@@ -2,10 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
-use es_anlz::build::{self, Beat};
-use es_anlz::decode::{self, Tags};
-use es_anlz::write::{build_beatgrid, clear_extended_beatgrid, patch_tags};
-use es_db::{AnalysisWrite, CueMove, Library};
+use rb_anlz::build::{self, Beat};
+use rb_anlz::decode::{self, Tags};
+use rb_anlz::write::{build_beatgrid, clear_extended_beatgrid, patch_tags};
+use rb_library::{AnalysisWrite, CueMove, Library};
 
 use crate::relocate::back_up_once;
 use crate::{Error, Result};
@@ -74,7 +74,7 @@ pub fn set_beatgrid(lib: &mut Library, share: &Path, id: &str, grid: &Grid, move
     let dat = files
         .analysis_path
         .as_deref()
-        .and_then(|rel| es_anlz::file(share, rel, "DAT"))
+        .and_then(|rel| rb_anlz::file(share, rel, "DAT"))
         .filter(|p| p.is_file())
         .ok_or_else(|| Error::Other("This track has no analysis file to hold a beatgrid".into()))?;
     let old_dat = std::fs::read(&dat).map_err(other)?;
@@ -174,7 +174,7 @@ pub fn apply_analysis(lib: &mut Library, share: &Path, id: &str, result: &Analys
             if let Some(pqt2) = tags.first("PQT2") {
                 replace.push(("PQT2", clear_extended_beatgrid(pqt2)));
             }
-            drop.push(es_anlz::PHRASE_TAG);
+            drop.push(rb_anlz::PHRASE_TAG);
         }
         if !replace.is_empty() || !drop.is_empty() {
             writes.push((path.clone(), patch_tags(bytes, &replace, &drop).map_err(other)?));

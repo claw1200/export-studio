@@ -107,6 +107,22 @@ application typecheck/build and release native build are verified separately;
 Windows CI, physical devices and private firmware tests remain unverified. Existing
 workspace-wide lint limitations remain as documented above.
 
+## Phase 5 Status
+
+Completed. The SDK now lives in the independent repository
+[`claw1200/es-rekordbox-sdk`](https://github.com/claw1200/es-rekordbox-sdk) and is
+included here as the `es-rekordbox-sdk` Git submodule. The app's Rust crates use
+the submodule's `rb-*` APIs directly; duplicate SDK sources and the `es-db`,
+`es-device`, and `es-anlz` forwarding crates have been removed from the app tree.
+The Electron/N-API application, orchestration, and schema-v3 `es-usb` transport
+remain app-owned. No CLI was created, as requested.
+
+The SDK repository has its own Cargo workspace, lockfile, licenses, upstream map,
+layer/provenance checkers, README, and test suite. CI and the native test runner
+fetch and validate the submodule and run SDK and app tests independently. Because
+the SDK repository is private, Export Studio GitHub Actions requires the
+`SDK_REPO_TOKEN` secret with read access to it.
+
 Codec consolidation, a complete conflict taxonomy and externally published/stable
 crate APIs are not claimed by this extraction. Standalone repository extraction
 and a CLI/example remain Phase 5 work.
@@ -128,9 +144,9 @@ and a CLI/example remain Phase 5 work.
    deletions, metadata, playlist changes, cues/grids, asset state and cross-format
    disagreement. Decisions are allowlisted and revalidated; receipts publish with
    the recoverable transaction. See Phase 4 Status and `UPSTREAM.md`.
-5. Verify a minimal independent CLI/example and standalone SDK workspace build.
-   Prepare extraction, API documentation, versioning and maintenance gates before
-   publishing or creating the separate repository.
+5. Completed. Extracted the standalone SDK workspace, published the private GitHub
+   repository, integrated it as an Export Studio submodule, removed duplicate and
+   forwarding crates, and added independent SDK/app test gates. No CLI was built.
 
 Each phase must pass independently before the next starts. The baseline refresh
 does not reintroduce the closed deletion-only review PR.

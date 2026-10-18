@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use es_db::fixture::{self, Rows};
-use es_db::{Guard, Library};
+use rb_library::fixture::{self, Rows};
+use rb_library::{Guard, Library};
 use es_engine::import::{import_files, Options};
 use es_engine::sync::{sync_volume, Progress};
 use std::cell::RefCell;
@@ -58,7 +58,7 @@ fn a_playlist_synced_to_a_stick_reads_back_with_its_tracks() {
     assert_eq!((result.tracks, result.playlists), (2, 1));
     assert!(!phases.borrow().is_empty());
 
-    let device = es_device::read::read(&volume).unwrap().unwrap();
+    let device = rb_device::read::read(&volume).unwrap().unwrap();
     assert_eq!(device.tracks.len(), 2);
     let mix = device.playlists.iter().find(|p| p.name == "Mix").unwrap();
     assert_eq!(mix.track_ids.len(), 2);

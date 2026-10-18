@@ -10,8 +10,8 @@ description = "Export Studio command for USB sync."
 workspace = true
 
 [dependencies]
-rb-model = { path = "../rb-model" }
-rb-usb = { path = "../rb-usb" }
+rb-model.workspace = true
+rb-usb.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

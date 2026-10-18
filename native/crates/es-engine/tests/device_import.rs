@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use es_db::fixture::{self, Rows};
-use es_db::{Guard, Library};
+use rb_library::fixture::{self, Rows};
+use rb_library::{Guard, Library};
 use es_engine::device_import::{import_device, preview, Options, PlaylistPolicy, TrackStatus};
 use serde_json::json;
 use tempfile::TempDir;
@@ -93,7 +93,7 @@ fn options(world: &World, policy: PlaylistPolicy) -> Options {
 }
 
 fn run(w: &mut World, policy: PlaylistPolicy) -> es_engine::device_import::Outcome {
-    let device = es_device::read::read(&w.volume).unwrap().unwrap();
+    let device = rb_device::read::read(&w.volume).unwrap().unwrap();
     let share = w.dir.path().join("lib/share");
     let opts = options(w, policy);
     import_device(&mut w.lib, &share, &w.volume, &device, &opts, &|_| {}).unwrap()
@@ -181,7 +181,7 @@ fn a_track_from_another_library_is_never_mistaken_for_one_here() {
         conn.execute("INSERT INTO djmdContent (ID, Title, FolderPath) VALUES ('101', 'Unrelated', ?1)", [path.to_string_lossy().into_owned()]).unwrap();
         Rows(&conn).playlist("1", "x", 0).unwrap();
     }
-    let device = es_device::read::read(&w.volume).unwrap().unwrap();
+    let device = rb_device::read::read(&w.volume).unwrap().unwrap();
     let plan = preview(&w.lib, &w.volume, &device, &options(&w, PlaylistPolicy::SkipExisting)).unwrap();
     assert!(plan.tracks.iter().all(|t| t.status == TrackStatus::Copy), "{:?}", plan.tracks);
 }
@@ -203,9 +203,9 @@ fn a_track_this_library_exported_is_reused_not_copied() {
 #[test]
 fn missing_audio_is_reported_and_the_rest_still_imports() {
     let Some(mut w) = world() else { return };
-    let device = es_device::read::read(&w.volume).unwrap().unwrap();
+    let device = rb_device::read::read(&w.volume).unwrap().unwrap();
     let gone = device.tracks.iter().find(|t| t.title == "Second").unwrap();
-    std::fs::remove_file(es_device::paths::volume_path(&gone.path, &w.volume).unwrap()).unwrap();
+    std::fs::remove_file(rb_device::paths::volume_path(&gone.path, &w.volume).unwrap()).unwrap();
     let plan = preview(&w.lib, &w.volume, &device, &options(&w, PlaylistPolicy::SkipExisting)).unwrap();
     assert_eq!(plan.tracks.iter().filter(|t| t.status == TrackStatus::Missing).count(), 1);
     let out = run(&mut w, PlaylistPolicy::SkipExisting);
@@ -221,7 +221,7 @@ fn a_playlist_the_library_deleted_is_not_recreated_from_the_stick() {
         let conn = fixture::connect(w.lib.path()).unwrap();
         Rows(&conn).playlist("1", "Folder", 0).unwrap();
     }
-    let device = es_device::read::read(&w.volume).unwrap().unwrap();
+    let device = rb_device::read::read(&w.volume).unwrap().unwrap();
     let plan = preview(&w.lib, &w.volume, &device, &options(&w, PlaylistPolicy::SkipExisting)).unwrap();
     assert_eq!(plan.tracks.len(), 2, "its tracks are still offered");
     assert!(plan.playlists.iter().all(|p| p.name != "Set"), "{:?}", plan.playlists);
@@ -250,7 +250,7 @@ fn a_renamed_library_playlist_still_counts_as_the_one_on_the_stick() {
 
 #[test]
 fn both_usb_libraries_preserve_selected_and_unset_hot_cue_colours() {
-    for kind in [es_device::LibraryKind::OneLibrary, es_device::LibraryKind::DeviceLibrary] {
+    for kind in [rb_device::LibraryKind::OneLibrary, rb_device::LibraryKind::DeviceLibrary] {
         let Some(mut w) = world() else { return };
         let job_path = w.dir.path().join("job.json");
         let mut job: serde_json::Value = serde_json::from_slice(&std::fs::read(&job_path).unwrap()).unwrap();
@@ -277,7 +277,7 @@ fn both_usb_libraries_preserve_selected_and_unset_hot_cue_colours() {
         let exported = Command::new(exporter().unwrap()).arg(&job_path).output().unwrap();
         assert!(exported.status.success(), "{}", String::from_utf8_lossy(&exported.stdout));
 
-        let device = es_device::read::read_kind(&w.volume, kind).unwrap().unwrap();
+        let device = rb_device::read::read_kind(&w.volume, kind).unwrap().unwrap();
         let share = w.dir.path().join("lib/share");
         let opts = options(&w, PlaylistPolicy::SkipExisting);
         let result = import_device(&mut w.lib, &share, &w.volume, &device, &opts, &|_| {}).unwrap();

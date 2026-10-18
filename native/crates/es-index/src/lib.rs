@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use es_db::{Library, PlaylistKind, Result};
+use rb_library::{Library, PlaylistKind, Result};
 use serde::Serialize;
 
 pub mod detail;
@@ -127,8 +127,8 @@ pub fn track_rows(lib: &Library, share: &Path, ids: Option<&[String]>) -> Result
             let phrase = t
                 .analysis_path
                 .as_deref()
-                .and_then(|relative| es_anlz::file(share, relative, "EXT"))
-                .is_some_and(|ext| es_anlz::has_tag(&ext, es_anlz::PHRASE_TAG));
+                .and_then(|relative| rb_anlz::file(share, relative, "EXT"))
+                .is_some_and(|ext| rb_anlz::has_tag(&ext, rb_anlz::PHRASE_TAG));
             let (memory, hot) = cue_counts(kinds.get(&t.id).map_or(&[][..], Vec::as_slice));
             let local = is_local(&t.folder_path);
             let stored = stored_file_type(t.file_type);

@@ -16,6 +16,12 @@ asarUnpack:
 extraResources:
   - from: resources/native/es-usb
     to: engine/es-usb
+  - from: ../es-rekordbox-sdk/LICENSE
+    to: licenses/es-rekordbox-sdk/LICENSE
+  - from: ../es-rekordbox-sdk/COPYING
+    to: licenses/es-rekordbox-sdk/COPYING
+  - from: ../es-rekordbox-sdk/licenses/rbxport
+    to: licenses/rbxport
   - from: resources/native
     to: engine
     filter:

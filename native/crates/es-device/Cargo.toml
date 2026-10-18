@@ -1,9 +1,0 @@
-[package]
-name = "es-device"
-description = "Export Studio compatibility imports for rb-device."
-version.workspace = true
-edition.workspace = true
-publish.workspace = true
-
-[dependencies]
-rb-device = { path = "../rb-device" }

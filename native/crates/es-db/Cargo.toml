@@ -1,9 +1,0 @@
-[package]
-name = "es-db"
-description = "Export Studio compatibility imports for rb-library."
-version.workspace = true
-edition.workspace = true
-publish.workspace = true
-
-[dependencies]
-rb-library = { path = "../rb-library" }

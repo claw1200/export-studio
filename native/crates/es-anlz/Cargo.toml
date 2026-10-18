@@ -1,9 +1,0 @@
-[package]
-name = "es-anlz"
-description = "Export Studio compatibility imports for rb-anlz."
-version.workspace = true
-edition.workspace = true
-publish.workspace = true
-
-[dependencies]
-rb-anlz = { path = "../rb-anlz" }

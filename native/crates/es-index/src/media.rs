@@ -2,7 +2,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use es_db::{Error, Library, Result};
+use rb_library::{Error, Library, Result};
 
 /// The file for `kind` (`audio` or `art`) of track `id`, if it exists. Artwork has small (`s`) and
 /// medium (`m`) versions beside the original.

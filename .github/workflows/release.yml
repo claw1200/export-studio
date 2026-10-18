@@ -21,6 +21,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          token: ${{ secrets.SDK_REPO_TOKEN || github.token }}
 
       - name: Require Apple signing secrets
         run: |
@@ -124,7 +127,9 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: native
+          workspaces: |
+            native -> native/target
+            es-rekordbox-sdk -> es-rekordbox-sdk/target
 
       - name: Test exporter and native engine
         run: node app/scripts/test-native.mjs
@@ -167,6 +172,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          token: ${{ secrets.SDK_REPO_TOKEN || github.token }}
 
       - name: Resolve version
         shell: pwsh
@@ -193,7 +201,9 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: native
+          workspaces: |
+            native -> native/target
+            es-rekordbox-sdk -> es-rekordbox-sdk/target
 
       - name: Test exporter and native engine
         run: node app/scripts/test-native.mjs

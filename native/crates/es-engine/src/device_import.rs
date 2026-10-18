@@ -7,9 +7,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use es_db::{DeviceData, Library, NewCue, PlaylistKind, TrackEdit};
-use es_device::paths::volume_path;
-use es_device::{Cue as DeviceCue, Device, Playlist, Track as DeviceTrack};
+use rb_library::{DeviceData, Library, NewCue, PlaylistKind, TrackEdit};
+use rb_device::paths::volume_path;
+use rb_device::{Cue as DeviceCue, Device, Playlist, Track as DeviceTrack};
 
 use crate::import::{import_files, Options as FileOptions};
 use crate::place::{candidate, destination, place_copy};
@@ -87,14 +87,14 @@ pub struct Progress {
 
 /// What the library already holds that a stick playlist may stand for.
 struct Known {
-    existing: Vec<es_db::PlaylistNode>,
+    existing: Vec<rb_library::PlaylistNode>,
     policy: PlaylistPolicy,
     /// Stick playlist export id -> the library playlist it was synced from.
     origins: HashMap<i64, u64>,
 }
 
 enum Match<'a> {
-    Existing(&'a es_db::PlaylistNode),
+    Existing(&'a rb_library::PlaylistNode),
     /// Synced from the library, which has since deleted it.
     Retired,
     New,
@@ -103,7 +103,7 @@ enum Match<'a> {
 impl Known {
     fn new(lib: &Library, volume: &Path, policy: PlaylistPolicy) -> Result<Self> {
         let db_id = u64::try_from(lib.db_id()?).unwrap_or(0);
-        Ok(Self { existing: lib.playlists()?, policy, origins: es_device::selection::playlist_origins(volume, db_id) })
+        Ok(Self { existing: lib.playlists()?, policy, origins: rb_device::selection::playlist_origins(volume, db_id) })
     }
 
     /// `parent` is the library playlist the row would go under; `None` when that folder is itself new.
@@ -217,7 +217,7 @@ pub fn preview(lib: &Library, volume: &Path, device: &Device, options: &Options)
     Ok(Plan { destination: root, layout: if contents { "Contents/Artist/Album" } else { "Artist/Album" }, playlists, tracks })
 }
 
-fn find<'a>(nodes: &'a [es_db::PlaylistNode], parent: &str, folder: bool, name: &str) -> Option<&'a es_db::PlaylistNode> {
+fn find<'a>(nodes: &'a [rb_library::PlaylistNode], parent: &str, folder: bool, name: &str) -> Option<&'a rb_library::PlaylistNode> {
     let kind = if folder { PlaylistKind::Folder } else { PlaylistKind::Playlist };
     nodes.iter().find(|n| n.parent_id == parent && n.kind == kind && (if n.name.trim().is_empty() { "Untitled" } else { n.name.trim() }) == name)
 }
@@ -274,7 +274,7 @@ fn carry(lib: &mut Library, share: &Path, volume: &Path, track: &DeviceTrack, co
     let relative = format!("/PIONEER/USBANLZ/{}/{}/ANLZ0000.DAT", uuid.chars().take(3).collect::<String>(), uuid.chars().skip(3).collect::<String>());
     let dat = share.join(relative.trim_start_matches('/'));
     let name = placed.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let path_tag = es_anlz::write::path_tag(&format!("?/{name}"));
+    let path_tag = rb_anlz::write::path_tag(&format!("?/{name}"));
 
     let source = if track.analysis.is_empty() { None } else { volume_path(&track.analysis, volume).ok() };
     let mut written: Vec<PathBuf> = Vec::new();
@@ -287,7 +287,7 @@ fn carry(lib: &mut Library, share: &Path, volume: &Path, track: &DeviceTrack, co
                 continue;
             }
             let data = std::fs::read(&from).map_err(|e| Error::Other(e.to_string()))?;
-            let patched = es_anlz::write::replace_tags(&data, &[("PPTH", path_tag.clone())]).map_err(|e| Error::Other(e.to_string()))?;
+            let patched = rb_anlz::write::replace_tags(&data, &[("PPTH", path_tag.clone())]).map_err(|e| Error::Other(e.to_string()))?;
             let to = dat.with_extension(suffix);
             if let Some(parent) = to.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| Error::Other(e.to_string()))?;
@@ -307,9 +307,9 @@ fn carry(lib: &mut Library, share: &Path, volume: &Path, track: &DeviceTrack, co
 
     let cues: Vec<NewCue> = if track.cues.is_empty() {
         ext_bytes
-            .and_then(|bytes| es_anlz::decode::Tags::parse(bytes).ok())
+            .and_then(|bytes| rb_anlz::decode::Tags::parse(bytes).ok())
             .map(|tags| {
-                es_anlz::decode::extended_cues(&tags)
+                rb_anlz::decode::extended_cues(&tags)
                     .into_iter()
                     .map(|c| NewCue {
                         kind: library_kind(c.slot, c.is_loop),
@@ -370,14 +370,14 @@ fn discard(files: &[PathBuf]) {
 }
 
 fn create_playlists(
-    tx: &mut es_db::Tx<'_>,
+    tx: &mut rb_library::Tx<'_>,
     kids: &Children<'_>,
     parent_export: i64,
     parent: Option<String>,
     known: &Known,
     resolved: &HashMap<i64, String>,
     created: &mut usize,
-) -> es_db::Result<()> {
+) -> rb_library::Result<()> {
     for row in kids.get(&parent_export).map(Vec::as_slice).unwrap_or_default() {
         let name = name_of(row);
         let ids: Vec<String> = if row.folder { Vec::new() } else { row.track_ids.iter().filter_map(|t| resolved.get(t).cloned()).collect() };

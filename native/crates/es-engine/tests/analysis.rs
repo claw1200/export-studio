@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use es_anlz::decode::{self, Tags};
-use es_db::fixture;
-use es_db::{CueMove, Guard, Library};
+use rb_anlz::decode::{self, Tags};
+use rb_library::fixture;
+use rb_library::{CueMove, Guard, Library};
 use es_engine::analysis::{apply_analysis, set_beatgrid, Analysis, Grid, Options};
 use es_engine::import::{import_files, Options as ImportOptions};
 
@@ -53,9 +53,9 @@ fn an_analysis_creates_files_and_fills_the_row() {
 
     let files = lib.track_files(&id).unwrap().unwrap();
     let relative = files.analysis_path.expect("an analysis path is recorded");
-    let dat = Tags::read(&es_anlz::file(&share, &relative, "DAT").unwrap()).unwrap();
+    let dat = Tags::read(&rb_anlz::file(&share, &relative, "DAT").unwrap()).unwrap();
     assert_eq!(decode::beatgrid(&dat).unwrap().times, vec![0, 469, 938, 1406]);
-    let ext = Tags::read(&es_anlz::file(&share, &relative, "EXT").unwrap()).unwrap();
+    let ext = Tags::read(&rb_anlz::file(&share, &relative, "EXT").unwrap()).unwrap();
     assert_eq!(decode::rgb(&ext).unwrap().length, 300);
     let row = lib.tracks(Some(std::slice::from_ref(&id))).unwrap().remove(0);
     assert_eq!(row.bpm_x100, 12800);
@@ -90,7 +90,7 @@ fn a_hand_edited_grid_is_written_and_moves_cues() {
     assert_eq!(bpm, Some(122.0));
 
     let relative = lib.track_files(&id).unwrap().unwrap().analysis_path.unwrap();
-    let dat = Tags::read(&es_anlz::file(&share, &relative, "DAT").unwrap()).unwrap();
+    let dat = Tags::read(&rb_anlz::file(&share, &relative, "DAT").unwrap()).unwrap();
     assert_eq!(decode::beatgrid(&dat).unwrap().times, vec![10, 500, 990]);
     assert_eq!(lib.cues(&id).unwrap().remove(0).start_ms, 510);
     assert_eq!(lib.tracks(Some(std::slice::from_ref(&id))).unwrap().remove(0).bpm_x100, 12200);

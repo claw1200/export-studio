@@ -9,11 +9,11 @@ fn main() {
     let backups = es_backup::Backups::new(
         &root,
         |path: &Path| {
-            es_db::verify(path)
+            rb_library::verify(path)
                 .map(|c| es_backup::Counts { tracks: c.tracks, playlists: c.playlists })
                 .map_err(|e| es_backup::Error::Message(e.to_string()))
         },
-        es_db::rekordbox_running,
+        rb_library::rekordbox_running,
     );
     if args.next().as_deref() == Some("--create") {
         let db = args.next().expect("a library");

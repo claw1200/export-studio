@@ -121,10 +121,14 @@ You can also change your preferences to write the changes to the actual file as 
 From the repository root:
 
 ```sh
+git submodule update --init --recursive
 cd app
 npm install
 npm run dev
 ```
+
+The SDK submodule is private. GitHub Actions requires an `SDK_REPO_TOKEN` repository
+secret with read access to `claw1200/es-rekordbox-sdk`.
 
 `npm run dev` builds the Rust Node addon and USB exporter, copies them into `app/resources/native`, then starts Electron. To run just the Rust tests, use `npm run test:native` from `app`.
 
@@ -141,7 +145,7 @@ npm run dev
 | `EXPORTSTUDIO_PROFILE_LIBRARY_OPEN=1` | Logs database snapshot stages, native service lock wait/operation time, and renderer startup stages. Use with `npm run dev`; native timings go to the terminal and renderer timings to DevTools. |
 | `EXPORTSTUDIO_USB_EXPORT=/path/to/es-usb` | Uses a specific USB exporter binary instead of the app's default. |
 | `EXPORTSTUDIO_FFMPEG=/path/to/ffmpeg` | Uses a specific FFmpeg binary for conversion. |
-| `ES_DB_TEST=1` | Safety guard: refuses test writes to the installed Rekordbox library. |
+| `RB_LIBRARY_TEST=1` | SDK safety guard: refuses test writes to the installed Rekordbox library. |
 
 ```bash
 EXPORTSTUDIO_PROFILE_LIBRARY_OPEN=1 npm run dev

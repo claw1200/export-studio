@@ -4,9 +4,10 @@ import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const native = join(root, 'native')
-const environment = { ...process.env, ES_DB_TEST: '1', RB_LITE_TEST: '1' }
+const sdk = join(root, 'es-rekordbox-sdk')
+const environment = { ...process.env, RB_LIBRARY_TEST: '1', RB_LITE_TEST: '1' }
 
-execFileSync(process.execPath, [join(native, 'check-layers.mjs')], {
+execFileSync(process.execPath, [join(sdk, 'check-layers.mjs')], {
   stdio: 'inherit',
   env: environment
 })
@@ -22,6 +23,11 @@ environment.EXPORTSTUDIO_USB_EXPORT = join(
   'debug',
   process.platform === 'win32' ? 'es-usb.exe' : 'es-usb'
 )
+execFileSync('cargo', ['test', '--locked', '--workspace'], {
+  cwd: sdk,
+  stdio: 'inherit',
+  env: environment
+})
 execFileSync('cargo', ['test', '--locked', '--workspace'], {
   cwd: native,
   stdio: 'inherit',

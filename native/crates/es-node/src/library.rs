@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::usb::UsbOp;
-use es_db::{Library, TrackEdit};
+use rb_library::{Library, TrackEdit};
 use es_engine::library::{LibraryService, ServiceEvent};
 use napi::bindgen_prelude::AsyncTask;
 use napi::threadsafe_function::{ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode};
@@ -379,14 +379,14 @@ impl Run {
                     beats: numbers("beats")?.iter().map(|beat| *beat as i64).collect(),
                     bpms: numbers("bpms")?,
                 };
-                let cues: Vec<es_db::CueMove> = input
+                let cues: Vec<rb_library::CueMove> = input
                     .get("cues")
                     .and_then(Value::as_array)
                     .map(|items| {
                         items
                             .iter()
                             .filter_map(|item| {
-                                Some(es_db::CueMove {
+                                Some(rb_library::CueMove {
                                     id: item.get("id").map(|value| value.as_str().map_or_else(|| value.to_string(), str::to_owned))?,
                                     start_ms: item.get("start")?.as_f64()?.round_ties_even() as i64,
                                     end_ms: item.get("end").and_then(Value::as_f64).map(|end| end.round_ties_even() as i64),

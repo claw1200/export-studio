@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use es_anlz::decode::Tags;
-use es_db::Library;
+use rb_anlz::decode::Tags;
+use rb_library::Library;
 
 use crate::{Error, Result};
 
@@ -68,13 +68,13 @@ pub fn relocate(lib: &mut Library, share: &Path, moves: &[(String, String)]) -> 
         let files = lib.track_files(&item.id)?.ok_or_else(|| Error::Other(format!("Unknown track {}", item.id)))?;
         let Some(relative) = files.analysis_path.as_deref() else { continue };
         let mut touched = Vec::new();
-        for path in es_anlz::files(share, relative).into_iter().filter(|p| p.is_file()) {
+        for path in rb_anlz::files(share, relative).into_iter().filter(|p| p.is_file()) {
             let old = std::fs::read(&path).map_err(|e| Error::Other(e.to_string()))?;
             let Ok(tags) = Tags::parse(old.clone()) else { continue };
             if tags.first("PPTH").is_none() {
                 continue;
             }
-            let new = es_anlz::write::replace_tags(&old, &[("PPTH", es_anlz::write::path_tag(&item.stored))]).map_err(|e| Error::Other(e.to_string()))?;
+            let new = rb_anlz::write::replace_tags(&old, &[("PPTH", rb_anlz::write::path_tag(&item.stored))]).map_err(|e| Error::Other(e.to_string()))?;
             touched.push(path.clone());
             writes.push((path, old, new));
         }

@@ -4,9 +4,9 @@ use std::path::Path;
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
-use es_anlz::decode::{self, Tags};
-use es_device::paths::volume_path;
-use es_device::{Cue as DeviceCue, Device, LibraryKind, Playlist, Track};
+use rb_anlz::decode::{self, Tags};
+use rb_device::paths::volume_path;
+use rb_device::{Cue as DeviceCue, Device, LibraryKind, Playlist, Track};
 use serde::Serialize;
 
 use crate::detail::{Bands, Colour, Cue, Detail, Grid, Mono, Preview, Waveform};
@@ -70,7 +70,7 @@ pub fn track_row(volume: &Path, track: &Track) -> TrackRow {
     let phrase = !track.analysis.is_empty()
         && volume_path(&track.analysis, volume)
             .ok()
-            .is_some_and(|base| es_anlz::has_tag(&base.with_extension("EXT"), es_anlz::PHRASE_TAG));
+            .is_some_and(|base| rb_anlz::has_tag(&base.with_extension("EXT"), rb_anlz::PHRASE_TAG));
     let name_source = if track.filename.is_empty() { &track.path } else { &track.filename };
     let stored = stored_file_type(track.file_type);
     TrackRow {

@@ -5,8 +5,8 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use es_db::export::{Bundle, ExportTrack};
-use es_db::Library;
+use rb_library::export::{Bundle, ExportTrack};
+use rb_library::Library;
 use rb_model::conflict::{Decisions, Inspection};
 use serde_json::{json, Value};
 
@@ -317,8 +317,8 @@ fn run(binary: &Path, job: &Path, on_progress: &dyn Fn(Progress)) -> Result<Valu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use es_db::fixture::{self, Rows};
-    use es_db::Guard;
+    use rb_library::fixture::{self, Rows};
+    use rb_library::Guard;
 
     struct FakePublisher;
 

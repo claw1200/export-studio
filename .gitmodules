@@ -1,0 +1,3 @@
+[submodule "es-rekordbox-sdk"]
+	path = es-rekordbox-sdk
+	url = https://github.com/claw1200/es-rekordbox-sdk.git

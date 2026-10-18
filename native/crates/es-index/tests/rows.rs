@@ -1,5 +1,5 @@
-use es_db::fixture::{self, Rows};
-use es_db::{Guard, Library};
+use rb_library::fixture::{self, Rows};
+use rb_library::{Guard, Library};
 use es_index::{history_nodes, playlist_nodes, track_rows};
 
 #[test]

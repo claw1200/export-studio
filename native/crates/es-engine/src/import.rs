@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use es_db::{FileFacts, Library, NewTrack, Stream, TrackEdit};
+use rb_library::{FileFacts, Library, NewTrack, Stream, TrackEdit};
 use uuid::Uuid;
 
 use crate::{artwork, Result};
