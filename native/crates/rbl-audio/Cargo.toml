@@ -1,6 +1,6 @@
 [package]
 name = "rbl-audio"
-version.workspace = true
+version = "1.9.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

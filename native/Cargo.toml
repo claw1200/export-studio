@@ -1,11 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["crates/es-decode", "crates/es-deck", "crates/es-wave", "crates/es-analyse", "crates/es-db", "crates/es-anlz", "crates/es-index", "crates/es-tags", "crates/es-engine", "crates/es-backup", "crates/es-device", "crates/es-node"]
+members = ["crates/*"]
 
 [workspace.package]
 edition = "2021"
 version = "0.1.0"
 publish = false
+rust-version = "1.89"
+license = "GPL-2.0-or-later"
 
 [workspace.dependencies]
 es-decode = { path = "crates/es-decode" }
@@ -37,14 +39,45 @@ cpal = "0.15"
 rtrb = "0.3"
 rayon = "1"
 thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
 napi = { version = "2", default-features = false, features = ["napi8", "serde-json"] }
 napi-derive = "2"
 napi-build = "2"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+perf = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+await_holding_lock = "deny"
+needless_pass_by_value = "deny"
+large_enum_variant = "deny"
+inefficient_to_string = "deny"
+unnecessary_to_owned = "deny"
+implicit_clone = "deny"
+cloned_instead_of_copied = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+chunks_exact_to_as_chunks = "allow"
+manual_is_multiple_of = "allow"
 
 [profile.release]
 lto = "thin"
 codegen-units = 1
 debug = false
+
+[profile.release.package.es-usb]
+strip = "symbols"
 
 [profile.test]
 opt-level = 2

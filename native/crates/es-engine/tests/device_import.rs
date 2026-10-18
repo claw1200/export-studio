@@ -1,4 +1,4 @@
-//! Importing a stick into a library, using a stick the real exporter wrote. Skipped when `es-usb` has not been built.
+//! Importing a disposable stick into a library, using a stick the native exporter wrote.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -10,8 +10,7 @@ use serde_json::json;
 use tempfile::TempDir;
 
 fn exporter() -> Option<PathBuf> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../vendor/usb-sync/target/release/es-usb");
-    path.is_file().then_some(path)
+    Some(es_engine::sync::exporter().expect("Build es-usb and set EXPORTSTUDIO_USB_EXPORT before running import tests"))
 }
 
 fn wav(path: &Path, seconds: u32) {
@@ -69,7 +68,7 @@ fn synced_world() -> Option<World> {
         }));
     }
     let job = json!({
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "destination": volume, "dbId": 4242, "tracks": tracks,
         "playlists": [
             { "id": 1, "name": "Folder", "parentId": 0, "folder": true, "trackIds": [] },

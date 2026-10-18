@@ -1,4 +1,4 @@
-//! Builds a real stick with the exporter and reads it back. Skipped when `es-usb` has not been built.
+//! Builds a disposable stick with the native exporter and reads it back.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -7,8 +7,13 @@ use es_device::{read::read, read::read_kind, LibraryKind};
 use serde_json::json;
 
 fn exporter() -> Option<PathBuf> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../vendor/usb-sync/target/release/es-usb");
-    path.is_file().then_some(path)
+    let name = if cfg!(windows) { "es-usb.exe" } else { "es-usb" };
+    let path = std::env::var_os("EXPORTSTUDIO_USB_EXPORT").map_or_else(
+        || Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug").join(name),
+        PathBuf::from,
+    );
+    assert!(path.is_file(), "Build es-usb and set EXPORTSTUDIO_USB_EXPORT before running stick tests");
+    Some(path)
 }
 
 fn wav(path: &Path) {
@@ -52,7 +57,7 @@ fn stick() -> Option<(tempfile::TempDir, PathBuf)> {
         }));
     }
     let job = json!({
-        "schemaVersion": 1, "destination": volume, "dbId": 4242, "tracks": tracks,
+        "schemaVersion": 2, "destination": volume, "dbId": 4242, "tracks": tracks,
         "playlists": [
             { "id": 1, "name": "Folder", "parentId": 0, "folder": true, "trackIds": [] },
             { "id": 2, "name": "Set", "parentId": 1, "folder": false, "trackIds": [102, 101] },

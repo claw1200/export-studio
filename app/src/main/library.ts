@@ -131,10 +131,10 @@ export class LibraryError extends Error {
   }
 }
 
-/** The USB export program next to the app, or in the vendored build tree in development. */
+/** The USB export program bundled with the native addon. */
 export function usbExport(): string {
   const name = process.platform === 'win32' ? 'es-usb.exe' : 'es-usb'
-  if (is.dev) return resolve(app.getAppPath(), '..', 'vendor', 'usb-sync', 'target', 'release', name)
+  if (is.dev) return resolve(app.getAppPath(), 'resources', 'native', name)
   return join(process.resourcesPath, 'engine', name)
 }
 

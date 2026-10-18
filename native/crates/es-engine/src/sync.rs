@@ -1,4 +1,4 @@
-//! Copy playlists onto a stick. The vendored `es-usb` program writes the device databases; this builds its job
+//! Copy playlists onto a stick. The native `es-usb` program writes the device databases; this builds its job
 //! from the library and relays its progress.
 
 use std::io::{BufRead, BufReader, Read};
@@ -58,7 +58,7 @@ pub fn find_settings() -> Option<PathBuf> {
     bases.iter().filter(|b| b.is_dir()).find_map(|b| search(b, 6))
 }
 
-/// Where the export program lives: the environment, next to the app, or the vendored build.
+/// Where the export program lives: the environment, next to the app, or the native build.
 pub fn exporter() -> Result<PathBuf> {
     let name = if cfg!(windows) { "es-usb.exe" } else { "es-usb" };
     let mut candidates: Vec<PathBuf> = Vec::new();
@@ -69,8 +69,8 @@ pub fn exporter() -> Result<PathBuf> {
         candidates.push(dir.join(name));
     }
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-    candidates.push(repo.join("vendor/usb-sync/target/release").join(name));
-    candidates.push(repo.join("vendor/usb-sync/target/debug").join(name));
+    candidates.push(repo.join("native/target/release").join(name));
+    candidates.push(repo.join("native/target/debug").join(name));
     candidates
         .into_iter()
         .find(|p| p.is_file())

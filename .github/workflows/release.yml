@@ -124,9 +124,7 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            native
-            vendor/usb-sync
+          workspaces: native
 
       - name: Test exporter and native engine
         run: node app/scripts/test-native.mjs
@@ -195,9 +193,7 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            native
-            vendor/usb-sync
+          workspaces: native
 
       - name: Test exporter and native engine
         run: node app/scripts/test-native.mjs

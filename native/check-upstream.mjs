@@ -4,7 +4,7 @@ import { dirname, join, resolve, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = dirname(fileURLToPath(import.meta.url))
-const provenance = JSON.parse(readFileSync(join(root, 'upstream.json'), 'utf8'))
+const provenance = JSON.parse(readFileSync(join(root, 'upstream-sources.json'), 'utf8'))
 const checkout = process.argv[2]
 if (!checkout) throw new Error('Usage: node check-upstream.mjs <upstream-checkout>')
 const upstream = resolve(checkout)
@@ -25,6 +25,10 @@ for (const crate of [...provenance.productionCrates, ...provenance.testSupportCr
   if (JSON.stringify(files(destination)) !== JSON.stringify(expectedFiles)) throw new Error(`File set differs: ${crate}`)
   for (const file of expectedFiles) {
     let expected = readFileSync(join(source, file))
+    if (file === 'Cargo.toml') {
+      expected = Buffer.from(expected.toString('utf8')
+        .replace('version.workspace = true', `version = "${provenance.version}"`))
+    }
     if (crate === 'rbl-export' && file.endsWith('.rs')) {
       expected = Buffer.from(expected.toString('utf8')
         .replaceAll('.rbxport-publication', '.exportstudio-publication')
@@ -35,4 +39,12 @@ for (const crate of [...provenance.productionCrates, ...provenance.testSupportCr
     if (!expected.equals(readFileSync(join(destination, file)))) throw new Error(`Unexpected downstream change: ${crate}/${file}`)
   }
 }
-console.log(`Verified ${provenance.version} (${revision}) with documented namespace changes`)
+for (const name of ['LICENSE', 'COPYING']) {
+  const original = name === 'COPYING'
+    ? join(upstream, 'crates', 'rbl-deck', 'vendor', 'rubberband', name)
+    : join(upstream, name)
+  if (!readFileSync(original).equals(readFileSync(join(root, 'licenses', 'rbxport', name)))) {
+    throw new Error(`License differs: ${name}`)
+  }
+}
+console.log(`Verified ${provenance.version} (${revision}) with documented namespace and workspace changes`)

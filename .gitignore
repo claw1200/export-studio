@@ -7,6 +7,5 @@ app/dist/
 app/.eslintcache
 
 # native
-native/target/
+**/target/
 app/resources/native/
-vendor/usb-sync/target/

@@ -23,8 +23,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            native
-            vendor/usb-sync
+          workspaces: native
       - name: Test exporter and native integration
         run: node app/scripts/test-native.mjs

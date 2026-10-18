@@ -18,13 +18,35 @@ Validation limits: application-wide ESLint has pre-existing errors outside the
 new runner; the new runner passes lint. Strict Clippy on the exporter is blocked
 by upstream documentation warnings and an inherited unknown lint on the local
 toolchain. Windows CI is configured but has not been executed locally. Physical
-devices and private firmware suites are unverified. Phase 2 has not started.
+devices and private firmware suites are unverified.
+
+## Phase 2 Status
+
+Completed on 2026-10-17. All ten imported crates and `es-usb`, including tests and
+assets, now live in `native/crates`. The 23-member workspace uses one Cargo
+manifest/lockfile; imported packages remain 1.9.0 and application packages remain
+0.1.0. The old vendor workspace files are removed. Build scripts, CI caches,
+application helper discovery and test fixtures use the native build paths.
+
+Copyright and full license texts are retained in `licenses/rbxport`.
+`upstream-sources.json` maps the original and current locations; `check-upstream.mjs`
+verifies all imported files with only the recorded namespace substitutions and
+explicit version declarations. No format algorithms or public API were rewritten.
+The existing local and upstream ANLZ implementations remain separate pending the
+layering phase's equivalence tests.
+
+Validation: 1,231 tests pass (five ignored), including device-reader and import
+fixtures that now require the current schema-v2 helper rather than quietly
+skipping. The source/license audit, Cargo graph assertions, application typecheck
+and production build, and combined release native build pass. Windows and physical
+hardware remain unverified; the existing workspace-wide lint limitations noted
+above are unchanged. Phase 3 has not started.
 
 ## Phases
 
 1. Refresh to pinned rbxport 1.9.0, preserve existing USB state names, adopt upstream
    sync semantics and validate the real app/helper integration. See
-   `../vendor/usb-sync/upstream.json` and its README for provenance and test commands.
+   `upstream-sources.json` and `UPSTREAM.md` for provenance and test commands.
 2. Move imported implementations, assets, tests and the helper into the native
    workspace without behavioural changes. Update packaging and use one lockfile.
    Keep mechanical moves separate from renaming. Consolidate overlapping ANLZ
