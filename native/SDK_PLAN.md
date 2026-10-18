@@ -64,7 +64,8 @@ by default; explicit snapshot access and the existing fixture APIs are retained.
 
 The USB service does not accept a database/session or expose preparation state.
 Settings paths are explicit and settings are published with the recoverable
-transaction. The schema-v2 helper is a JSON transport over that service. Existing
+transaction. At Phase 3 completion the helper used schema v2; Phase 4 advances it
+to schema v3 for typed inspection, decisions and explicit recovery. Existing
 on-device manifest and journal names remain unchanged for media compatibility.
 
 Validation: 1,236 tests pass (five ignored), including direct Rust USB use without
@@ -73,7 +74,38 @@ tests and ANLZ cross-parser coverage. Dependency gates enforce no SDK-to-app run
 edges, a pure model, and independent USB/master-library access. Application and
 release native builds pass. Provenance records unchanged moves and intentional
 derived edits separately. Hardware/Windows coverage and existing workspace-wide
-lint limits remain as above. Phase 4 has not started.
+lint limits remain as above.
+
+## Phase 4 Status
+
+Completed. The generic USB service now exposes read-only inspection, export,
+recovery status and explicit recovery. Inspection returns typed diagnostics with
+stable IDs, severity, entity/format context, field evidence, supported resolutions
+and a plan summary. The helper protocol is schema v3; the renderer displays the
+same decisions and only submits backend-authorized actions.
+
+Review tokens bind the canonical volume and filesystem-root fingerprint, request,
+source revisions, database signatures, analysis revisions, settings, previous
+manifest and reconciled plan. Export re-inspects while holding the publication
+lock. Stale or incomplete decisions are rejected before staging. Accepted
+resolutions are recorded in manifest version 3 with the recoverable generation;
+manifest versions 1 and 2 remain readable. Inspection and verification never
+recover implicitly; a pending publication requires the explicit recovery API.
+
+Implemented actions are limited to library-wins changes, restoring known deleted
+library items and discarding specific device edits. There is no universal force
+operation or keep-deleted workflow. Ownership/identity uncertainty, unreconciled
+cross-format data, history references, unsupported schema, integrity and unsafe
+preflight conditions remain blockers. Information-only cases include device data
+the plan demonstrably retains and expected missing-source skips. Diagnostic
+coverage is behaviorally tested for implemented paths; enum membership alone does
+not claim every possible Rekordbox conflict is detected.
+
+Validation: `npm run test:native` passes 1,252 tests (five ignored), including
+schema-v3 helper integration. The source provenance and layer gates pass. The
+application typecheck/build and release native build are verified separately;
+Windows CI, physical devices and private firmware tests remain unverified. Existing
+workspace-wide lint limitations remain as documented above.
 
 Codec consolidation, a complete conflict taxonomy and externally published/stable
 crate APIs are not claimed by this extraction. Standalone repository extraction
@@ -92,11 +124,10 @@ and a CLI/example remain Phase 5 work.
    access and USB orchestration. Application state, UI projections, profiling,
    playback and analysis workflows remain outside the SDK. Core APIs take explicit
    paths/options; the USB engine accepts source records, not an application session.
-4. Introduce typed inspection/planning/execution/recovery contracts covering
-   deletions, metadata, playlist membership/order/hierarchy, cues/grids, missing
-   assets and cross-format disagreement. Distinguish warnings, supported decisions
-   and blockers; never add a universal integrity/ownership bypass. Revalidate plans
-   at execution and publish decision receipts with the recoverable transaction.
+4. Completed. Typed inspection/planning/execution/recovery contracts cover supported
+   deletions, metadata, playlist changes, cues/grids, asset state and cross-format
+   disagreement. Decisions are allowlisted and revalidated; receipts publish with
+   the recoverable transaction. See Phase 4 Status and `UPSTREAM.md`.
 5. Verify a minimal independent CLI/example and standalone SDK workspace build.
    Prepare extraction, API documentation, versioning and maintenance gates before
    publishing or creating the separate repository.

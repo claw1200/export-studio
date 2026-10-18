@@ -26,6 +26,7 @@ import type {
   UsbImportResult,
   Volume
 } from './types'
+import type { SyncDecisions, SyncInspection } from '../../../preload/engine'
 
 const call = window.api.call
 
@@ -78,8 +79,12 @@ export const api = {
   usbLibraries: (volumeId: string) => call<DeviceLibraryView[]>('usb.libraries', { volumeId }),
   usbSelection: (volumeId: string) => call<{ playlistIds: string[] }>('usb.selection', { volumeId }),
   usbTracks: (volumeId: string, playlistId: string | null) => call<Track[]>('usb.tracks', { volumeId, playlistId }),
-  usbSync: (volumeId: string, playlistIds: string[]) =>
-    call<{ volumeId: string; tracks: number; playlists: number }>('usb.sync', { volumeId, playlistIds }),
+  usbSyncReview: (volumeId: string, playlistIds: string[]) =>
+    call<SyncInspection>('usb.syncReview', { volumeId, playlistIds }),
+  usbSync: (volumeId: string, playlistIds: string[], review?: SyncDecisions) =>
+    call<{ volumeId: string; tracks: number; playlists: number }>('usb.sync', { volumeId, playlistIds, review }),
+  usbRecoveryStatus: (volumeId: string) => call<{ required: boolean }>('usb.recoveryStatus', { volumeId }),
+  usbRecover: (volumeId: string) => call<{ recovered: boolean }>('usb.recover', { volumeId }),
   usbImportPreview: (volumeId: string, folder: string | null, policy: PlaylistPolicy = 'skipExisting') =>
     call<UsbImportPreview>('usb.importPreview', {
       volumeId,

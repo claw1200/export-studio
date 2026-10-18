@@ -31,6 +31,8 @@ pub enum Error {
     /// The export program could not publish the device databases.
     #[error("{0}")]
     Publication(String),
+    #[error("USB changes require review")]
+    ReviewRequired(rb_model::conflict::Inspection),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

@@ -68,7 +68,7 @@ fn synced_world() -> Option<World> {
         }));
     }
     let job = json!({
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "destination": volume, "dbId": 4242, "tracks": tracks,
         "playlists": [
             { "id": 1, "name": "Folder", "parentId": 0, "folder": true, "trackIds": [] },

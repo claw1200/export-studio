@@ -8,7 +8,7 @@ use std::process::ExitCode;
 use rb_model::source::{Playlist, Source, Tag, Track};
 use serde::Deserialize;
 
-const JOB_SCHEMA_VERSION: u32 = 2;
+const JOB_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, thiserror::Error)]
 enum JobError {
@@ -24,6 +24,8 @@ enum JobError {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Job {
     schema_version: u32,
+    #[serde(default = "default_operation")]
+    operation: String,
     destination: PathBuf,
     #[serde(default)]
     db_id: u64,
@@ -35,7 +37,11 @@ struct Job {
     my_tags: Vec<Tag>,
     tracks: Vec<Track>,
     playlists: Vec<Playlist>,
+    #[serde(default)]
+    decisions: Option<rb_model::conflict::Decisions>,
 }
+
+fn default_operation() -> String { "export".into() }
 
 fn emit(value: &serde_json::Value) -> io::Result<()> {
     let mut output = io::stdout().lock();
@@ -75,12 +81,22 @@ fn run(path: &Path) -> Result<(), JobError> {
         playlists: job.playlists,
         my_tags: job.my_tags,
     };
+    let options = rb_usb::Options {
+        settings_dir: job.settings_dir,
+        decisions: job.decisions,
+    };
+    if job.operation == "inspect" {
+        let inspection = rb_usb::inspect(&job.destination, &source, &options)?;
+        emit(&serde_json::json!({ "event": "result", "inspection": inspection }))?;
+        return Ok(());
+    }
+    if job.operation != "export" {
+        return Err(JobError::Message(format!("Unsupported USB operation: {}", job.operation)));
+    }
     let report = rb_usb::export(
         &job.destination,
         &source,
-        &rb_usb::Options {
-            settings_dir: job.settings_dir,
-        },
+        &options,
         &mut |event| {
             let _ = emit(&serde_json::json!({
                 "event": "progress", "phase": phase(event.stage),
@@ -104,6 +120,13 @@ fn kind_of(error: &JobError) -> &'static str {
     }
 }
 
+fn review_of(error: &JobError) -> Option<&rb_model::conflict::Inspection> {
+    match error {
+        JobError::Export(rb_usb::Error::ReviewRequired(inspection)) => Some(inspection),
+        _ => None,
+    }
+}
+
 fn main() -> ExitCode {
     let Some(path) = std::env::args_os().nth(1) else {
         let _ = writeln!(io::stderr(), "usage: es-usb <job.json>");
@@ -115,6 +138,7 @@ fn main() -> ExitCode {
             let _ = writeln!(io::stderr(), "{error}");
             let _ = emit(&serde_json::json!({
                 "event": "error", "kind": kind_of(&error), "message": error.to_string(),
+                "review": review_of(&error),
             }));
             ExitCode::from(1)
         }

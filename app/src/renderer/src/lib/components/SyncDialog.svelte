@@ -7,6 +7,7 @@
   import { suspendModal } from '$lib/modal'
   import { buildTree, type TreeNode } from '$lib/library/tree'
   import type { DeviceLibraryView, Volume } from '$lib/types'
+  import type { SyncInspection, SyncResolution } from '../../../../preload/engine'
 
   const COLLECTION_ID = 'collection'
 
@@ -43,6 +44,10 @@
   let formatId = $state<string | null>(null)
   let batch = $state(false)
   let activeDevice = $state<string | null>(null)
+  let inspections = $state.raw<Record<string, SyncInspection>>({})
+  let inspectionErrors = $state.raw<Record<string, string>>({})
+  let resolutions = $state<Record<string, Record<string, SyncResolution>>>({})
+  let reviewing = $state(false)
 
   const selectedIds = $derived.by(() => {
     const present = new Set(library.devices.map((item) => item.id))
@@ -54,6 +59,18 @@
   const pending = $derived(volumeId !== '' && loadedFor !== volumeId)
   const locked = $derived(library.syncing || batch)
   const canEject = $derived(selectedIds.some((id) => library.devices.some((item) => item.id === id && item.ejectable)))
+
+  async function recoverVolume(id: string): Promise<void> {
+    if (locked) return
+    error = null
+    try {
+      await api.usbRecover(id)
+      refreshToken += 1
+      deviceToken += 1
+    } catch (reason) {
+      error = reason instanceof Error ? reason.message : 'Could not recover USB publication'
+    }
+  }
 
   function collect(node: TreeNode, into: Set<string>): void {
     if (node.kind !== 'folder') into.add(node.id)
@@ -91,10 +108,73 @@
     return userTicks ?? baseSelection()
   })
 
+  const reviewKey = $derived(JSON.stringify([selectedIds, [...checked].sort(), refreshToken]))
+  const reviewBlocked = $derived(selectedIds.some((id) => inspections[id]?.diagnostics.some((item) => item.severity === 'blocked')))
+  const reviewUnresolved = $derived(selectedIds.some((id) => {
+    const inspection = inspections[id]
+    return !inspection || inspection.diagnostics.some((item) => item.severity === 'decision_required' && !resolutions[id]?.[item.id])
+  }))
+
+  $effect(() => {
+    const key = reviewKey
+    const ids = [...selectedIds]
+    const playlistIds = [...checked].sort()
+    if (!ids.length || pending || !playlistIds.length) {
+      inspections = {}
+      inspectionErrors = {}
+      resolutions = {}
+      reviewing = false
+      return undefined
+    }
+    let cancelled = false
+    reviewing = true
+    inspections = {}
+    inspectionErrors = {}
+    resolutions = {}
+    void Promise.all(ids.map(async (id) => {
+      try {
+        return [id, await api.usbSyncReview(id, playlistIds)] as const
+      } catch (reason) {
+        const message = reason instanceof Error ? reason.message : 'Could not inspect USB changes'
+        return [id, message] as const
+      }
+    })).then((results) => {
+      if (cancelled || key !== reviewKey) return
+      const nextInspections: Record<string, SyncInspection> = {}
+      const nextErrors: Record<string, string> = {}
+      for (const [id, result] of results) {
+        if (typeof result === 'string') nextErrors[id] = result
+        else nextInspections[id] = result
+      }
+      inspections = nextInspections
+      inspectionErrors = nextErrors
+    }).finally(() => {
+      if (!cancelled && key === reviewKey) reviewing = false
+    })
+    return (): void => {
+      cancelled = true
+    }
+  })
+
+  function chooseResolution(volume: string, diagnostic: string, resolution: SyncResolution): void {
+    resolutions = {
+      ...resolutions,
+      [volume]: { ...resolutions[volume], [diagnostic]: resolution }
+    }
+  }
+
+  function resolutionLabel(resolution: SyncResolution): string {
+    switch (resolution) {
+      case 'use_library': return 'Use library version'
+      case 'restore_from_library': return 'Restore from library'
+      case 'discard_device_edits': return 'Discard device edits'
+    }
+  }
+
   function leafStats(nodes: TreeNode[], selected: SvelteSet<string>): { total: number; picked: number } {
     let total = 0
     let picked = 0
-    const walk = (list: TreeNode[]) => {
+    const walk = (list: TreeNode[]): void => {
       for (const node of list) {
         if (node.kind !== 'folder') {
           total += 1
@@ -310,7 +390,7 @@
   async function submit(): Promise<void> {
     const targets = [...selectedIds]
     const playlistIds = [...checked]
-    if (locked || pending || !targets.length || !playlistIds.length) return
+    if (locked || pending || reviewing || reviewBlocked || reviewUnresolved || !targets.length || !playlistIds.length) return
     error = null
     notice = null
     confirm = null
@@ -319,13 +399,20 @@
     try {
       for (const id of targets) {
         activeDevice = id
-        const ok = await library.syncTo(id, playlistIds)
+        const inspection = inspections[id]
+        const selectedResolutions = resolutions[id] ?? {}
+        const review = inspection && Object.keys(selectedResolutions).length
+          ? { token: inspection.token, resolutions: selectedResolutions }
+          : undefined
+        const ok = await library.syncTo(id, playlistIds, review)
         if (!ok) {
           error = library.syncError
+          refreshToken += 1
           return
         }
       }
       deviceToken += 1
+      refreshToken += 1
       if (ejectAfter) {
         for (const id of targets) {
           const device = library.devices.find((item) => item.id === id)
@@ -668,10 +755,79 @@
           <p class="mt-2.5 text-[12px] leading-relaxed text-warn">{error}</p>
         {/if}
 
+        {#if reviewing}
+          <p class="mt-3 border-t border-line pt-3 text-[12px] text-muted">Reviewing USB changes</p>
+        {:else}
+          {#each selectedIds as id (id)}
+            {@const inspection = inspections[id]}
+            {@const deviceName = library.devices.find((item) => item.id === id)?.name ?? id}
+            {#if inspectionErrors[id]}
+              <p class="mt-3 border-t border-line pt-3 text-[12px] leading-relaxed text-warn">
+                {deviceName}: {inspectionErrors[id]}
+              </p>
+            {:else if inspection}
+              <section class="mt-3 border-t border-line pt-3" aria-label={`USB changes on ${deviceName}`}>
+                <h3 class="text-[12.5px] font-semibold">Review changes · {deviceName}</h3>
+                {#if inspection.plan}
+                  <p class="mt-0.5 text-[11px] text-faint">
+                    {inspection.plan.tracks} tracks · {inspection.plan.playlists} playlists
+                    {inspection.plan.estimatedPeakBytes == null ? ' · space estimate unavailable' : ` · ${inspection.plan.approximate ? 'approximately ' : ''}up to ${formatBytes(inspection.plan.estimatedPeakBytes)}`}
+                  </p>
+                {/if}
+                <div class="mt-2 flex flex-col gap-2">
+                  {#if inspection.diagnostics.length === 0}
+                    <p class="text-[11px] text-muted">No device changes need review.</p>
+                  {/if}
+                  {#each inspection.diagnostics as diagnostic (diagnostic.id)}
+                    <div class="border-l-2 {diagnostic.severity === 'blocked' ? 'border-danger' : diagnostic.severity === 'decision_required' ? 'border-warn' : 'border-line'} pl-2.5">
+                      <p class="text-[12px] font-medium">{diagnostic.name || diagnostic.entity}</p>
+                      <p class="mt-0.5 text-[11px] leading-relaxed text-muted">{diagnostic.detail}</p>
+                      {#if diagnostic.kind === 'recovery_required'}
+                        <button
+                          type="button"
+                          class="mt-1 h-7 rounded-md border border-line px-2 text-[11px] text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
+                          disabled={locked}
+                          onclick={() => void recoverVolume(id)}
+                        >
+                          Recover interrupted export
+                        </button>
+                      {/if}
+                      {#if diagnostic.fields.length}
+                        <p class="text-[10.5px] text-faint">{diagnostic.fields.join(' · ')}{diagnostic.formats.length ? ` · ${diagnostic.formats.join(' / ')}` : ''}</p>
+                      {/if}
+                      {#each diagnostic.evidence as evidence (evidence.field)}
+                        <p class="break-words text-[10.5px] text-faint">
+                          {evidence.field}: baseline {evidence.baseline ?? 'unknown'} · device {evidence.device ?? 'absent'} · library {evidence.library ?? 'unavailable'}
+                        </p>
+                      {/each}
+                      {#if diagnostic.severity === 'decision_required'}
+                        <select
+                          class="mt-1 h-7 max-w-full rounded-md border border-line bg-bg px-2 text-[11px]"
+                          aria-label={`Resolution for ${diagnostic.name}`}
+                          value={resolutions[id]?.[diagnostic.id] ?? ''}
+                          onchange={(event) => {
+                            const value = event.currentTarget.value as SyncResolution | ''
+                            if (value) chooseResolution(id, diagnostic.id, value)
+                          }}
+                        >
+                          <option value="">Choose action</option>
+                          {#each diagnostic.allowedResolutions as resolution (resolution)}
+                            <option value={resolution}>{resolutionLabel(resolution)}</option>
+                          {/each}
+                        </select>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              </section>
+            {/if}
+          {/each}
+        {/if}
+
         <div class="mt-3 flex flex-col gap-2.5">
           <button
             value="confirm"
-            disabled={locked || pending || selectedIds.length === 0 || checked.size === 0}
+            disabled={locked || pending || reviewing || reviewBlocked || reviewUnresolved || selectedIds.length === 0 || checked.size === 0}
             class="h-8 rounded-md bg-accent px-3 text-[12.5px] font-medium text-bg hover:bg-accent/90 disabled:opacity-40"
           >
             Sync

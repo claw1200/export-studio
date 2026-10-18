@@ -57,7 +57,7 @@ fn stick() -> Option<(tempfile::TempDir, PathBuf)> {
         }));
     }
     let job = json!({
-        "schemaVersion": 2, "destination": volume, "dbId": 4242, "tracks": tracks,
+        "schemaVersion": 3, "destination": volume, "dbId": 4242, "tracks": tracks,
         "playlists": [
             { "id": 1, "name": "Folder", "parentId": 0, "folder": true, "trackIds": [] },
             { "id": 2, "name": "Set", "parentId": 1, "folder": false, "trackIds": [102, 101] },

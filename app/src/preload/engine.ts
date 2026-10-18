@@ -1,6 +1,34 @@
 export type PlaylistPolicy = 'skipExisting' | 'merge' | 'createNew'
 export type ConvertMode = 'copy' | 'update' | 'update_delete'
 
+export type SyncResolution = 'use_library' | 'restore_from_library' | 'discard_device_edits'
+export type SyncSeverity = 'information' | 'decision_required' | 'blocked'
+
+export interface SyncDiagnostic {
+  id: string
+  kind: string
+  severity: SyncSeverity
+  entity: string
+  entityId: string
+  name: string
+  formats: string[]
+  fields: string[]
+  evidence: { field: string; baseline: string | null; device: string | null; library: string | null }[]
+  detail: string
+  allowedResolutions: SyncResolution[]
+}
+
+export interface SyncInspection {
+  token: string
+  diagnostics: SyncDiagnostic[]
+  plan: { tracks: number; playlists: number; estimatedPeakBytes: number | null; approximate: boolean } | null
+}
+
+export interface SyncDecisions {
+  token: string
+  resolutions: Record<string, SyncResolution>
+}
+
 export interface TrackEditFields {
   title?: string
   comment?: string
@@ -90,7 +118,10 @@ export interface EngineCommandParams {
   'track.relocate': { moves: Record<string, string> }
   'usb.eject': { volumeId: string }
   'usb.format': { volumeId: string }
-  'usb.sync': { volumeId: string; playlistIds: string[] }
+  'usb.syncReview': { volumeId: string; playlistIds: string[] }
+  'usb.sync': { volumeId: string; playlistIds: string[]; review?: SyncDecisions }
+  'usb.recoveryStatus': { volumeId: string }
+  'usb.recover': { volumeId: string }
   'usb.import': { volumeId: string; folder?: string | null; policy?: PlaylistPolicy }
 }
 

@@ -151,12 +151,15 @@ fn one_playlist_the_two_libraries_fill_differently_still_stops_the_first_sync() 
     create(dest.path(), Format::DeviceLibrary, "TAG LIST 367", vec![ids[0], ids[1]]);
     create(dest.path(), Format::OneLibrary, "TAG LIST 367", vec![ids[2]]);
 
-    let error = sync_to(dest.path(), &tracks, &selection).unwrap_err().to_string();
-    assert_eq!(
-        error,
-        "USB sync conflict: The USB's two libraries, export.pdb and exportLibrary.db, differ on playlist 'TAG LIST 367', \
-         so this first sync stopped before changing anything. Delete that playlist from the USB in rekordbox, then sync again."
-    );
+    let before = Snapshot::read(dest.path()).unwrap();
+    let result = sync_to(dest.path(), &tracks, &selection);
+    let Err(rbl_export::ExportError::ReviewRequired(inspection)) = result else { panic!("{result:?}") };
+    let conflict = inspection.diagnostics.iter().find(|item|
+        item.kind == rb_model::conflict::ConflictKind::CrossFormatDivergence && item.name == "TAG LIST 367"
+    ).unwrap();
+    assert_eq!(conflict.severity, rb_model::conflict::Severity::Blocked);
+    assert!(conflict.allowed_resolutions.is_empty());
+    assert_eq!(Snapshot::read(dest.path()).unwrap(), before);
 }
 
 

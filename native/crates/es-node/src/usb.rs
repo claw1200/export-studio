@@ -24,7 +24,10 @@ pub(crate) enum UsbOp {
     Media(String),
     ImportPreview { volume: String, folder: Option<String>, policy: Option<String> },
     Import { volume: String, folder: Option<String>, policy: Option<String> },
-    Sync { volume: String, playlists: Vec<String> },
+    SyncReview { volume: String, playlists: Vec<String> },
+    Sync { volume: String, playlists: Vec<String>, decisions: Option<serde_json::Value> },
+    RecoveryStatus(String),
+    Recover(String),
 }
 
 type Signature = Vec<Option<(SystemTime, u64)>>;
@@ -225,10 +228,27 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
                 "failed": outcome.failed.iter().map(|(title, error)| json!({ "title": title, "error": error })).collect::<Vec<_>>(),
             }))
         }
-        UsbOp::Sync { volume, playlists } => {
+        UsbOp::SyncReview { volume, playlists } => {
+            let volume = listed(volume)?;
+            let review = service.usb_sync_review(&volume, playlists).map_err(failure)?;
+            json_of(&review)
+        }
+        UsbOp::RecoveryStatus(volume) => {
+            let volume = listed(volume)?;
+            json_of(&json!({ "required": service.usb_recovery_required(&volume) }))
+        }
+        UsbOp::Recover(volume) => {
+            let volume = listed(volume)?;
+            service.usb_recover(&volume).map_err(failure)?;
+            core.devices.forget(&volume);
+            publish_volumes(core);
+            Ok(json!({ "recovered": true }))
+        }
+        UsbOp::Sync { volume, playlists, decisions } => {
             let volume = listed(volume)?;
             let emit = |event| core.emit_service_event(event);
-            let result = service.usb_sync(&volume, playlists, &emit);
+            let decisions = decisions.as_ref().map(|value| serde_json::from_value(value.clone())).transpose().map_err(failure)?;
+            let result = service.usb_sync(&volume, playlists, decisions.as_ref(), &emit);
             core.devices.forget(&volume);
             let result = result.map_err(failure)?;
             publish_volumes(core);

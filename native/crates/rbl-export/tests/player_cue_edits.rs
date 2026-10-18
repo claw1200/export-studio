@@ -12,7 +12,8 @@ mod common;
 
 use rbl_anlz::cues::ExportCue;
 use rbl_anlz::{Anlz, AnlzBuilder, Beat};
-use rbl_export::{export_full, verify, Manifest, SourcePlaylist, SourceTrack, SyncSource};
+use rb_model::conflict::{ConflictKind, Decisions, Resolution, Severity};
+use rbl_export::{export_cancellable, export_full, verify, ExportOptions, Manifest, SourcePlaylist, SourceTrack, SyncSource};
 use std::path::{Path, PathBuf};
 
 fn library_cues() -> Vec<ExportCue> {
@@ -61,6 +62,29 @@ fn sync(root: &Path, tracks: &[SourceTrack], playlists: &[SourcePlaylist]) -> rb
             automatic: false,
         }),
         &mut |_| {},
+    )
+}
+
+fn sync_with_decisions(
+    root: &Path,
+    tracks: &[SourceTrack],
+    playlists: &[SourcePlaylist],
+    decisions: Option<&Decisions>,
+    progress: &mut impl FnMut(&rbl_export::ExportProgress),
+) -> rbl_export::Result<rbl_export::ExportReport> {
+    let sync = SyncSource {
+        db_id: 123,
+        tree: playlists.iter().map(|p| rbl_export::SyncNode { id: p.id, parent: p.parent_id, attribute: 0 }).collect(),
+        automatic: false,
+    };
+    export_cancellable(
+        root,
+        tracks,
+        playlists,
+        &[],
+        &ExportOptions { sync: Some(&sync), decisions, ..Default::default() },
+        progress,
+        &|| false,
     )
 }
 
@@ -190,11 +214,10 @@ fn an_export_replaces_onelibrary_cue_rows_added_on_a_player_for_an_exported_trac
     assert_eq!(times, [1_000_000, 3_000_000], "the library's cue rows win on export");
 }
 
-/// Cue rows a player added to a track that this sync takes off the stick
-/// are not being exported over; they would just be lost. That still stops
-/// the sync.
+/// Cue rows a player added to a removed track require an explicit discard
+/// decision before the sync can take them off the stick.
 #[test]
-fn a_sync_still_refuses_to_drop_cue_rows_a_player_added_to_a_track_it_removes() {
+fn a_sync_requires_explicit_discard_before_dropping_cue_rows_on_a_removed_track() {
     let src = tempfile::tempdir().unwrap();
     let usb = common::stick();
     let tracks = [track(src.path(), 1), track(src.path(), 2)];
@@ -204,10 +227,20 @@ fn a_sync_still_refuses_to_drop_cue_rows_a_player_added_to_a_track_it_removes() 
     edit(usb.path(), &format!("INSERT INTO cue(content_id,kind,inUsec,cueComment) VALUES({removed},2,7000000,'set on the CDJ')"));
     let before = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
 
-    let result = sync(usb.path(), &tracks[..1], &[playlist(10, &[0])]);
-
-    assert!(matches!(&result, Err(rbl_export::ExportError::Conflict(m)) if m.contains("'Track 2'")), "{result:?}");
+    let playlists = [playlist(10, &[0])];
+    let sync = SyncSource { db_id: 123, tree: vec![rbl_export::SyncNode { id: 10, parent: 0, attribute: 0 }], automatic: false };
+    let options = ExportOptions { sync: Some(&sync), ..Default::default() };
+    let inspection = rbl_export::review::inspect_volume(usb.path(), &tracks[..1], &playlists, &[], &options).unwrap();
+    let conflict = inspection.diagnostics.iter().find(|item| item.kind == ConflictKind::CueGridChanged).unwrap();
+    assert_eq!(conflict.severity, Severity::DecisionRequired);
+    assert_eq!(conflict.allowed_resolutions, [Resolution::DiscardDeviceEdits]);
+    let unresolved = sync_with_decisions(usb.path(), &tracks[..1], &playlists, None, &mut |_| {});
+    assert!(matches!(unresolved, Err(rbl_export::ExportError::ReviewRequired(_))), "{unresolved:?}");
     assert_eq!(rbl_export::snapshot::Snapshot::read(usb.path()).unwrap(), before);
+
+    let decisions = Decisions { token: inspection.token, resolutions: [(conflict.id.clone(), Resolution::DiscardDeviceEdits)].into() };
+    sync_with_decisions(usb.path(), &tracks[..1], &playlists, Some(&decisions), &mut |_| {}).unwrap();
+    assert!(verify(usb.path()).unwrap().is_ok());
 }
 
 /// [`track`], with its analysis in library files (as rekordbox keeps it under
@@ -322,10 +355,10 @@ fn a_sync_drops_an_unreadable_stick_analysis_when_the_library_has_none() {
     assert!(verify(usb.path()).unwrap().is_ok());
 }
 
-/// The refusal for a player's cue row on a track the sync removes names the
-/// track, comes before any copy, and clears once the user does what it asks.
+/// An unresolved player cue edit blocks before copying; explicitly discarding
+/// it permits the sync to remove that track.
 #[test]
-fn the_removed_track_cue_refusal_names_the_track_and_can_be_cleared() {
+fn removed_track_cue_review_blocks_before_copy_and_accepts_explicit_discard() {
     let src = tempfile::tempdir().unwrap();
     let usb = common::stick();
     let tracks = [track(src.path(), 1), track(src.path(), 2), track(src.path(), 3)];
@@ -334,26 +367,21 @@ fn the_removed_track_cue_refusal_names_the_track_and_can_be_cleared() {
     let removed = manifest.tracks.iter().find(|t| t.library_id == 2).unwrap().export_id;
     edit(usb.path(), &format!("INSERT INTO cue(content_id,kind,inUsec,cueComment) VALUES({removed},2,7000000,'set on the CDJ')"));
 
-    // Track 3 is new, so a late refusal would have copied it first.
+    let selected = [tracks[0].clone(), tracks[2].clone()];
+    let playlists = [playlist(10, &[0, 1])];
+    let sync = SyncSource { db_id: 123, tree: vec![rbl_export::SyncNode { id: 10, parent: 0, attribute: 0 }], automatic: false };
+    let options = ExportOptions { sync: Some(&sync), ..Default::default() };
+    let inspection = rbl_export::review::inspect_volume(usb.path(), &selected, &playlists, &[], &options).unwrap();
+    let conflict = inspection.diagnostics.iter().find(|item| item.kind == ConflictKind::CueGridChanged).unwrap();
+    assert_eq!(conflict.name, "Track 2");
+
+    // Track 3 is new, so the unresolved decision must be rejected before copying it.
     let mut stages = Vec::new();
-    let result = export_full(usb.path(), &[tracks[0].clone(), tracks[2].clone()], &[playlist(10, &[0, 1])], &[], None,
-        Some(&SyncSource { db_id: 123, tree: vec![rbl_export::SyncNode { id: 10, parent: 0, attribute: 0 }], automatic: false }),
-        &mut |p| stages.push(p.stage));
-    let Err(rbl_export::ExportError::Conflict(message)) = result else { panic!("{result:?}") };
-    assert!(message.contains("'Track 2'"), "{message}");
-    assert!(message.contains("Keep a playlist that holds it in the sync"), "{message}");
+    let result = sync_with_decisions(usb.path(), &selected, &playlists, None, &mut |p| stages.push(p.stage));
+    assert!(matches!(result, Err(rbl_export::ExportError::ReviewRequired(_))), "{result:?}");
     assert!(!stages.contains(&"copying"), "refused only after copying: {stages:?}");
 
-    // Way out 1: keep it in the sync. The library's cues then replace the row.
-    sync(usb.path(), &tracks, &[playlist(10, &[0, 1, 2])]).unwrap();
-
-    // Way out 2: delete it from the USB (in rekordbox, which takes its cue
-    // rows with it), then sync without it.
-    let manifest = Manifest::load(usb.path()).unwrap();
-    let removed = manifest.tracks.iter().find(|t| t.library_id == 2).unwrap().export_id;
-    edit(usb.path(), &format!("INSERT INTO cue(content_id,kind,inUsec,cueComment) VALUES({removed},2,8000000,'again')"));
-    assert!(sync(usb.path(), &[tracks[0].clone(), tracks[2].clone()], &[playlist(10, &[0, 1])]).is_err());
-    edit(usb.path(), &format!("DELETE FROM cue WHERE content_id={removed}"));
-    sync(usb.path(), &[tracks[0].clone(), tracks[2].clone()], &[playlist(10, &[0, 1])]).unwrap();
+    let decisions = Decisions { token: inspection.token, resolutions: [(conflict.id.clone(), Resolution::DiscardDeviceEdits)].into() };
+    sync_with_decisions(usb.path(), &selected, &playlists, Some(&decisions), &mut |_| {}).unwrap();
     assert!(verify(usb.path()).unwrap().is_ok());
 }

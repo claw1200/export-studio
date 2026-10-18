@@ -318,6 +318,26 @@ pub fn same_root(left: &Path, right: &Path) -> std::io::Result<bool> {
     same_file::is_same_file(left, right)
 }
 
+/// Best-effort stable fingerprint for binding a reviewed plan to a mounted root.
+/// This detects ordinary unmount/remount replacement; it is not a hardware authenticator.
+pub fn root_fingerprint(root: &Path) -> std::io::Result<String> {
+    let metadata = std::fs::metadata(root)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return Ok(format!("unix:{}:{}", metadata.dev(), metadata.ino()));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        return Ok(format!("windows:{:?}:{:?}", metadata.volume_serial_number(), metadata.file_index()));
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        Ok(format!("fallback:{}:{:?}", metadata.len(), metadata.modified().ok()))
+    }
+}
+
 /// Holds the directory identity across planning and staging, including Windows.
 /// Reusing a mount path for another device must not redirect an active export.
 pub struct VolumeIdentity(same_file::Handle);
@@ -1049,6 +1069,14 @@ fn lock(root: &Path) -> std::io::Result<std::fs::File> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn root_fingerprint_is_stable_and_distinguishes_test_volumes() {
+        let left = tempfile::tempdir().unwrap();
+        let right = tempfile::tempdir().unwrap();
+        assert_eq!(root_fingerprint(left.path()).unwrap(), root_fingerprint(left.path()).unwrap());
+        assert_ne!(root_fingerprint(left.path()).unwrap(), root_fingerprint(right.path()).unwrap());
+    }
 
     #[cfg(unix)]
     #[test]

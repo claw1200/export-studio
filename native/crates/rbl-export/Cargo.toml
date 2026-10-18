@@ -19,6 +19,7 @@ rbl-core = { path = "../rbl-core" }
 rbl-pdb = { path = "../rbl-pdb" }
 rbl-onelibrary = { path = "../rbl-onelibrary" }
 rbl-anlz = { path = "../rbl-anlz" }
+rb-model = { path = "../rb-model" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

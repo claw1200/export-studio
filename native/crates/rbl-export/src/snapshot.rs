@@ -208,6 +208,16 @@ impl Snapshot {
     /// that the sync rewrites on purpose although the stick added entries
     /// to them (`reconcile::Prepared::device_additions`, #429).
     pub fn check_changes_except(&self, previous: Option<&Manifest>, next: &Self, device_additions: &BTreeSet<u32>) -> Result<()> {
+        self.check_changes_reviewed(previous, next, device_additions, &BTreeSet::new())
+    }
+
+    pub fn check_changes_reviewed(
+        &self,
+        previous: Option<&Manifest>,
+        next: &Self,
+        device_additions: &BTreeSet<u32>,
+        accepted: &BTreeSet<String>,
+    ) -> Result<()> {
         for (label, current, target, baseline) in [
             (
                 "Device Library",
@@ -230,7 +240,7 @@ impl Snapshot {
                 let Some(target) = target else {
                     return Err(ExportError::Conflict(format!("Missing {label} output")));
                 };
-                check_database_changes(label, current, target, baseline, device_additions)?;
+                check_database_changes(label, current, target, baseline, device_additions, accepted)?;
             }
         }
         if let Some(baseline) = previous.and_then(|m| m.baseline.as_ref()) {
@@ -241,6 +251,7 @@ impl Snapshot {
                     .find(|t| t.id == tag.id)
                     .is_some_and(|old| old != tag)
                     && !next.my_tags.contains(tag)
+                    && !accepted.contains(&format!("tag:{}", tag.id))
                 {
                     return Err(ExportError::Conflict(format!(
                         "My Tag '{name}' changed on the USB",
@@ -248,9 +259,12 @@ impl Snapshot {
                     )));
                 }
             }
-            for (id, tags) in &self.tag_memberships {
-                if baseline.tag_memberships.get(id) != Some(tags)
-                    && next.tag_memberships.get(id) != Some(tags)
+            let membership_ids: BTreeSet<u32> = baseline.tag_memberships.keys().chain(self.tag_memberships.keys()).copied().collect();
+            for id in membership_ids {
+                let current = self.tag_memberships.get(&id);
+                if baseline.tag_memberships.get(&id) != current
+                    && next.tag_memberships.get(&id) != current
+                    && !accepted.contains(&format!("tag_membership:{id}"))
                 {
                     return Err(ExportError::Conflict(format!(
                         "My Tags changed on USB track {id}"
@@ -259,7 +273,7 @@ impl Snapshot {
             }
         }
         let kept: BTreeSet<u32> = next.one.iter().flat_map(|l| &l.tracks).map(|t| t.id).collect();
-        self.check_removed_cues(previous, &kept, &next.cues)
+        self.check_removed_cues_reviewed(previous, &kept, &next.cues, accepted)
     }
 
     /// Stops a sync that would take a track off the stick while it holds a
@@ -276,12 +290,22 @@ impl Snapshot {
     /// the message names the track and asks to keep it or delete it on
     /// purpose.
     pub fn check_removed_cues(&self, previous: Option<&Manifest>, kept: &BTreeSet<u32>, written: &[String]) -> Result<()> {
+        self.check_removed_cues_reviewed(previous, kept, written, &BTreeSet::new())
+    }
+
+    pub fn check_removed_cues_reviewed(
+        &self,
+        previous: Option<&Manifest>,
+        kept: &BTreeSet<u32>,
+        written: &[String],
+        accepted: &BTreeSet<String>,
+    ) -> Result<()> {
         let Some(baseline) = previous.and_then(|m| m.baseline.as_ref()) else { return Ok(()) };
         // A row of an unknown shape cannot be placed on a kept track, so it
         // counts as lost.
         let lost = self.cues.iter().filter(|row| !baseline.cues.contains(row) && !written.contains(row))
             .map(|row| cue_content(row))
-            .find(|id| !id.is_some_and(|id| kept.contains(&id)));
+            .find(|id| !id.is_some_and(|id| kept.contains(&id)) && !id.is_some_and(|id| accepted.contains(&format!("cue_grid:track:{id}"))));
         let Some(id) = lost else { return Ok(()) };
         let title = id.and_then(|id| self.one.iter().flat_map(|l| &l.tracks).find(|t| t.id == id))
             .map_or_else(|| format!("USB track {}", id.unwrap_or_default()), |t| t.title.clone());
@@ -309,7 +333,7 @@ pub struct Rewritten {
 }
 
 /// The fields two readings of one track differ on, by name.
-pub(crate) fn track_differences(a: &Track, b: &Track) -> Vec<&'static str> {
+pub fn track_differences(a: &Track, b: &Track) -> Vec<&'static str> {
     [
         ("title", a.title != b.title),
         ("artist", a.artist != b.artist),
@@ -464,7 +488,7 @@ fn read_legacy_into(out: &mut Snapshot, pdb: &Path) -> Result<()> {
     use rbl_pdb::PageType;
     let bytes = std::fs::read(pdb)?;
     let parsed = rbl_pdb::Pdb::parse(&bytes)
-        .map_err(|e| ExportError::Conflict(format!("Cannot read Device Library: {e}")))?;
+        .map_err(|e| ExportError::IntegrityFailure(format!("Cannot read Device Library: {e}")))?;
     out.legacy_background = parsed.property().map_or(0, |p| p.background_color);
     let tracks = parsed
         .table(PageType::Tracks)
@@ -550,27 +574,24 @@ fn read_legacy_into(out: &mut Snapshot, pdb: &Path) -> Result<()> {
 }
 /// The `OneLibrary` (`exportLibrary.db`) side of [`Snapshot::read_at`].
 fn read_one_into(out: &mut Snapshot, path: &Path) -> Result<()> {
-    let db = rbl_onelibrary::ExportLibrary::open_read_only(path).map_err(sql)?;
+    let db = rbl_onelibrary::ExportLibrary::open_read_only(path)
+        .map_err(|error| ExportError::IntegrityFailure(format!("Cannot open OneLibrary: {error}")))?;
     let conn = db.connection();
-    conn.execute_batch("BEGIN").map_err(sql)?;
+    conn.execute_batch("BEGIN").map_err(|error| ExportError::IntegrityFailure(format!("Cannot read OneLibrary transaction: {error}")))?;
     let integrity: String = conn
         .query_row("PRAGMA quick_check", [], |r| r.get(0))
-        .map_err(sql)?;
+        .map_err(|error| ExportError::IntegrityFailure(format!("OneLibrary integrity check failed: {error}")))?;
     if integrity != "ok" {
-        return Err(ExportError::Conflict(format!(
-            "OneLibrary integrity check failed: {integrity}",
-        )));
+        return Err(ExportError::IntegrityFailure(format!("OneLibrary integrity check failed: {integrity}")));
     }
     let version: String = conn
         .query_row("SELECT dbVersion FROM property LIMIT 1", [], |r| r.get(0))
-        .map_err(sql)?;
+        .map_err(|error| ExportError::IntegrityFailure(format!("Cannot read OneLibrary schema version: {error}")))?;
     if version != rbl_onelibrary::build::DB_VERSION {
-        return Err(ExportError::Conflict(format!(
-            "Unsupported OneLibrary schema {version}; the device was left unchanged."
-        )));
+        return Err(ExportError::UnsupportedSchema(format!("Unsupported OneLibrary schema {version}; the device was left unchanged.")));
     }
-    read_one_library(&db, out)?;
-    read_one_history_and_tags(&db, out)?;
+    read_one_library(&db, out).map_err(|error| ExportError::IntegrityFailure(format!("Cannot read OneLibrary contents: {error}")))?;
+    read_one_history_and_tags(&db, out).map_err(|error| ExportError::IntegrityFailure(format!("Cannot read OneLibrary metadata: {error}")))?;
     Ok(())
 }
 
@@ -722,6 +743,7 @@ fn check_database_changes(
     target: &Library,
     baseline: Option<&Library>,
     device_additions: &BTreeSet<u32>,
+    accepted: &BTreeSet<String>,
 ) -> Result<()> {
     let originals: BTreeMap<_, _> = baseline.into_iter().flat_map(|b| &b.tracks).map(|t| (t.id, t)).collect();
     let targets: BTreeMap<_, _> = target.tracks.iter().map(|t| (t.id, t)).collect();
@@ -739,13 +761,13 @@ fn check_database_changes(
                 &corrected == old
             } else { old == track }
         });
-        if original.is_some() && !unchanged && next != Some(track) {
+        if original.is_some() && !unchanged && next != Some(track) && !accepted.contains(&format!("metadata:{label}:track:{}", track.id)) {
             return Err(ExportError::Conflict(format!(
                 "{label}: '{title}' changed on the USB. Import its changes before syncing.",
                 title = track.title
             )));
         }
-        if original.is_none() && next.is_none() {
+        if original.is_none() && next.is_none() && !accepted.contains(&format!("device_only:{label}:track:{}", track.id)) {
             return Err(ExportError::Conflict(format!(
                 "{label}: device-only track '{title}' would be lost",
                 title = track.title
@@ -763,10 +785,10 @@ fn check_database_changes(
                 && a.folder == b.folder
                 && a.tracks == b.tracks
         };
-        if original.is_some_and(|b| !same(b, playlist)) && !next.is_some_and(|n| same(n, playlist)) && !device_additions.contains(&playlist.id) {
+        if original.is_some_and(|b| !same(b, playlist)) && !next.is_some_and(|n| same(n, playlist)) && !device_additions.contains(&playlist.id) && !accepted.contains(&format!("playlist:{label}:{}", playlist.id)) {
             return Err(ExportError::Conflict(format!("{label}: playlist '{name}' changed on the USB. Import or reconcile it before syncing.", name = playlist.name)));
         }
-        if original.is_none() && next.is_none() {
+        if original.is_none() && next.is_none() && !accepted.contains(&format!("device_only:{label}:playlist:{}", playlist.id)) {
             return Err(ExportError::Conflict(format!(
                 "Device-only playlist '{name}' would be lost",
                 name = playlist.name
@@ -776,9 +798,9 @@ fn check_database_changes(
     // A deletion on the device is also an edit; don't silently resurrect it.
     if let Some(baseline) = baseline {
         if baseline.tracks.iter().any(|t| {
-            !current_ids.contains(&t.id) && targets.contains_key(&t.id)
+            !current_ids.contains(&t.id) && targets.contains_key(&t.id) && !accepted.contains(&format!("deletion:{label}:track:{}", t.id))
         }) || baseline.playlists.iter().any(|p| {
-            !current_playlist_ids.contains(&p.id) && target_playlists.contains_key(&p.id)
+            !current_playlist_ids.contains(&p.id) && target_playlists.contains_key(&p.id) && !accepted.contains(&format!("deletion:{label}:playlist:{}", p.id))
         }) {
             return Err(ExportError::Conflict(format!("{label} contains device-side deletions. Reconcile them before syncing.")));
         }
@@ -804,7 +826,7 @@ impl Library {
 /// alphatheta-docs platform/rekordbox-onelibrary-reference.md] and this
 /// exporter's (`rbl_onelibrary::build`). `None` when the row does not have
 /// that shape.
-fn cue_content(row: &str) -> Option<u32> {
+pub(crate) fn cue_content(row: &str) -> Option<u32> {
     row.split('|').nth(1)?.strip_prefix("Integer(")?.strip_suffix(')')?.parse().ok()
 }
 pub fn analysis_hash(files: &[(String, Vec<u8>)]) -> u64 {

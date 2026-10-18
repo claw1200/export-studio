@@ -21,6 +21,7 @@ pub mod cache;
 pub mod plan;
 pub mod sync_record;
 pub mod snapshot;
+pub mod review;
 mod reconcile;
 mod verification;
 
@@ -53,6 +54,12 @@ pub enum ExportError {
     Io(#[from] std::io::Error),
     #[error("could not write exportLibrary.db: {0}")]
     OneLibrary(String),
+    #[error("unsupported device database schema: {0}")]
+    UnsupportedSchema(String),
+    #[error("device database integrity check failed: {0}")]
+    IntegrityFailure(String),
+    #[error("USB changes require review before syncing")]
+    ReviewRequired(rb_model::conflict::Inspection),
 }
 
 pub type Result<T> = std::result::Result<T, ExportError>;
@@ -901,6 +908,8 @@ pub struct ExportOptions<'a> {
     /// their place, instead of being taken off. Export Playlist and Export
     /// Track add to a device as rekordbox's do; a SYNC leaves this off.
     pub keep_unlisted: bool,
+    /// Decisions from a current `review::inspect_volume` result.
+    pub decisions: Option<&'a rb_model::conflict::Decisions>,
 }
 
 /// Export with optional conversion of audio outside the common CDJ formats.
@@ -948,10 +957,14 @@ fn export_cancellable_inner(
     let _inspection = incremental::Inspection::new();
     let started = std::time::Instant::now();
     let requested_tracks = tracks;
-    let &ExportOptions { defaults, sync, compatibility, root, keep_unlisted: _, settings_files, cache, expected_volume, verify_all } = options;
+    let &ExportOptions { defaults, sync, compatibility, root, keep_unlisted: _, settings_files, cache, expected_volume, verify_all, decisions: _ } = options;
     if let Some(volume) = expected_volume { volume.check(destination)?; }
     if destination.exists() && !destination.is_dir() {
         return Err(ExportError::NotADirectory(destination.to_owned()));
+    }
+    if destination.join(PUBLICATION).exists() {
+        let inspection = review::inspect_volume(destination, tracks, playlists, my_tags, options)?;
+        return Err(ExportError::ReviewRequired(inspection));
     }
 
     let root_name = export_root_name_with(destination, root)?;
@@ -962,10 +975,6 @@ fn export_cancellable_inner(
     rbl_core::durable::create_dir_all(&anlz_root)?;
     rbl_core::durable::create_dir_all(&db_dir)?;
 
-    if destination.join(PUBLICATION).exists() {
-        progress(&ExportProgress { stage: "recovering", ..Default::default() });
-    }
-    recover(destination)?;
     let publication = rbl_core::durable::Publication::new(destination, PUBLICATION)?;
     if let Some(volume) = expected_volume { volume.check(destination)?; }
     let mut previous = Manifest::load(destination);
@@ -1000,7 +1009,7 @@ fn export_cancellable_inner(
     let database_signatures = incremental::databases(destination)?;
     let generation_matches = previous.as_ref().and_then(|m| m.generation.as_ref())
         .is_some_and(|g| g.transform_version == incremental::TRANSFORM_VERSION && g.databases == database_signatures);
-    if let Some(old) = previous.as_ref().filter(|_| generation_matches) {
+    if let Some(old) = previous.as_ref().filter(|_| generation_matches && options.decisions.is_none()) {
         if old.generation.as_ref().is_some_and(|g| g.request == request && g.inputs == source_revisions)
             && settings_files.is_empty() && incremental::receipts_match(destination, old.generation.as_ref().ok_or_else(|| ExportError::Conflict("Missing generation receipt".into()))?)? {
             return Ok(ExportReport {
@@ -1019,16 +1028,10 @@ fn export_cancellable_inner(
     } else { snapshot::Snapshot::read(destination)? };
     let trusted = incremental::trusted_paths(destination, previous.as_ref())?;
     let db_id = sync.map_or(0, |s| s.db_id);
-    if let Some(old) = previous.as_mut().filter(|m| m.db_id == 0 && db_id != 0) {
-        if sync_record::read(destination).is_some_and(|r| r.db_id == db_id) {
-            // Old manifests lacked DBID. Upgrade only when rekordbox's own
-            // record identifies the same source database.
-            old.db_id = db_id;
-        }
-    }
+    // Old manifests lacked DBID. Upgrade only when rekordbox's own record identifies the same source.
+    review::upgrade_previous_db_id(destination, &mut previous, db_id);
     let playlist_record = reconcile::playlist_namespace(destination, &mut before, previous.as_ref(), db_id);
     let rewritten = reconcile::rewritten(playlist_record.as_ref(), &before, previous.as_ref(), tracks, playlists, db_id);
-    before.check_baseline_except(previous.as_ref(), db_id, &rewritten)?;
     // Read every analysis file the stick names only once the sync is going
     // ahead: on a large stick that is most of what preparing takes, and a
     // refused sync should say so at once (#331).
@@ -1040,7 +1043,23 @@ fn export_cancellable_inner(
         .filter(|p| !p.folder && !p.device_only && p.id != 0 && p.id < reconcile::DEVICE_PLAYLIST_ID_BASE)
         .map(|p| (p.id, p.track_indices.iter().filter_map(|i| tracks.get(*i)).map(|t| track_key(t.id, &t.source_path.to_string_lossy())).collect()))
         .collect();
-    let plan = plan::from_baseline(destination, &before, previous.as_ref(), tracks, playlists, options, playlist_record.as_ref())?;
+    let mut plan = plan::from_baseline(destination, &before, previous.as_ref(), tracks, playlists, options, playlist_record.as_ref())?;
+    let inspection = review::inspect_state(
+        destination, tracks, playlists, my_tags, options, &before, previous.as_ref(),
+        &database_signatures, &plan.tracks, &plan.playlists, &rewritten,
+        &plan.device_additions,
+        Some(rb_model::conflict::PlanSummary {
+            tracks: plan.tracks.len(),
+            playlists: plan.playlists.len(),
+            estimated_peak_bytes: (!plan.unknown_size).then_some(plan.peak_bytes),
+            approximate: plan.approximate,
+        }),
+    )?;
+    let accepted = review::validate_decisions(&inspection, options.decisions)?;
+    review::apply_library_playlist_decisions(
+        &plan.tracks, &mut plan.playlists, tracks, playlists, &inspection, options.decisions,
+    )?;
+    before.check_baseline_except(previous.as_ref(), db_id, &rewritten)?;
     if !plan.unknown_size && fs2::available_space(destination)? < plan.peak_bytes {
         return Err(ExportError::Conflict(format!("Not enough temporary space to sync safely: approximately {} bytes required while the previous library is retained", plan.peak_bytes)));
     }
@@ -1126,7 +1145,7 @@ fn export_cancellable_inner(
     // Before anything is copied: a player's cue on a track this sync takes
     // off the stick stops it, and should at once rather than after every
     // copy. The same check runs again on what was written.
-    before.check_removed_cues(previous.as_ref(), &ids.iter().copied().collect(), &[])?;
+    before.check_removed_cues_reviewed(previous.as_ref(), &ids.iter().copied().collect(), &[], &accepted)?;
     // Entries are taken out as they are matched; whatever is left at the end
     // is what the selection no longer holds.
     let mut stale: BTreeMap<String, &ManifestTrack> = previous
@@ -1898,7 +1917,7 @@ fn export_cancellable_inner(
     let named: Vec<String> = recorded.iter().map(|track| track.audio.clone()).collect();
     let after = snapshot::Snapshot::read_at(publication.stage(), root_name)?;
     before.check_retained_history(&after)?;
-    before.check_changes_except(previous.as_ref(), &after, &device_additions)?;
+    before.check_changes_reviewed(previous.as_ref(), &after, &device_additions, &accepted)?;
     progress(&ExportProgress { stage: "verifying", done: 0, total: 0, title: String::new(), reused: report.reused, copied: report.tracks_added + report.tracks_updated, converted: report.converted, ..Default::default() });
     let verified_reused: BTreeSet<String> = trusted.iter().filter(|p| !publication.stage().join(p).is_file()).cloned().collect();
     let verified = verification::verify_staged_incremental(publication.stage(), destination, &after, &absent_audio, &verified_reused)?;
@@ -1934,6 +1953,9 @@ fn export_cancellable_inner(
             })
             .collect(),
         loose,
+        review: options.decisions.map(|decisions| crate::manifest::DecisionReceipt {
+            token: decisions.token.clone(), resolutions: decisions.resolutions.clone(),
+        }),
     };
     let structure = incremental::manifest_structure(&manifest)?;
     if let Some(g) = &mut manifest.generation { g.structure = structure; }
@@ -2142,7 +2164,9 @@ pub fn create_library_with_root(
     if destination.exists() && !destination.is_dir() {
         return Err(ExportError::NotADirectory(destination.to_owned()));
     }
-    recover(destination)?;
+    if recovery_pending(destination) {
+        return Err(ExportError::Conflict("This USB has an interrupted export. Recover it explicitly before creating a library.".into()));
+    }
     let publication = rbl_core::durable::Publication::new(destination, PUBLICATION)?;
     let root_name = export_root_name_with(destination, preferred_root)?;
     let db_dir = destination.join(root_name).join("rekordbox");

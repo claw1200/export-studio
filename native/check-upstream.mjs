@@ -43,7 +43,8 @@ for (const crate of [
   const localFiles = expectedFiles.filter(
     (file) => !relocations[`crates/${crate}/${file}`],
   );
-  if (JSON.stringify(files(destination)) !== JSON.stringify(localFiles))
+  const extraFiles = (provenance.extraFiles?.[crate] ?? []).map((entry) => entry.path);
+  if (JSON.stringify(files(destination)) !== JSON.stringify([...localFiles, ...extraFiles].sort()))
     throw new Error(`File set differs: ${crate}`);
   for (const file of expectedFiles) {
     let expected = readFileSync(join(source, file));
@@ -84,6 +85,12 @@ for (const crate of [
     }
     if (!expected.equals(actual))
       throw new Error(`Unexpected downstream change: ${crate}/${file}`);
+  }
+  for (const entry of provenance.extraFiles?.[crate] ?? []) {
+    const digest = createHash("sha256")
+      .update(readFileSync(join(root, `crates/${crate}/${entry.path}`)))
+      .digest("hex");
+    if (digest !== entry.sha256) throw new Error(`Unexpected extra file: ${crate}/${entry.path}`);
   }
 }
 for (const name of ["LICENSE", "COPYING"]) {

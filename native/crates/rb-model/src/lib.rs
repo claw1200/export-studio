@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod source;
+pub mod conflict;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

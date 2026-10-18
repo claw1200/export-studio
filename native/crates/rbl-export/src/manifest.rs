@@ -12,13 +12,21 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use rb_model::conflict::Resolution;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionReceipt {
+    pub token: String,
+    pub resolutions: std::collections::BTreeMap<String, Resolution>,
+}
 
 /// Where the record sits, relative to the root of the stick.
 pub const MANIFEST_PATH: &str = "PIONEER/exportstudio/manifest.json";
 
 /// Version 1 retains ownership and IDs but must establish new receipts. Unknown
 /// future versions are ignored rather than treated as a trusted baseline.
-pub const MANIFEST_VERSION: u32 = 2;
+pub const MANIFEST_VERSION: u32 = 3;
 
 /// The state of one export.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +52,9 @@ pub struct Manifest {
     /// the user enables music cleanup. Absent in older records.
     #[serde(default)]
     pub loose: Vec<u64>,
+    /// User decisions applied by the generation, published with its journal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<DecisionReceipt>,
 }
 
 /// One playlist as it was asked for.
@@ -161,7 +172,7 @@ impl Manifest {
             || manifest.generation.as_ref().is_some_and(|g| !crate::incremental::manifest_structure(&manifest).is_ok_and(|hash| hash == g.structure)) {
             manifest.generation = None;
         }
-        (matches!(manifest.version, 1 | MANIFEST_VERSION)).then_some(manifest)
+        (matches!(manifest.version, 1 | 2 | MANIFEST_VERSION)).then_some(manifest)
     }
 
     /// Writes the record, replacing any previous one.
@@ -253,6 +264,7 @@ mod tests {
             }],
             playlists: vec![ManifestPlaylist { device_only: false, export_id: 1, folder: false, library_id: 9, name: "Set".to_owned(), library_entries: Some(vec!["#42".to_owned()]) }],
             loose: vec![42],
+            review: None,
         };
         manifest.save(dir.path()).unwrap();
         let read = Manifest::load(dir.path()).expect("saved manifest");

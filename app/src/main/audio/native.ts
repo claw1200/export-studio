@@ -128,7 +128,10 @@ export interface NativeLibrary {
   usbMedia(key: string): Promise<unknown>
   usbImportPreview(volume: string, folder: string | null, policy: string | null): Promise<unknown>
   usbImport(volume: string, folder: string | null, policy: string | null): Promise<unknown>
-  usbSync(volume: string, playlistIds: string[]): Promise<unknown>
+  usbSyncReview(volume: string, playlistIds: string[]): Promise<unknown>
+  usbSync(volume: string, playlistIds: string[], review?: unknown): Promise<unknown>
+  usbRecoveryStatus(volume: string): Promise<unknown>
+  usbRecover(volume: string): Promise<unknown>
   removeTracks(ids: string[]): Promise<unknown>
   playlistAdd(id: string, trackIds: string[]): Promise<unknown>
   playlistRemove(id: string, trackIds: string[]): Promise<unknown>

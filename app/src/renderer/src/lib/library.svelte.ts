@@ -872,7 +872,7 @@ export class Library {
     return this.devicePlaylists[volumeId]
   }
 
-  async syncTo(volumeId: string, playlistIds: string[]): Promise<boolean> {
+  async syncTo(volumeId: string, playlistIds: string[], review?: import('../../../preload/engine').SyncDecisions): Promise<boolean> {
     if (this.syncing) return false
     if (!playlistIds.length) {
       this.syncError = 'Select a playlist to sync'
@@ -882,7 +882,7 @@ export class Library {
     this.syncError = null
     this.syncProgress = { phase: 'reading' }
     try {
-      await api.usbSync(volumeId, playlistIds)
+      await api.usbSync(volumeId, playlistIds, review)
       const refreshPlaylists = volumeId in this.devicePlaylists
       const playlists = { ...this.devicePlaylists }
       delete playlists[volumeId]

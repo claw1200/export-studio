@@ -813,8 +813,23 @@ impl RekordboxLibrary {
     }
 
     #[napi(ts_return_type = "Promise<unknown>")]
-    pub fn usb_sync(&self, volume: String, playlist_ids: Vec<String>) -> AsyncTask<Run> {
-        self.run(Op::Usb(UsbOp::Sync { volume, playlists: playlist_ids }))
+    pub fn usb_sync_review(&self, volume: String, playlist_ids: Vec<String>) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::SyncReview { volume, playlists: playlist_ids }))
+    }
+
+    #[napi(ts_return_type = "Promise<unknown>")]
+    pub fn usb_recovery_status(&self, volume: String) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::RecoveryStatus(volume)))
+    }
+
+    #[napi(ts_return_type = "Promise<unknown>")]
+    pub fn usb_recover(&self, volume: String) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::Recover(volume)))
+    }
+
+    #[napi(ts_return_type = "Promise<unknown>")]
+    pub fn usb_sync(&self, volume: String, playlist_ids: Vec<String>, decisions: Option<Value>) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::Sync { volume, playlists: playlist_ids, decisions }))
     }
 }
 

@@ -7,13 +7,14 @@ use std::process::{Command, Stdio};
 
 use es_db::export::{Bundle, ExportTrack};
 use es_db::Library;
+use rb_model::conflict::{Decisions, Inspection};
 use serde_json::{json, Value};
 
 use crate::{Error, Result};
 
 /// What rekordbox's own analysis marks a fully analysed track with.
 const ANALYSED: i64 = 105;
-const JOB_SCHEMA_VERSION: u32 = 2;
+const JOB_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone)]
 pub enum Progress {
@@ -125,7 +126,7 @@ fn track_job(share: &Path, track: &ExportTrack) -> Value {
     })
 }
 
-fn job(share: &Path, volume: &Path, bundle: &Bundle) -> Result<Value> {
+fn job(share: &Path, volume: &Path, bundle: &Bundle, operation: &str, decisions: Option<&Decisions>) -> Result<Value> {
     let tracks: Vec<Value> = bundle.tracks.iter().map(|t| track_job(share, t)).collect();
     let known: std::collections::HashSet<i64> = bundle.tracks.iter().map(|t| num(&t.id)).collect();
     let mut playlists = Vec::new();
@@ -148,14 +149,21 @@ fn job(share: &Path, volume: &Path, bundle: &Bundle) -> Result<Value> {
         .collect();
     Ok(json!({
         "schemaVersion": JOB_SCHEMA_VERSION,
+        "operation": operation,
         "destination": volume.to_string_lossy(), "dbId": num(&bundle.db_id), "automatic": false,
         "settingsDir": find_settings().map(|p| p.to_string_lossy().into_owned()),
         "myTags": tags, "tracks": tracks, "playlists": playlists,
+        "decisions": decisions,
     }))
 }
 
-fn export_error(kind: &str, message: String) -> Error {
-    if kind == "conflict" {
+fn export_error(kind: &str, message: String, review: Option<Value>) -> Error {
+    if kind == "review" {
+        review.and_then(|value| serde_json::from_value(value).ok()).map_or_else(
+            || Error::Conflict("USB changes need review. Inspect the device again before syncing.".into()),
+            Error::ReviewRequired,
+        )
+    } else if kind == "conflict" {
         Error::Conflict(message)
     } else if message.to_lowercase().contains("verif") || message.to_lowercase().contains("disagree") {
         Error::Verify(message)
@@ -195,10 +203,41 @@ pub fn sync_volume(
     lib: &Library,
     volume: &Path,
     playlist_ids: &[String],
+    decisions: Option<&Decisions>,
     on_progress: &dyn Fn(Progress),
 ) -> Result<Outcome> {
     let publisher = CommandPublisher::discover()?;
-    sync_volume_with_publisher(lib, volume, playlist_ids, &publisher, on_progress)
+    sync_volume_with_publisher(lib, volume, playlist_ids, decisions, &publisher, on_progress)
+}
+
+pub fn inspect_volume(lib: &Library, volume: &Path, playlist_ids: &[String]) -> Result<Inspection> {
+    let publisher = CommandPublisher::discover()?;
+    inspect_volume_with_publisher(lib, volume, playlist_ids, &publisher)
+}
+
+pub fn recovery_required(volume: &Path) -> bool {
+    rb_usb::recovery_required(volume)
+}
+
+pub fn recover_volume(volume: &Path) -> Result<()> {
+    rb_usb::recover(volume).map_err(|error| Error::Publication(error.to_string()))
+}
+
+pub fn inspect_volume_with_publisher(
+    lib: &Library,
+    volume: &Path,
+    playlist_ids: &[String],
+    publisher: &impl UsbPublisher,
+) -> Result<Inspection> {
+    let volume = volume.canonicalize()
+        .map_err(|_| Error::Other(format!("Volume is not mounted: {}", volume.display())))?;
+    if !volume.is_dir() { return Err(Error::Other(format!("Volume is not mounted: {}", volume.display()))); }
+    let bundle = lib.export_bundle(playlist_ids)?;
+    let body = job(&lib.share_dir(), &volume, &bundle, "inspect", None)?;
+    let result = publisher.publish(&body, &|_| {})?;
+    serde_json::from_value(result.get("inspection").cloned()
+        .ok_or_else(|| Error::Other("USB inspection returned no diagnostics".into()))?)
+        .map_err(|error| Error::Other(format!("USB inspection response was invalid: {error}")))
 }
 
 /// Build and validate the library export, then publish it through the selected device boundary.
@@ -206,6 +245,7 @@ pub fn sync_volume_with_publisher(
     lib: &Library,
     volume: &Path,
     playlist_ids: &[String],
+    decisions: Option<&Decisions>,
     publisher: &impl UsbPublisher,
     on_progress: &dyn Fn(Progress),
 ) -> Result<Outcome> {
@@ -216,12 +256,7 @@ pub fn sync_volume_with_publisher(
         return Err(Error::Other(format!("Volume is not mounted: {}", volume.display())));
     }
     let bundle = lib.export_bundle(playlist_ids)?;
-    for track in &bundle.tracks {
-        if !Path::new(&track.folder_path).is_file() {
-            return Err(Error::Other(format!("Audio file is missing: {}", track.folder_path)));
-        }
-    }
-    let body = job(&lib.share_dir(), &volume, &bundle)?;
+    let body = job(&lib.share_dir(), &volume, &bundle, "export", decisions)?;
     let result = publisher.publish(&body, on_progress)?;
     let tracks = result.get("tracks").and_then(Value::as_i64).unwrap_or(0);
     let playlists = result.get("playlists").and_then(Value::as_i64).unwrap_or(0);
@@ -266,6 +301,7 @@ fn run(binary: &Path, job: &Path, on_progress: &dyn Fn(Progress)) -> Result<Valu
         (Some(result), None) if status.success() => Ok(result),
         (_, error) => {
             let kind = error.as_ref().and_then(|e| e.get("kind")).and_then(Value::as_str).unwrap_or("export").to_owned();
+            let review = error.as_ref().and_then(|e| e.get("review")).filter(|value| !value.is_null()).cloned();
             let mut message = error.as_ref().and_then(|e| e.get("message")).and_then(Value::as_str).unwrap_or("").to_owned();
             if message.is_empty() {
                 message = stderr.trim().to_owned();
@@ -273,7 +309,7 @@ fn run(binary: &Path, job: &Path, on_progress: &dyn Fn(Progress)) -> Result<Valu
             if message.is_empty() {
                 message = format!("USB export failed ({})", status.code().unwrap_or(-1));
             }
-            Err(export_error(&kind, message))
+            Err(export_error(&kind, message, review))
         }
     }
 }
@@ -289,6 +325,9 @@ mod tests {
     impl UsbPublisher for FakePublisher {
         fn publish(&self, job: &Value, _on_progress: &dyn Fn(Progress)) -> Result<Value> {
             assert_eq!(job["schemaVersion"], JOB_SCHEMA_VERSION);
+            if job["operation"] == "inspect" {
+                return Ok(json!({ "inspection": { "token": "fixture", "diagnostics": [], "plan": null } }));
+            }
             Ok(json!({ "tracks": 0, "playlists": 1 }))
         }
     }
@@ -296,9 +335,10 @@ mod tests {
     #[test]
     fn usb_job_declares_its_schema_version() {
         let directory = tempfile::tempdir().unwrap();
-        let body = job(directory.path(), directory.path(), &Bundle::default()).unwrap();
+        let body = job(directory.path(), directory.path(), &Bundle::default(), "export", None).unwrap();
 
         assert_eq!(body["schemaVersion"], JOB_SCHEMA_VERSION);
+        assert_eq!(body["operation"], "export");
         assert!(body.get("overwrite").is_none());
     }
 
@@ -318,11 +358,28 @@ mod tests {
             &library,
             &volume,
             &["playlist-1".into()],
+            None,
             &FakePublisher,
             &|_| {},
         )
         .unwrap();
 
         assert_eq!((result.tracks, result.playlists), (0, 1));
+    }
+
+    #[test]
+    fn review_use_case_uses_the_inspection_operation() {
+        let directory = tempfile::tempdir().unwrap();
+        let database_path = fixture::build(directory.path(), 1).unwrap();
+        {
+            let connection = fixture::connect(&database_path).unwrap();
+            Rows(&connection).playlist("playlist-1", "Test playlist", 0).unwrap();
+        }
+        let library = Library::open_live(&database_path, Guard::Off).unwrap();
+        let volume = directory.path().join("STICK");
+        std::fs::create_dir_all(&volume).unwrap();
+        let review = inspect_volume_with_publisher(&library, &volume, &["playlist-1".into()], &FakePublisher).unwrap();
+        assert_eq!(review.token, "fixture");
+        assert!(review.diagnostics.is_empty());
     }
 }

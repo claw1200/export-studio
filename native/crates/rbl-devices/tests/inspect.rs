@@ -60,6 +60,7 @@ fn a_stick_with_only_a_manifest_is_not_an_export() {
         tracks: Vec::new(),
         playlists: Vec::new(),
         loose: Vec::new(),
+        review: None,
     };
     manifest.save(stick.path()).unwrap();
     // Without export.pdb no player can read it, so there is nothing to report.

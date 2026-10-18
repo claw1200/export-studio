@@ -22,6 +22,8 @@ pub enum Error {
     Empty,
     #[error("could not write exportLibrary.db: {0}")]
     Database(String),
+    #[error("USB changes require review")]
+    ReviewRequired(rb_model::conflict::Inspection),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -38,6 +40,8 @@ impl From<rbl_export::ExportError> for Error {
             rbl_export::ExportError::Empty => Self::Empty,
             rbl_export::ExportError::Io(error) => Self::Io(error),
             rbl_export::ExportError::OneLibrary(message) => Self::Database(message),
+            rbl_export::ExportError::UnsupportedSchema(message) | rbl_export::ExportError::IntegrityFailure(message) => Self::Conflict(message),
+            rbl_export::ExportError::ReviewRequired(inspection) => Self::ReviewRequired(inspection),
         }
     }
 }
@@ -45,6 +49,7 @@ impl From<rbl_export::ExportError> for Error {
 #[derive(Debug, Clone, Default)]
 pub struct Options {
     pub settings_dir: Option<PathBuf>,
+    pub decisions: Option<rb_model::conflict::Decisions>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,9 +79,35 @@ impl Error {
             Self::Conflict(_) => "conflict",
             Self::Cancelled => "cancelled",
             Self::DeviceGone => "device",
+            Self::ReviewRequired(_) => "review",
             _ => "export",
         }
     }
+}
+
+/// Inspect device and source state without recovery, staging, or writes.
+pub fn inspect(destination: &Path, source: &Source, options: &Options) -> Result<rb_model::conflict::Inspection> {
+    let (tracks, playlists, tags, sync) = prepare::prepare(source)?;
+    let settings = collect_settings(destination, options.settings_dir.as_deref())?;
+    Ok(rbl_export::review::inspect_volume(
+        destination,
+        &tracks,
+        &playlists,
+        &tags,
+        &rbl_export::ExportOptions { sync: Some(&sync), settings_files: &settings, ..Default::default() },
+    )?)
+}
+
+fn collect_settings(destination: &Path, source: Option<&Path>) -> Result<Vec<(String, Vec<u8>)>> {
+    let Some(source) = source else { return Ok(Vec::new()) };
+    let root = rbl_export::export_root(destination);
+    rbl_export::MY_SETTINGS_FILES.iter()
+        .filter_map(|name| {
+            let path = source.join(name);
+            (path.is_file() && !root.join(name).exists()).then_some((name, path))
+        })
+        .map(|(name, path)| Ok(((*name).to_owned(), std::fs::read(path)?)))
+        .collect()
 }
 
 /// Execute a recoverable export; an interrupted prior publication is recovered first.
@@ -91,20 +122,19 @@ pub fn export(
     if cancelled() {
         return Err(Error::Cancelled);
     }
-    rbl_export::recover(destination)?;
-    let settings = rbl_export::MY_SETTINGS_FILES
-        .iter()
-        .filter_map(|name| {
-            options
-                .settings_dir
-                .as_ref()
-                .map(|directory| (name, directory.join(name)))
-        })
-        .filter(|(name, path)| {
-            path.is_file() && !rbl_export::export_root(destination).join(name).exists()
-        })
-        .map(|(name, path)| Ok(((*name).to_owned(), std::fs::read(path)?)))
-        .collect::<std::io::Result<Vec<_>>>()?;
+    let settings = collect_settings(destination, options.settings_dir.as_deref())?;
+    let inspection = rbl_export::review::inspect_volume(
+        destination,
+        &tracks,
+        &playlists,
+        &tags,
+        &rbl_export::ExportOptions {
+            sync: Some(&sync),
+            settings_files: &settings,
+            ..Default::default()
+        },
+    )?;
+    rbl_export::review::validate_decisions(&inspection, options.decisions.as_ref())?;
     let report = rbl_export::export_cancellable(
         destination,
         &tracks,
@@ -113,6 +143,7 @@ pub fn export(
         &rbl_export::ExportOptions {
             sync: Some(&sync),
             settings_files: &settings,
+            decisions: options.decisions.as_ref(),
             ..Default::default()
         },
         &mut |event| {
@@ -141,6 +172,16 @@ pub fn export(
         failed: report.failed,
         one_library: report.one_library,
     })
+}
+
+/// Whether an interrupted export journal is present. This check never writes.
+pub fn recovery_required(destination: &Path) -> bool {
+    rbl_export::recovery_pending(destination)
+}
+
+/// Explicitly recover an interrupted publication. This operation may modify the volume.
+pub fn recover(destination: &Path) -> Result<()> {
+    Ok(rbl_export::recover(destination)?)
 }
 
 #[cfg(test)]
@@ -252,6 +293,7 @@ mod tests {
             &source,
             &Options {
                 settings_dir: Some(settings.clone()),
+                decisions: None,
             },
             &mut |_| {},
             &|| false,
@@ -267,6 +309,7 @@ mod tests {
             &source,
             &Options {
                 settings_dir: Some(settings),
+                decisions: None,
             },
             &mut |_| {},
             &|| false,
@@ -293,5 +336,22 @@ mod tests {
             Err(Error::Cancelled)
         ));
         assert!(!destination.exists());
+    }
+
+    #[test]
+    fn recovery_status_is_read_only_and_separate_from_export() {
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("USB");
+        std::fs::create_dir(&destination).unwrap();
+        let journal = destination.join(".exportstudio-publication");
+        std::fs::create_dir(&journal).unwrap();
+        std::fs::write(journal.join("fixture"), b"pending").unwrap();
+        let before = std::fs::read(journal.join("fixture")).unwrap();
+        assert!(recovery_required(&destination));
+        let inspection = inspect(&destination, &Source::default(), &Options::default()).unwrap();
+        assert!(inspection.diagnostics.iter().any(|item| item.kind == rb_model::conflict::ConflictKind::RecoveryRequired));
+        assert_eq!(std::fs::read(journal.join("fixture")).unwrap(), before);
+        assert!(matches!(export(&destination, &Source::default(), &Options::default(), &mut |_| {}, &|| false), Err(Error::ReviewRequired(_))));
+        assert_eq!(std::fs::read(journal.join("fixture")).unwrap(), before);
     }
 }

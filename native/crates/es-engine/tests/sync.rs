@@ -49,7 +49,7 @@ fn a_playlist_synced_to_a_stick_reads_back_with_its_tracks() {
     let volume = dir.path().join("STICK");
     std::fs::create_dir_all(&volume).unwrap();
     let phases = RefCell::new(Vec::new());
-    let result = sync_volume(&lib, &volume, &["10".to_owned()], &|p| {
+    let result = sync_volume(&lib, &volume, &["10".to_owned()], None, &|p| {
         if let Progress::Step { phase, .. } = p {
             phases.borrow_mut().push(phase);
         }
@@ -62,6 +62,9 @@ fn a_playlist_synced_to_a_stick_reads_back_with_its_tracks() {
     assert_eq!(device.tracks.len(), 2);
     let mix = device.playlists.iter().find(|p| p.name == "Mix").unwrap();
     assert_eq!(mix.track_ids.len(), 2);
+    let review = es_engine::sync::inspect_volume(&lib, &volume, &["10".to_owned()]).unwrap();
+    assert!(review.diagnostics.is_empty());
+    assert_eq!(review.plan.as_ref().unwrap().tracks, 2);
 
     let manifest_path = volume.join("PIONEER/exportstudio/manifest.json");
     let mut manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
@@ -75,7 +78,7 @@ fn a_playlist_synced_to_a_stick_reads_back_with_its_tracks() {
     let foreign_path = volume.join("PIONEER/rbxport/manifest.json");
     std::fs::create_dir_all(foreign_path.parent().unwrap()).unwrap();
     std::fs::write(&foreign_path, b"foreign application state").unwrap();
-    sync_volume(&lib, &volume, &["10".to_owned()], &|_| {}).unwrap();
+    sync_volume(&lib, &volume, &["10".to_owned()], None, &|_| {}).unwrap();
     let after: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
     for (before, after) in tracks_before.as_array().unwrap().iter().zip(after["tracks"].as_array().unwrap()) {
         assert_eq!(before["export_id"], after["export_id"]);
@@ -93,5 +96,5 @@ fn syncing_nothing_is_refused() {
     let lib = Library::open_live(&path, Guard::Off).unwrap();
     let volume = dir.path().join("STICK");
     std::fs::create_dir_all(&volume).unwrap();
-    assert!(sync_volume(&lib, &volume, &[], &|_| {}).is_err());
+    assert!(sync_volume(&lib, &volume, &[], None, &|_| {}).is_err());
 }

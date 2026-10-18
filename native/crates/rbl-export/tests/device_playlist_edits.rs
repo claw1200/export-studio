@@ -27,6 +27,7 @@ use std::path::Path;
 
 use rbl_export::device_library::{self, Edit, Format};
 use rbl_export::snapshot::Snapshot;
+use rb_model::conflict::{ConflictKind, Severity};
 use rbl_export::{Manifest, SourcePlaylist, SourceTrack};
 
 const DB_ID: u64 = 429;
@@ -142,7 +143,7 @@ fn a_track_added_on_the_stick_stays_until_the_library_playlist_changes() {
     // library's; Techno 1 leaves it but stays on the stick.
     let selection = [lib[0].clone(), lib[1].clone(), lib[3].clone()];
     for step in ["step 4", "step 4, again"] {
-        sync(dest.path(), &selection, &[playlist(P, "P", &[0, 1, 2])]).unwrap_or_else(|e| panic!("{step}: {e}"));
+        sync(dest.path(), &selection, &[playlist(P, "P", &[0, 1, 2])]).unwrap_or_else(|e| panic!("{step}: {e:?}"));
         assert_eq!(on_stick(dest.path(), "P"), titles(&["House 1", "House 2", "House 3"]), "{step}");
         techno_still_on_stick(dest.path(), step);
     }
@@ -209,8 +210,9 @@ fn a_library_entry_removed_on_the_stick_still_stops_the_sync() {
         let id = playlist_id(dest.path(), format, "P");
         device_library::apply(dest.path(), format, &Edit::Remove { playlist: id, tracks: vec![house] }).unwrap();
     }
-    let error = sync(dest.path(), &lib[..2], &[playlist(P, "P", &[0, 1])]).unwrap_err().to_string();
-    assert!(error.contains("playlist 'P' changed on the USB"), "{error}");
+    let error = sync(dest.path(), &lib[..2], &[playlist(P, "P", &[0, 1])]).unwrap_err();
+    let rbl_export::ExportError::ReviewRequired(review) = error else { panic!("expected structured review, got {error:?}") };
+    assert!(review.diagnostics.iter().any(|item| item.kind == ConflictKind::PlaylistChanged && item.severity == Severity::DecisionRequired));
     assert_eq!(on_stick(dest.path(), "P"), titles(&["House 2"]), "nothing was written");
 }
 
@@ -224,8 +226,9 @@ fn a_track_added_to_one_library_only_still_stops_the_sync() {
     first_sync(&lib, dest.path());
     let techno = rekordbox_exports_techno(&lib, dest.path());
     add_on_stick(dest.path(), &[Format::OneLibrary], "P", techno);
-    let error = sync(dest.path(), &lib[..2], &[playlist(P, "P", &[0, 1])]).unwrap_err().to_string();
-    assert!(error.contains("playlist 'P' changed on the USB"), "{error}");
+    let error = sync(dest.path(), &lib[..2], &[playlist(P, "P", &[0, 1])]).unwrap_err();
+    let rbl_export::ExportError::ReviewRequired(review) = error else { panic!("expected structured review, got {error:?}") };
+    assert!(review.diagnostics.iter().any(|item| item.kind == ConflictKind::PlaylistChanged && item.severity == Severity::DecisionRequired));
     let [legacy, one] = on_stick(dest.path(), "P");
     assert_eq!((legacy.len(), one.len()), (2, 3), "nothing was written");
 }

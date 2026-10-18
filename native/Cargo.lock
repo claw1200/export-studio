@@ -660,6 +660,8 @@ dependencies = [
  "es-index",
  "es-tags",
  "image",
+ "rb-model",
+ "rb-usb",
  "serde",
  "serde_json",
  "tempfile",
@@ -1677,6 +1679,7 @@ name = "rb-model"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1809,6 +1812,7 @@ version = "1.9.0"
 dependencies = [
  "blake3",
  "fs2",
+ "rb-model",
  "rbl-analysis",
  "rbl-anlz",
  "rbl-audio",

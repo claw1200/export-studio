@@ -89,7 +89,13 @@ fn resync_repairs_the_old_xml_scale_without_discarding_other_device_edits() {
         source_path: source.path().join(format!("stars-{rating}.mp3")), title: format!("Stars {rating}"), rating,
         analysis: vec![("DAT".into(), rbl_anlz::AnlzBuilder::new().path("/x.mp3").finish())], ..Default::default()
     }).collect::<Vec<_>>();
-    assert!(matches!(rbl_export::export(usb.path(), &tracks, &[]), Err(rbl_export::ExportError::Conflict(_))));
+    let before = rbl_export::snapshot::Snapshot::read(usb.path()).unwrap();
+    let result = rbl_export::export(usb.path(), &tracks, &[]);
+    let Err(rbl_export::ExportError::ReviewRequired(inspection)) = result else { panic!("{result:?}") };
+    assert!(inspection.diagnostics.iter().any(|item|
+        item.kind == rb_model::conflict::ConflictKind::MetadataChanged && item.fields.contains(&"comment".to_owned())
+    ));
+    assert_eq!(rbl_export::snapshot::Snapshot::read(usb.path()).unwrap(), before);
 }
 
 fn raw_one_library_ratings(root: &Path) -> Vec<i64> {

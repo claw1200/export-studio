@@ -209,11 +209,14 @@ fn a_disagreement_the_sync_would_carry_names_what_differs() {
     disagree_on_comment(dest.path(), device_id(dest.path(), 3));
     // Track 3 is not selected: the stick keeps it as it has it.
     let selection = vec![SourcePlaylist { id: 10, name: "Set".into(), track_indices: vec![0, 1], ..Default::default() }];
-    let error = sync_to(dest.path(), &tracks[..2], &selection, DB_ID).unwrap_err().to_string();
-    assert_eq!(
-        error,
-        "USB sync conflict: The USB's two libraries, export.pdb and exportLibrary.db, differ on the comment of track 'Track 3', \
-         so this first sync stopped before changing anything. Include that track in this sync if it is in your library, \
-         or delete it from the USB in rekordbox, then sync again."
-    );
+    let before = Snapshot::read(dest.path()).unwrap();
+    let result = sync_to(dest.path(), &tracks[..2], &selection, DB_ID);
+    let Err(rbl_export::ExportError::ReviewRequired(inspection)) = result else { panic!("{result:?}") };
+    let conflict = inspection.diagnostics.iter().find(|item|
+        item.kind == rb_model::conflict::ConflictKind::CrossFormatDivergence && item.entity_id == "3"
+    ).unwrap();
+    assert_eq!(conflict.severity, rb_model::conflict::Severity::Blocked);
+    assert!(conflict.fields.contains(&"comment".to_owned()));
+    assert!(conflict.allowed_resolutions.is_empty());
+    assert_eq!(Snapshot::read(dest.path()).unwrap(), before);
 }
