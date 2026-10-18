@@ -230,7 +230,13 @@ mod tests {
         assert_eq!(decode::bands(&ex2, "PWV6").unwrap().length, COLOR_PREVIEW);
         for (_, data) in &files {
             assert_eq!(u32::from_be_bytes([data[8], data[9], data[10], data[11]]) as usize, data.len());
+            let parsed = rbl_anlz::parse(data).unwrap();
+            assert!(Tags::parse(parsed.to_bytes()).is_ok());
         }
+        let parsed = rbl_anlz::parse(&files[0].1).unwrap();
+        let actual: Vec<_> = parsed.beat_grid().unwrap().into_iter()
+            .map(|beat| (beat.beat_number, beat.tempo_x100, beat.time_ms)).collect();
+        assert_eq!(actual, beats);
     }
 
     #[test]

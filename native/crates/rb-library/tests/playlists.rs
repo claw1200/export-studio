@@ -1,5 +1,5 @@
-use es_db::fixture::{self, Rows};
-use es_db::{Error, Guard, Library, PlaylistKind};
+use rb_library::fixture::{self, Rows};
+use rb_library::{Error, Guard, Library, PlaylistKind};
 use tempfile::TempDir;
 
 const XML: &str = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<MASTER_PLAYLIST Version=\"3.0.0\" AutomaticSync=\"0\">\n    <PLAYLISTS>\n        <NODE Id=\"A\" ParentId=\"0\" Attribute=\"0\" Timestamp=\"1\" Lib_Type=\"0\" CheckType=\"0\"/>\n        <NODE Id=\"B\" ParentId=\"0\" Attribute=\"1\" Timestamp=\"1\" Lib_Type=\"0\" CheckType=\"0\"/>\n    </PLAYLISTS>\n</MASTER_PLAYLIST>\n";

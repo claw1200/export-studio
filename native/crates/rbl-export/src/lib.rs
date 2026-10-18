@@ -1871,16 +1871,6 @@ fn export_cancellable_inner(
     write_one_library(&staged_db, &one_library_tracks, playlists, &playlist_ids, &export_ids, &artwork_paths, my_tags, settings.as_ref().or(defaults), master_db_id, &before, Some(&existing_database))?;
     report.one_library = true;
 
-    // The DJ's My Settings, as rekordbox puts them on every stick it writes.
-    if let Some(source) = rbl_core::paths::rekordbox_settings_dir() {
-        for name in MY_SETTINGS_FILES {
-            let from = source.join(name);
-            if from.is_file() && !destination.join(root_name).join(name).exists() {
-                copy_staged(&from, &publication.stage().join(root_name).join(name))?;
-            }
-        }
-    }
-
     // The sync record, so rekordbox's Sync Manager opens on this selection
     // too. A playlist that is not the library's has no id to record.
     if let Some(sync) = sync {

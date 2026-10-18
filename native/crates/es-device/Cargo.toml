@@ -1,19 +1,9 @@
 [package]
 name = "es-device"
-description = "USB sticks and drives rekordbox has exported to: finding them and reading their libraries."
-edition.workspace = true
+description = "Export Studio compatibility imports for rb-device."
 version.workspace = true
+edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-fs2 = "0.4"
-plist = "1"
-rbl-onelibrary = { path = "../rbl-onelibrary" }
-rbl-pdb = { path = "../rbl-pdb" }
-rusqlite.workspace = true
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror.workspace = true
-
-[dev-dependencies]
-tempfile = "3"
+rb-device = { path = "../rb-device" }

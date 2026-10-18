@@ -1,13 +1,9 @@
 [package]
 name = "es-db"
-description = "rekordbox master.db: guarded access, live-membership reads and every library write."
-edition.workspace = true
+description = "Export Studio compatibility imports for rb-library."
 version.workspace = true
+edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-rusqlite = { workspace = true, features = ["backup"] }
-thiserror.workspace = true
-flate2 = "1"
-tempfile = "3"
-uuid = { version = "1", features = ["v4"] }
+rb-library = { path = "../rb-library" }

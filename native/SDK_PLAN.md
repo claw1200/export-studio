@@ -40,7 +40,44 @@ fixtures that now require the current schema-v2 helper rather than quietly
 skipping. The source/license audit, Cargo graph assertions, application typecheck
 and production build, and combined release native build pass. Windows and physical
 hardware remain unverified; the existing workspace-wide lint limitations noted
-above are unchanged. Phase 3 has not started.
+above are unchanged.
+
+## Phase 3 Status
+
+Implemented on 2026-10-18. The SDK has six application-independent entry packages:
+
+| Package | Responsibility |
+| --- | --- |
+| `rb-model` | Shared values and caller-supplied source records; only serde dependencies |
+| `rb-storage` | Existing durable publication and recovery implementation |
+| `rb-anlz` | Analysis-file building, decoding and editing |
+| `rb-library` | Snapshot reads and guarded master.db writes; explicit paths |
+| `rb-device` | USB/volume discovery, paths and device-library reads |
+| `rb-usb` | Source-record preparation and recoverable export, progress and results |
+
+The proven `rbl-pdb`, `rbl-onelibrary`, `rbl-anlz`, audio and export engine remain
+lower-level implementation crates. Three `es-*` compatibility crates and core
+re-exports keep existing application and engine imports working without duplicate
+implementations. UI projections, session policy, playback/analysis workflows and
+profiling stay outside the SDK. `rb-library::Library::open` uses the write guard
+by default; explicit snapshot access and the existing fixture APIs are retained.
+
+The USB service does not accept a database/session or expose preparation state.
+Settings paths are explicit and settings are published with the recoverable
+transaction. The schema-v2 helper is a JSON transport over that service. Existing
+on-device manifest and journal names remain unchanged for media compatibility.
+
+Validation: 1,236 tests pass (five ignored), including direct Rust USB use without
+an application session, settings/cancellation regressions, guarded library/device
+tests and ANLZ cross-parser coverage. Dependency gates enforce no SDK-to-app runtime
+edges, a pure model, and independent USB/master-library access. Application and
+release native builds pass. Provenance records unchanged moves and intentional
+derived edits separately. Hardware/Windows coverage and existing workspace-wide
+lint limits remain as above. Phase 4 has not started.
+
+Codec consolidation, a complete conflict taxonomy and externally published/stable
+crate APIs are not claimed by this extraction. Standalone repository extraction
+and a CLI/example remain Phase 5 work.
 
 ## Phases
 

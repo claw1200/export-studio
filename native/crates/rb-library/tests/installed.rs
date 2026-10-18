@@ -1,6 +1,6 @@
 //! Reads a snapshot of the installed library. Run with `cargo test -p es-db --test installed -- --ignored`.
 
-use es_db::{write::DEPENDENTS, Library};
+use rb_library::{write::DEPENDENTS, Library};
 
 fn snapshot() -> Library {
     let path = Library::installed_path().expect("no home directory");

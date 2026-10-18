@@ -1,11 +1,9 @@
 [package]
 name = "es-anlz"
-description = "rekordbox analysis files (ANLZ .DAT, .EXT, .2EX): locating and reading their tags."
-edition.workspace = true
+description = "Export Studio compatibility imports for rb-anlz."
 version.workspace = true
+edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-
-[dev-dependencies]
-tempfile = "3"
+rb-anlz = { path = "../rb-anlz" }

@@ -1,6 +1,6 @@
-use es_db::fixture::{self, Rows};
-use es_db::write::{OnRemove, DEPENDENTS};
-use es_db::{Error, Guard, Library};
+use rb_library::fixture::{self, Rows};
+use rb_library::write::{OnRemove, DEPENDENTS};
+use rb_library::{Error, Guard, Library};
 use tempfile::TempDir;
 
 struct Scene {
@@ -178,7 +178,7 @@ fn a_snapshot_includes_committed_wal_data_and_stays_isolated() {
     let tracks = snap.tracks(Some(&["1".into()])).unwrap();
     assert_eq!(tracks[0].title, "Before");
     assert!(snap.source_changed());
-    assert_eq!(es_db::verify(snap.path()).unwrap().tracks, 3);
+    assert_eq!(rb_library::verify(snap.path()).unwrap().tracks, 3);
 }
 
 #[test]
@@ -207,7 +207,7 @@ fn snapshots_stay_consistent_during_writes_and_checkpoints() {
             let tracks = snap.tracks(None).unwrap();
             assert_eq!(tracks.len(), 3);
             assert!(tracks.iter().all(|track| track.title == tracks[0].title));
-            assert_eq!(es_db::verify(snap.path()).unwrap().tracks, 3);
+            assert_eq!(rb_library::verify(snap.path()).unwrap().tracks, 3);
         }
     });
 }

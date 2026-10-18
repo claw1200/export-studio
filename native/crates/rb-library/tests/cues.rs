@@ -1,5 +1,5 @@
-use es_db::fixture::{self, Rows};
-use es_db::{Error, Guard, Library};
+use rb_library::fixture::{self, Rows};
+use rb_library::{Error, Guard, Library};
 use tempfile::TempDir;
 
 fn scene() -> (TempDir, Library) {

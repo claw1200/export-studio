@@ -12,10 +12,39 @@
   "previousCommitNote": "The previous mixed snapshot declared 1.2.0 but was refreshed in Export Studio commit f4a4568351d27cbb9aa3f9f61bd3a583b9c1d805; its exact upstream revision is unknown.",
   "productionCrates": ["rbl-core", "rbl-pdb", "rbl-anlz", "rbl-audio", "rbl-onelibrary", "rbl-export"],
   "testSupportCrates": ["rbl-db", "rbl-index", "rbl-analysis", "rbl-devices"],
+  "fileRelocations": {
+    "crates/rbl-core/src/durable.rs": "crates/rb-storage/src/durable.rs"
+  },
+  "derivedFiles": {
+    "crates/rbl-core/Cargo.toml": {
+      "upstreamSha256": "f32e4b131513aba2e4c7e3f3acd1b989343bafcf0cfe6ffd1fdf6c39b7496930",
+      "localSha256": "c8d3a7fa587ce1398bd6c56fc4c53769ad73acc3e271a875a2e73de52146169e",
+      "reason": "Depend on the extracted model and storage packages rather than mixing their implementations in core."
+    },
+    "crates/rbl-core/src/lib.rs": {
+      "upstreamSha256": "09de308f44e4fa00e43ecfc7cb2551be528f9e718ad713b1d670397dfea6e685",
+      "localSha256": "20cde72f85552bc9c84f4a222f2041861b840d07c604a1b585fea91e8c4074c4",
+      "reason": "Re-export rb-model primitives and rb-storage durability for existing engine/codec callers."
+    },
+    "crates/rbl-export/src/lib.rs": {
+      "upstreamSha256": "a453ec1bd0ef3f4bec23a5ef6fba889ef6583156e41d830001ae2693f905f18f",
+      "localSha256": "3550b02f685f78d36ba9915a396073f087944b2daa14477af5457c7c9bdfc754",
+      "reason": "Preserve state namespaces and remove automatic host settings discovery; rb-usb stages only explicitly supplied settings."
+    }
+  },
+  "localExtractions": {
+    "baselineCommit": "0354a1b85eda40579c18ac91dfd8c2be11f17ef1",
+    "rb-library": "native/crates/es-db: guarded master.db implementation; profiling removed and discovery separated.",
+    "rb-device": "native/crates/es-device: volume and USB read API; tests now import rb_device.",
+    "rb-anlz": "native/crates/es-anlz: analysis-file API with additional cross-parser coverage.",
+    "rb-model/source": "native/crates/es-usb: source records without the helper's protocol envelope.",
+    "rb-usb/prepare": "native/crates/es-usb: private cue, track and playlist conversion logic."
+  },
   "downstreamChanges": [
     "Keep .exportstudio-publication journal and exportstudio manifest/recovery paths in rbl-export sources and fixtures.",
     "Move all imported crates and upstream test-support crates into native; pin their versions explicitly to 1.9.0 while application crates remain 0.1.0.",
     "Inherit dependency/lint settings from native/Cargo.toml, retaining thin-LTO releases and the native test profile.",
-    "es-usb is an Export Studio helper, not an upstream crate; schemaVersion 2 adopts library-wins cue/grid semantics."
+    "es-usb is now a thin schema-v2 transport over rb-model source records and the rb-usb service.",
+    "Phase 3 extracts model/storage and generic library/device/analysis/USB packages; compatibility crates/re-exports keep existing app and upstream callers working."
   ]
 }

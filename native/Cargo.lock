@@ -601,7 +601,7 @@ dependencies = [
 name = "es-anlz"
 version = "0.1.0"
 dependencies = [
- "tempfile",
+ "rb-anlz",
 ]
 
 [[package]]
@@ -619,11 +619,7 @@ dependencies = [
 name = "es-db"
 version = "0.1.0"
 dependencies = [
- "flate2",
- "rusqlite",
- "tempfile",
- "thiserror 2.0.21",
- "uuid",
+ "rb-library",
 ]
 
 [[package]]
@@ -650,15 +646,7 @@ dependencies = [
 name = "es-device"
 version = "0.1.0"
 dependencies = [
- "fs2",
- "plist",
- "rbl-onelibrary",
- "rbl-pdb",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
+ "rb-device",
 ]
 
 [[package]]
@@ -728,9 +716,8 @@ dependencies = [
 name = "es-usb"
 version = "1.9.0"
 dependencies = [
- "rbl-anlz",
- "rbl-core",
- "rbl-export",
+ "rb-model",
+ "rb-usb",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1652,6 +1639,73 @@ dependencies = [
 ]
 
 [[package]]
+name = "rb-anlz"
+version = "0.1.0"
+dependencies = [
+ "rbl-anlz",
+ "tempfile",
+]
+
+[[package]]
+name = "rb-device"
+version = "0.1.0"
+dependencies = [
+ "fs2",
+ "plist",
+ "rbl-onelibrary",
+ "rbl-pdb",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rb-library"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "rusqlite",
+ "tempfile",
+ "thiserror 2.0.21",
+ "uuid",
+]
+
+[[package]]
+name = "rb-model"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "rb-storage"
+version = "0.1.0"
+dependencies = [
+ "fs2",
+ "rustix",
+ "same-file",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "rb-usb"
+version = "0.1.0"
+dependencies = [
+ "rb-device",
+ "rb-model",
+ "rbl-anlz",
+ "rbl-core",
+ "rbl-export",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "rbl-analysis"
 version = "1.9.0"
 dependencies = [
@@ -1701,14 +1755,10 @@ version = "1.9.0"
 dependencies = [
  "chrono",
  "dirs",
- "fs2",
- "rustix",
- "same-file",
+ "rb-model",
+ "rb-storage",
  "serde",
- "serde_json",
- "tempfile",
  "thiserror 2.0.21",
- "unicode-normalization",
 ]
 
 [[package]]

@@ -166,4 +166,16 @@ mod tests {
     fn refuses_other_files() {
         assert!(replace_tags(b"nope", &[]).is_err());
     }
+
+    #[test]
+    fn path_edits_and_backend_roundtrip_preserve_unknown_sections() {
+        let unknown = other("ZZZZ");
+        let original = file(&[path_tag("?/old.wav"), unknown.clone()]);
+        let patched = replace_tags(&original, &[("PPTH", path_tag("?/new.wav"))]).unwrap();
+        let parsed = rbl_anlz::parse(&patched).unwrap();
+        assert_eq!(parsed.path().as_deref(), Some("?/new.wav"));
+        assert_eq!(parsed.to_bytes(), patched);
+        let local = Tags::parse(parsed.to_bytes()).unwrap();
+        assert_eq!(local.first("ZZZZ").unwrap(), unknown);
+    }
 }

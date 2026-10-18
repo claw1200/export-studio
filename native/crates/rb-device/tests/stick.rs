@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use es_device::{read::read, read::read_kind, LibraryKind};
+use rb_device::{read::read, read::read_kind, LibraryKind};
 use serde_json::json;
 
 fn exporter() -> Option<PathBuf> {
@@ -104,7 +104,7 @@ fn the_older_database_reads_the_same_library() {
     let Some((_dir, volume)) = stick() else { return };
     let one = read_kind(&volume, LibraryKind::OneLibrary).unwrap().unwrap();
     let old = read_kind(&volume, LibraryKind::DeviceLibrary).unwrap().expect("export.pdb is written too");
-    let titles = |d: &es_device::Device| {
+    let titles = |d: &rb_device::Device| {
         let mut t: Vec<_> = d.tracks.iter().map(|t| (t.title.clone(), t.artist.clone(), t.bpm_x100)).collect();
         t.sort();
         t
@@ -123,7 +123,7 @@ fn both_device_libraries_keep_their_artwork_paths() {
         let device = read_kind(&volume, kind).unwrap().unwrap();
         let first = device.tracks.iter().find(|track| track.title == "First").unwrap();
         assert!(!first.artwork.is_empty(), "missing artwork in {kind:?}");
-        let path = es_device::paths::volume_path(&first.artwork, &volume).unwrap();
+        let path = rb_device::paths::volume_path(&first.artwork, &volume).unwrap();
         assert_eq!(std::fs::read(path).unwrap(), b"artwork fixture");
         let second = device.tracks.iter().find(|track| track.title == "Second").unwrap();
         assert!(second.artwork.is_empty());

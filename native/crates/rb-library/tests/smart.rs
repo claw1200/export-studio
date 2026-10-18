@@ -1,5 +1,5 @@
-use es_db::fixture::{self, Rows};
-use es_db::{Guard, Library};
+use rb_library::fixture::{self, Rows};
+use rb_library::{Guard, Library};
 
 fn lib_with(xml: &str) -> (tempfile::TempDir, Library) {
     let dir = tempfile::tempdir().unwrap();

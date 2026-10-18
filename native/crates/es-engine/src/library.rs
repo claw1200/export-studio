@@ -867,9 +867,18 @@ impl Default for LibraryService {
     }
 }
 
+fn open_snapshot(source: &Path) -> es_db::Result<Database> {
+    let started = std::time::Instant::now();
+    let result = Database::open_snapshot(source);
+    if std::env::var_os("EXPORTSTUDIO_PROFILE_LIBRARY_OPEN").is_some() {
+        eprintln!("[library-profile] snapshot source={} total_ms={:.1}", source.display(), started.elapsed().as_secs_f64() * 1000.0);
+    }
+    result
+}
+
 impl LibrarySession {
     pub fn open(source: PathBuf, writable: bool, backed_up: bool) -> Result<Self> {
-        let database = Database::open_snapshot(&source)?;
+        let database = open_snapshot(&source)?;
         let live = if writable {
             Some(Database::open_live(&source, Guard::RefuseWhileRunning)?)
         } else {
@@ -917,7 +926,7 @@ impl LibrarySession {
         }
         if writable {
             if self.snapshot_refresh_pending {
-                self.database = Database::open_snapshot(&self.source)?;
+                self.database = open_snapshot(&self.source)?;
                 self.snapshot_refresh_pending = false;
             }
             let live = Database::open_live(&self.source, self.guard)?;
@@ -927,7 +936,7 @@ impl LibrarySession {
             self.live = None;
             self.writable = false;
             self.snapshot_refresh_pending = true;
-            self.database = Database::open_snapshot(&self.source)?;
+            self.database = open_snapshot(&self.source)?;
             self.snapshot_refresh_pending = false;
         }
         Ok(())
