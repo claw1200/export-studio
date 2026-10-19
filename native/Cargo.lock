@@ -1540,6 +1540,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "unicode-normalization",
+ "winapi-util",
 ]
 
 [[package]]
