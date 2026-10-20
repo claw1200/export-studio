@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/export-studio-header.webp" alt="Export Studio" width="512">
+  <img src="assets/brand/export-studio-header.webp" alt="Export Studio" width="512">
 </p>
 
 # Export Studio - The Export Mode You Actually Want
