@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="export-studio-header.webp" alt="Export Studio" width="512">
+  <img src="assets/export-studio-header.webp" alt="Export Studio" width="512">
 </p>
 
 # Export Studio - The Export Mode You Actually Want
@@ -53,7 +53,7 @@ Export Studio's goal is not just to strip down Rekordbox, but improve on the fea
 
 Collection, playlists, histories, tags, and devices in one responsive window.
 
-![The collection, playlists, and deck in one window.](preview/images/full_app.webp)
+![The collection, playlists, and deck in one window.](assets/app/full_app.webp)
 
 ### High-resolution waveforms
 
@@ -61,13 +61,13 @@ Export Studio adds custom high-resolution waveforms, drawn from the audio, at up
 
 A quality slider changes the number of samples used to draw the waveform. Off uses the waveform rekordbox stored during analysis.
 
-<img src="preview/images/highres_waveform.webp" alt="A zoomed waveform drawn from the audio." height="480">
+<img src="assets/app/highres_waveform.webp" alt="A zoomed waveform drawn from the audio." height="480">
 
 ### Grid editing
 
 Stop spending hours holding down the nudge button to get the beatgrid just right. Export Studio lets you grab the beatgrid and drag it to the position you want, then use nudge to fine-tune it.
 
-<img src="preview/images/grid_edit.webp" alt="Editing a beatgrid on the deck, with nudge, half, and double." height="480">
+<img src="assets/app/grid_edit.webp" alt="Editing a beatgrid on the deck, with nudge, half, and double." height="480">
 
 ### Analysis
 
@@ -75,7 +75,7 @@ Export Studio works out tempo, beatgrid, and key itself. A normal grid fits one 
 
 Tested on vast rekordbox libraries, it almost always matches or improves on rekordbox's analysis for beatgrids, tempo, and key.
 
-<img src="preview/images/analysis.webp" alt="Analysis settings: grid type, BPM range, precision, and key detection." height="480">
+<img src="assets/app/analysis.webp" alt="Analysis settings: grid type, BPM range, precision, and key detection." height="480">
 
 ### USB sync
 
@@ -86,7 +86,7 @@ has no analysis for a track, usable analysis already on the device is retained.
 
 DeviceLibrary and OneLibrary are both written to the device, so that compatibility is preserved across all players.
 
-<img src="preview/images/usb_sync.webp" alt="Choosing which playlists to copy onto a USB stick." height="480">
+<img src="assets/app/usb_sync.webp" alt="Choosing which playlists to copy onto a USB stick." height="480">
 
 ### Backups
 
@@ -95,7 +95,7 @@ Backups are run when you unlock editing, and once a day when something has chang
 > [!NOTE]
 > Audio files are not included in the backup.
 
-<img src="preview/images/backups.webp" alt="Saved library backups, with restore, in Settings." height="480">
+<img src="assets/app/backups.webp" alt="Saved library backups, with restore, in Settings." height="480">
 
 
 ### Editing
@@ -106,7 +106,7 @@ Select multiple tracks to edit their metadata in bulk.
 
 You can also change your preferences to write the changes to the actual file as well as the database.
 
-<img src="preview/images/editing_metadata.webp" alt="Editing a track's title, artist, rating, and colour." height="480">
+<img src="assets/app/editing_metadata.webp" alt="Editing a track's title, artist, rating, and colour." height="480">
 
 ## Development
 
