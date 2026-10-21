@@ -92,6 +92,14 @@ fn publish_volumes(core: &Core) {
     core.emit("usb.volumes", &json!({ "volumes": volumes::list(None) }));
 }
 
+fn sync_review_value(review: &impl serde::Serialize) -> napi::Result<serde_json::Value> {
+    let mut value = json_of(review)?;
+    if let Some(bytes) = value["plan"]["estimatedPeakBytes"].as_u64() {
+        value["plan"]["estimatedPeakBytes"] = json!(bytes as f64);
+    }
+    Ok(value)
+}
+
 fn volume_value(volume: Volume) -> serde_json::Value {
     json!({
         "id": volume.id,
@@ -231,7 +239,7 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
         UsbOp::SyncReview { volume, playlists } => {
             let volume = listed(volume)?;
             let review = service.usb_sync_review(&volume, playlists).map_err(failure)?;
-            json_of(&review)
+            sync_review_value(&review)
         }
         UsbOp::RecoveryStatus(volume) => {
             let volume = listed(volume)?;
@@ -260,6 +268,29 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sync_review_estimates_above_four_gib_are_serialized_as_numbers() {
+        let review = json!({
+            "token": "review-token",
+            "diagnostics": [],
+            "plan": { "tracks": 602, "playlists": 20, "estimatedPeakBytes": 20_231_004_590_u64, "approximate": true },
+        });
+        let value = sync_review_value(&review).unwrap();
+        assert!(value["plan"]["estimatedPeakBytes"].is_f64());
+        assert_eq!(value["plan"]["estimatedPeakBytes"].as_f64(), Some(20_231_004_590.0));
+        assert_eq!(value["token"], review["token"]);
+        assert_eq!(value["diagnostics"], review["diagnostics"]);
+        assert_eq!(value["plan"]["tracks"], 602);
+    }
+
+    #[test]
+    fn sync_review_preserves_absent_estimates() {
+        for plan in [serde_json::Value::Null, json!({ "estimatedPeakBytes": null })] {
+            let review = json!({ "token": "review-token", "diagnostics": [], "plan": plan });
+            assert_eq!(sync_review_value(&review).unwrap(), review);
+        }
+    }
 
     #[test]
     fn volume_capacities_are_serialized_as_numbers() {

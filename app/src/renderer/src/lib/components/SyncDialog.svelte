@@ -117,8 +117,8 @@
 
   $effect(() => {
     const key = reviewKey
-    const ids = [...selectedIds]
-    const playlistIds = [...checked].sort()
+    const ids = untrack(() => [...selectedIds])
+    const playlistIds = untrack(() => [...checked].sort())
     if (!ids.length || pending || !playlistIds.length) {
       inspections = {}
       inspectionErrors = {}
