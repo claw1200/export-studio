@@ -51,12 +51,12 @@ fn update_repoints_the_track_and_copy_makes_a_new_one_with_the_cues() {
     let copy = lib.track_files(&copied.ids[0]).unwrap().unwrap();
     assert!(copy.folder_path.ends_with("Song.flac") && Path::new(&copy.folder_path).is_file());
     assert_eq!(lib.cues(&copied.ids[0]).unwrap().len(), 1);
-    assert_eq!(lib.track_files(&id).unwrap().unwrap().folder_path, wav_file.to_string_lossy());
+    assert_eq!(Path::new(&lib.track_files(&id).unwrap().unwrap().folder_path), wav_file);
 
     let moved = convert_tracks(&mut lib, &share, std::slice::from_ref(&id), &preset, Mode::UpdateDelete, &|_, _, _| {});
     assert!(moved.failed.is_empty(), "{:?}", moved.failed);
     assert_eq!(moved.ids, std::slice::from_ref(&id));
-    assert_eq!(moved.originals, [wav_file.to_string_lossy().into_owned()]);
+    assert_eq!(moved.originals.iter().map(Path::new).collect::<Vec<_>>(), [wav_file.as_path()]);
     assert!(lib.track_files(&id).unwrap().unwrap().folder_path.ends_with("Song (1).flac"));
     assert!(wav_file.is_file(), "the old file is left for the caller to remove");
     drop(dir);

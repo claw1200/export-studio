@@ -61,7 +61,7 @@ fn a_new_file_becomes_a_track_with_its_file_facts() {
 
     let track = s.lib.tracks(None).unwrap().remove(0);
     assert_eq!((track.title.as_str(), track.file_type, track.sample_rate, track.length), ("Some Song", 11, 8000, 1));
-    assert_eq!(track.folder_path, path);
+    assert_eq!(Path::new(&track.folder_path), Path::new(&path));
     let conn = fixture::connect(s.lib.path()).unwrap();
     let (link, device, master, auto): (i64, String, String, String) = conn
         .query_row("SELECT ContentLink, DeviceID, MasterDBID, HotCueAutoLoad FROM djmdContent", [], |r| {

@@ -23,13 +23,17 @@ environment.EXPORTSTUDIO_USB_EXPORT = join(
   'debug',
   process.platform === 'win32' ? 'es-usb.exe' : 'es-usb'
 )
-execFileSync('cargo', ['test', '--locked', '--workspace'], {
-  cwd: sdk,
-  stdio: 'inherit',
-  env: environment
-})
-execFileSync('cargo', ['test', '--locked', '--workspace'], {
-  cwd: native,
-  stdio: 'inherit',
-  env: environment
-})
+// Run every test binary in both workspaces before failing, so one CI run lists every failure.
+let failed = false
+for (const cwd of [sdk, native]) {
+  try {
+    execFileSync('cargo', ['test', '--locked', '--workspace', '--no-fail-fast'], {
+      cwd,
+      stdio: 'inherit',
+      env: environment
+    })
+  } catch {
+    failed = true
+  }
+}
+if (failed) process.exit(1)

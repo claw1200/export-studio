@@ -43,7 +43,7 @@ fn a_moved_file_is_found_and_the_track_pointed_at_it() {
     let moved = relocate(&mut lib, &share, &[(id.clone(), target.clone())]).unwrap();
     assert_eq!(moved, std::slice::from_ref(&id));
     let files = lib.track_files(&id).unwrap().unwrap();
-    assert_eq!(files.folder_path, target);
+    assert_eq!(Path::new(&files.folder_path), Path::new(&target));
     assert_eq!(files.file_name, "old song.WAV");
     assert!(find_missing(&lib, &[id], &dir.path().join("moved")).unwrap().matches.is_empty());
 }
@@ -59,5 +59,5 @@ fn relocating_to_a_missing_file_changes_nothing() {
     let id = import_files(&mut lib, &share, &[file.to_string_lossy().into_owned()], &Options { artwork: false, playlist: None }).unwrap().ids[0].clone();
     let err = relocate(&mut lib, &share, &[(id.clone(), dir.path().join("nope.wav").to_string_lossy().into_owned())]).unwrap_err();
     assert!(err.to_string().contains("Can't find nope.wav"));
-    assert_eq!(lib.track_files(&id).unwrap().unwrap().folder_path, file.to_string_lossy());
+    assert_eq!(Path::new(&lib.track_files(&id).unwrap().unwrap().folder_path), file);
 }
