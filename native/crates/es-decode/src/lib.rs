@@ -35,8 +35,6 @@ impl From<SymphoniaError> for DecodeError {
     }
 }
 
-mod mp3;
-
 pub type Result<T> = std::result::Result<T, DecodeError>;
 
 /// Frames the resampler consumes per pass.
@@ -54,8 +52,9 @@ pub struct Streamer {
     source: Vec<f32>,
     /// Source frames at the front of `source` still to be dropped, after a seek landed early.
     skip: u64,
-    /// Source frames of silence before the file's audio, to start where rekordbox does.
-    lead: u64,
+    /// Source frames rekordbox's timeline runs ahead of the decode: silence to play first when
+    /// positive, decoded frames to drop when negative.
+    lead: i64,
     /// Lead-in frames still to be played.
     lead_left: u64,
     resampler: Option<Box<StereoResampler>>,
@@ -107,13 +106,13 @@ impl Streamer {
             output_rate
         };
         let lead = if params.codec == CODEC_TYPE_MP3 {
-            mp3::lead_in(path)
+            rb_audio::rekordbox_lead_frames(path)
         } else {
             0
         };
         let total = params
             .n_frames
-            .map(|n| scale(n + lead, source_rate, output_rate))
+            .map(|n| scale(n.saturating_add_signed(lead), source_rate, output_rate))
             .unwrap_or(0);
         let resampler = if source_rate == output_rate {
             None
@@ -128,9 +127,9 @@ impl Streamer {
             source_rate,
             output_rate,
             source: Vec::new(),
-            skip: 0,
+            skip: lead.unsigned_abs() * u64::from(lead < 0),
             lead,
-            lead_left: lead,
+            lead_left: u64::try_from(lead).unwrap_or(0),
             resampler,
             ready: Vec::new(),
             ready_at: 0,
@@ -210,8 +209,8 @@ impl Streamer {
         if let Some(resampler) = self.resampler.as_mut() {
             resampler.reset();
         }
-        self.lead_left = self.lead.saturating_sub(source_frame);
-        let source_frame = source_frame.saturating_sub(self.lead);
+        self.lead_left = u64::try_from(self.lead).unwrap_or(0).saturating_sub(source_frame);
+        let source_frame = source_frame.saturating_add_signed(-self.lead);
         let seconds = source_frame as f64 / f64::from(self.source_rate);
         let landed = self.format.seek(
             SeekMode::Accurate,

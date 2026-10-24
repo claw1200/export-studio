@@ -5,6 +5,7 @@ version.workspace = true
 publish.workspace = true
 
 [dependencies]
+rb-audio.workspace = true
 symphonia.workspace = true
 rubato.workspace = true
 thiserror.workspace = true
