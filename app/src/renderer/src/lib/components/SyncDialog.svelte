@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronRight, Eraser, Folder, FolderOpen, Library, ListMusic, RefreshCw, Search, Sparkles, X } from '@lucide/svelte'
+  import { Check, ChevronRight, Eraser, Folder, FolderOpen, Library, ListMusic, LoaderCircle, RefreshCw, Search, Sparkles, X } from '@lucide/svelte'
   import { untrack } from 'svelte'
   import { SvelteSet } from 'svelte/reactivity'
   import { api } from '$lib/api'
@@ -43,11 +43,13 @@
   let confirm = $state<'format' | null>(null)
   let formatId = $state<string | null>(null)
   let batch = $state(false)
+  let ejecting = $state(false)
   let activeDevice = $state<string | null>(null)
   let inspections = $state.raw<Record<string, SyncInspection>>({})
   let inspectionErrors = $state.raw<Record<string, string>>({})
   let resolutions = $state<Record<string, Record<string, SyncResolution>>>({})
   let reviewing = $state(false)
+  const showInformation = new SvelteSet<string>()
 
   const selectedIds = $derived.by(() => {
     const present = new Set(library.devices.map((item) => item.id))
@@ -363,10 +365,11 @@
   }
 
   function phaseLabel(): string {
-    const progress = library.syncProgress
-    if (!progress) return ''
     const device = activeDevice ? library.devices.find((item) => item.id === activeDevice) : null
     const prefix = device && selectedIds.length > 1 ? `${device.name} · ` : ''
+    if (ejecting) return prefix + 'Ejecting device'
+    const progress = library.syncProgress
+    if (!progress) return prefix + 'Preparing sync'
     if (progress.phase === 'copy') {
       const done = progress.done ?? 0
       const total = progress.total ?? 0
@@ -383,7 +386,7 @@
     if (progress.phase === 'writing') return prefix + 'Writing the library'
     if (progress.phase === 'staged' || progress.phase === 'verifying') return prefix + 'Checking the export'
     if (progress.phase === 'publishing') return prefix + 'Publishing'
-    if (progress.phase === 'done') return prefix + 'Sync finished'
+    if (progress.phase === 'done') return prefix + 'Finalizing sync'
     return prefix + 'Syncing'
   }
 
@@ -418,6 +421,8 @@
           const device = library.devices.find((item) => item.id === id)
           if (!device?.ejectable) continue
           try {
+            activeDevice = id
+            ejecting = true
             await library.ejectDevice(id)
             ejected += 1
           } catch (reason) {
@@ -426,8 +431,11 @@
           }
         }
       }
-      notice = ejected ? 'Sync finished and the device was ejected' : 'Sync finished'
+      notice = ejected
+        ? 'Sync finished and the device was ejected'
+        : 'Sync finished'
     } finally {
+      ejecting = false
       activeDevice = null
       batch = false
     }
@@ -562,7 +570,7 @@
   <form
     method="dialog"
     {@attach loadSelection(volumeId, refreshToken)}
-    class="flex max-h-[calc(100vh-48px)] flex-col"
+    class="flex h-[min(760px,calc(100dvh-48px))] flex-col overflow-hidden"
     onsubmit={(e) => {
       if (e.submitter?.getAttribute('value') !== 'confirm') return
       e.preventDefault()
@@ -584,9 +592,9 @@
         <X class="size-4" />
       </button>
     </header>
-    <div class="min-h-0 flex-1 overflow-y-auto p-5">
-    <div class="grid grid-cols-2 items-start gap-4">
-      <section class="min-w-0">
+    <div class="min-h-0 flex-1 overflow-hidden p-5">
+    <div class="grid h-full min-h-0 grid-cols-2 gap-4">
+      <section class="flex min-h-0 min-w-0 flex-col">
         <h2 class="text-[13.5px] font-semibold">Playlists</h2>
         <p class="mt-1 text-[12px] text-muted">
           {#if pending}
@@ -595,7 +603,7 @@
             {stats.picked} of {stats.total} playlists selected
           {/if}
         </p>
-        <label class="mt-3 flex h-8 items-center gap-2 rounded-md border border-line bg-bg px-2">
+        <label class="mt-3 flex h-8 shrink-0 items-center gap-2 rounded-md border border-line bg-bg px-2">
           <Search class="size-3.5 shrink-0 text-faint" />
           <input
             type="search"
@@ -608,7 +616,7 @@
             }}
           />
         </label>
-        <div class="mt-2 max-h-[min(24rem,calc(100vh-280px))] overflow-y-auto rounded-md border border-line py-1">
+        <div class="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-md border border-line py-1">
           {#if needle && !searchHit}
             <p class="px-2 py-1 text-[12.5px] text-faint">No matching playlists</p>
           {:else}
@@ -620,8 +628,8 @@
         </p>
       </section>
 
-      <section class="min-w-0" {@attach loadLibraries(library.devices.map((item) => item.id).join('\n'), deviceToken)}>
-        <div class="flex items-baseline justify-between gap-3">
+      <section class="flex min-h-0 min-w-0 flex-col" {@attach loadLibraries(library.devices.map((item) => item.id).join('\n'), deviceToken)}>
+        <div class="flex shrink-0 items-baseline justify-between gap-3">
           <h2 class="text-[13.5px] font-semibold">Devices</h2>
           <button
             type="button"
@@ -642,7 +650,7 @@
         </p>
 
         {#if library.devices.length}
-          <div class="mt-3 overflow-hidden rounded-md border border-line">
+          <div class="mt-3 min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-md border border-line">
             {#each library.devices as item (item.id)}
               {@const libs = deviceLibraries[item.id]}
               {@const chosen = selectedIds.includes(item.id)}
@@ -713,6 +721,7 @@
                     </p>
                   </div>
                 {/if}
+                <div class="max-h-40 overflow-y-auto overscroll-contain" role="region" aria-label={`Playlists on ${item.name}`}>
                 {#if libs === undefined}
                   <p class="px-2 pb-2 text-[12px] text-faint">Reading this volume</p>
                 {:else if libs.length === 0}
@@ -744,6 +753,7 @@
                     {/if}
                   {/each}
                 {/if}
+                </div>
               </div>
             {/each}
           </div>
@@ -755,8 +765,12 @@
           <p class="mt-2.5 text-[12px] leading-relaxed text-warn">{error}</p>
         {/if}
 
+        <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {#if reviewing}
-          <p class="mt-3 border-t border-line pt-3 text-[12px] text-muted">Reviewing USB changes</p>
+          <p class="mt-3 flex items-center gap-2 border-t border-line pt-3 text-[12px] text-muted" role="status">
+            <LoaderCircle class="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            Reviewing USB changes
+          </p>
         {:else}
           {#each selectedIds as id (id)}
             {@const inspection = inspections[id]}
@@ -766,20 +780,35 @@
                 {deviceName}: {inspectionErrors[id]}
               </p>
             {:else if inspection}
+              {@const informationCount = inspection.diagnostics.filter((item) => item.severity === 'information').length}
+              {@const visibleDiagnostics = inspection.diagnostics.filter((item) => item.severity !== 'information' || showInformation.has(id))}
               <section class="mt-3 border-t border-line pt-3" aria-label={`USB changes on ${deviceName}`}>
-                <h3 class="text-[12.5px] font-semibold">Review changes · {deviceName}</h3>
+                <h3 class="text-[12.5px] font-semibold">Summary · {deviceName}</h3>
                 {#if inspection.plan}
                   <p class="mt-0.5 text-[11px] text-faint">
                     {inspection.plan.tracks} tracks · {inspection.plan.playlists} playlists
                     {inspection.plan.estimatedPeakBytes == null ? ' · space estimate unavailable' : ` · ${inspection.plan.approximate ? 'approximately ' : ''}up to ${formatBytes(inspection.plan.estimatedPeakBytes)}`}
                   </p>
                 {/if}
-                <div class="mt-2 flex flex-col gap-2">
-                  {#if inspection.diagnostics.length === 0}
+                {#if informationCount > 0}
+                  <label class="mt-2 flex items-center gap-2 text-[11px] text-muted">
+                    <input
+                      type="checkbox"
+                      checked={showInformation.has(id)}
+                      onchange={(event) => {
+                        if (event.currentTarget.checked) showInformation.add(id)
+                        else showInformation.delete(id)
+                      }}
+                    />
+                    Show informational changes ({informationCount})
+                  </label>
+                {/if}
+                <div class="mt-2 flex max-h-48 flex-col gap-2 overflow-y-auto overscroll-contain" role="region" aria-label={`Change details for ${deviceName}`}>
+                  {#if visibleDiagnostics.length === 0}
                     <p class="text-[11px] text-muted">No device changes need review.</p>
                   {/if}
-                  {#each inspection.diagnostics as diagnostic (diagnostic.id)}
-                    <div class="border-l-2 {diagnostic.severity === 'blocked' ? 'border-danger' : diagnostic.severity === 'decision_required' ? 'border-warn' : 'border-line'} pl-2.5">
+                  {#each visibleDiagnostics as diagnostic (diagnostic.id)}
+                    <div class="shrink-0 break-words border-l-2 {diagnostic.severity === 'blocked' ? 'border-danger' : diagnostic.severity === 'decision_required' ? 'border-warn' : 'border-line'} pl-2.5">
                       <p class="text-[12px] font-medium">{diagnostic.name || diagnostic.entity}</p>
                       <p class="mt-0.5 text-[11px] leading-relaxed text-muted">{diagnostic.detail}</p>
                       {#if diagnostic.kind === 'recovery_required'}
@@ -823,8 +852,9 @@
             {/if}
           {/each}
         {/if}
+        </div>
 
-        <div class="mt-3 flex flex-col gap-2.5">
+        <div class="mt-3 flex shrink-0 flex-col gap-2.5">
           <button
             value="confirm"
             disabled={locked || pending || reviewing || reviewBlocked || reviewUnresolved || selectedIds.length === 0 || checked.size === 0}
@@ -836,10 +866,15 @@
             <input type="checkbox" class="mt-0.5" bind:checked={ejectAfter} disabled={locked || !canEject} />
             Eject after syncing
           </label>
-          {#if locked}
-            <p class="text-[11px] leading-snug text-muted">{phaseLabel()}</p>
-          {:else if notice}
-            <p class="text-[12.5px] text-ok">{notice}</p>
+          {#if locked || notice}
+            <p class="flex items-start gap-2 text-[12px] leading-snug {locked ? 'text-muted' : 'text-ok'}" role="status" aria-atomic="true">
+              {#if locked}
+                <LoaderCircle class="mt-0.5 size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+              {:else}
+                <Check class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              {/if}
+              <span>{locked ? phaseLabel() : notice}</span>
+            </p>
           {/if}
         </div>
       </section>
