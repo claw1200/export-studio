@@ -176,11 +176,12 @@ pub fn convert_file(source: &Path, preset: &Preset) -> Result<PathBuf> {
 }
 
 fn run_ffmpeg(command: &[String], partial: &Path) -> Result<()> {
-    let mut child = Command::new(&command[0])
-        .args(&command[1..])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
+    let mut ffmpeg = Command::new(&command[0]);
+    ffmpeg.args(&command[1..]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    // CREATE_NO_WINDOW: ffmpeg is a console program and the app has no console to share.
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut ffmpeg, 0x0800_0000);
+    let mut child = ffmpeg
         .spawn()
         .map_err(|e| Error::Other(format!("Could not start ffmpeg: {e}")))?;
     let mut stderr = child.stderr.take();
