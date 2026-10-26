@@ -12,7 +12,8 @@ execFileSync(process.execPath, [join(sdk, 'check-layers.mjs')], {
   env: environment
 })
 
-execFileSync('cargo', ['build', '--locked', '-p', 'es-usb'], {
+// Same profile and feature set as `cargo test --workspace` below, so the native workspace compiles once.
+execFileSync('cargo', ['build', '--locked', '--workspace', '--all-targets', '--profile', 'test'], {
   cwd: native,
   stdio: 'inherit',
   env: environment

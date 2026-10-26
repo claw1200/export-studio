@@ -8,8 +8,13 @@ permissions:
   contents: write
 
 jobs:
+  # Runs alongside the builds; publish waits for it, so nothing is uploaded unless tests pass.
+  test:
+    uses: ./.github/workflows/native.yml
+    secrets: inherit
+
   build-macos:
-    name: Build and upload (macOS)
+    name: Build (macOS)
     runs-on: macos-latest
     env:
       MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
@@ -124,16 +129,6 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            native -> native/target
-            es-rekordbox-sdk -> es-rekordbox-sdk/target
-
-      - name: Test exporter and native engine
-        run: node app/scripts/test-native.mjs
-
       - name: Install app dependencies
         working-directory: app
         run: npm ci
@@ -158,15 +153,15 @@ jobs:
             ./packaging/macos/notarize.sh "${dmg}"
           done
 
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v3
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
         with:
-          files: "app/dist/Export Studio-${{ env.VERSION }}-macOS-*.dmg"
-          fail_on_unmatched_files: true
-          overwrite_existing: true
+          name: macos
+          path: app/dist/Export Studio-${{ env.VERSION }}-macOS-*.dmg
+          if-no-files-found: error
 
   build-windows:
-    name: Build and upload (Windows)
+    name: Build (Windows)
     runs-on: windows-latest
 
     steps:
@@ -198,16 +193,6 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            native -> native/target
-            es-rekordbox-sdk -> es-rekordbox-sdk/target
-
-      - name: Test exporter and native engine
-        run: node app/scripts/test-native.mjs
-
       - name: Install app dependencies
         working-directory: app
         run: npm ci
@@ -218,9 +203,27 @@ jobs:
           npm pkg set "version=${{ env.VERSION }}"
           npm run build:win -- --publish never
 
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: app/dist/Export Studio-${{ env.VERSION }}-Windows-setup.exe
+          if-no-files-found: error
+
+  publish:
+    name: Upload release assets
+    needs: [test, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: Upload release assets
         uses: softprops/action-gh-release@v3
         with:
-          files: "app/dist/Export Studio-${{ env.VERSION }}-Windows-setup.exe"
+          files: dist/*
           fail_on_unmatched_files: true
           overwrite_existing: true

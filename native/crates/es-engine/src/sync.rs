@@ -265,10 +265,12 @@ pub fn sync_volume_with_publisher(
 }
 
 fn run(binary: &Path, job: &Path, on_progress: &dyn Fn(Progress)) -> Result<Value> {
-    let mut child = Command::new(binary)
-        .arg(job)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+    let mut command = Command::new(binary);
+    command.arg(job).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // CREATE_NO_WINDOW: es-usb is a console program and the app has no console to share.
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
+    let mut child = command
         .spawn()
         .map_err(|e| Error::Other(format!("Could not start the USB export program: {e}")))?;
     let stdout = child.stdout.take().ok_or_else(|| Error::Other("no output from the USB export program".into()))?;

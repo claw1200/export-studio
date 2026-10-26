@@ -405,7 +405,7 @@
         const inspection = inspections[id]
         const selectedResolutions = resolutions[id] ?? {}
         const review = inspection && Object.keys(selectedResolutions).length
-          ? { token: inspection.token, resolutions: selectedResolutions }
+          ? { token: inspection.token, resolutions: { ...selectedResolutions } }
           : undefined
         const ok = await library.syncTo(id, playlistIds, review)
         if (!ok) {
