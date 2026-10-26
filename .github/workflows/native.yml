@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
@@ -15,19 +16,40 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_PROFILE_TEST_DEBUG: 0
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
           token: ${{ secrets.SDK_REPO_TOKEN || github.token }}
+      # ReFS Dev Drive: much faster than NTFS + Defender for cargo builds and tempfile-heavy tests.
+      - name: Set up Dev Drive
+        if: runner.os == 'Windows'
+        uses: samypr100/setup-dev-drive@v4
+        with:
+          drive-size: 20GB
+          workspace-copy: true
+          env-mapping: |
+            CARGO_HOME,{{ DEV_DRIVE }}/.cargo
+            TMP,{{ DEV_DRIVE }}/tmp
+            TEMP,{{ DEV_DRIVE }}/tmp
+      - name: Create Dev Drive temp directory
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path "$env:DEV_DRIVE/tmp" | Out-Null
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
+          # Target paths are relative to each workspace root.
           workspaces: |
-            native -> native/target
-            es-rekordbox-sdk -> es-rekordbox-sdk/target
+            ${{ env.DEV_DRIVE_WORKSPACE || github.workspace }}/native -> target
+            ${{ env.DEV_DRIVE_WORKSPACE || github.workspace }}/es-rekordbox-sdk -> target
+          # PR caches can't be restored by main and would evict main's caches.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Test exporter and native integration
+        working-directory: ${{ env.DEV_DRIVE_WORKSPACE || github.workspace }}
         run: node app/scripts/test-native.mjs
