@@ -4,10 +4,12 @@
   import { SvelteSet } from 'svelte/reactivity'
   import { api } from '$lib/api'
   import { getApp } from '$lib/context'
+  import { loadPresets } from '$lib/convertPresetStore'
+  import { FORMAT_NAMES, presetKey, presetLabel } from '$lib/convertPresets'
   import { suspendModal } from '$lib/modal'
   import { buildTree, type TreeNode } from '$lib/library/tree'
   import type { DeviceLibraryView, Volume } from '$lib/types'
-  import type { SyncInspection, SyncResolution } from '../../../../preload/engine'
+  import type { SyncInspection, SyncPlan, SyncResolution } from '../../../../preload/engine'
 
   const COLLECTION_ID = 'collection'
 
@@ -50,6 +52,10 @@
   let resolutions = $state<Record<string, Record<string, SyncResolution>>>({})
   let reviewing = $state(false)
   const showInformation = new SvelteSet<string>()
+  const presets = loadPresets()
+  /** The chosen format by preset key; empty copies every track as it is. */
+  let convertKey = $state('')
+  const convert = $derived(presets.find((preset) => presetKey(preset) === convertKey))
 
   const selectedIds = $derived.by(() => {
     const present = new Set(library.devices.map((item) => item.id))
@@ -110,7 +116,7 @@
     return userTicks ?? baseSelection()
   })
 
-  const reviewKey = $derived(JSON.stringify([selectedIds, [...checked].sort(), refreshToken]))
+  const reviewKey = $derived(JSON.stringify([selectedIds, [...checked].sort(), refreshToken, convertKey]))
   const reviewBlocked = $derived(selectedIds.some((id) => inspections[id]?.diagnostics.some((item) => item.severity === 'blocked')))
   const reviewUnresolved = $derived(selectedIds.some((id) => {
     const inspection = inspections[id]
@@ -121,6 +127,7 @@
     const key = reviewKey
     const ids = untrack(() => [...selectedIds])
     const playlistIds = untrack(() => [...checked].sort())
+    const preset = untrack(() => convert)
     if (!ids.length || pending || !playlistIds.length) {
       inspections = {}
       inspectionErrors = {}
@@ -135,7 +142,7 @@
     resolutions = {}
     void Promise.all(ids.map(async (id) => {
       try {
-        return [id, await api.usbSyncReview(id, playlistIds)] as const
+        return [id, await api.usbSyncReview(id, playlistIds, preset)] as const
       } catch (reason) {
         const message = reason instanceof Error ? reason.message : 'Could not inspect USB changes'
         return [id, message] as const
@@ -364,6 +371,15 @@
     return `${value.toFixed(digits)} ${units[unit]}`
   }
 
+  function planChanges(plan: SyncPlan): string {
+    if (plan.upToDate) return 'Up to date · no changes'
+    const parts: string[] = []
+    if (plan.convert) parts.push(`${plan.convert} to convert`)
+    if (plan.copy) parts.push(`${plan.copy} to copy`)
+    if (plan.remove) parts.push(`${plan.remove} to remove`)
+    return parts.length ? parts.join(' · ') : 'No audio to copy or convert'
+  }
+
   function phaseLabel(): string {
     const device = activeDevice ? library.devices.find((item) => item.id === activeDevice) : null
     const prefix = device && selectedIds.length > 1 ? `${device.name} · ` : ''
@@ -374,6 +390,12 @@
       const done = progress.done ?? 0
       const total = progress.total ?? 0
       return prefix + (total ? `Copying ${done + 1} of ${total}` : 'Copying audio')
+    }
+    if (progress.phase === 'convert') {
+      const done = progress.done ?? 0
+      const total = progress.total ?? 0
+      const name = progress.name ? ` · ${progress.name}` : ''
+      return prefix + (total ? `Converting ${done + 1} of ${total}${name}` : 'Converting audio')
     }
     if (progress.phase === 'import') {
       const done = progress.done ?? 0
@@ -407,7 +429,7 @@
         const review = inspection && Object.keys(selectedResolutions).length
           ? { token: inspection.token, resolutions: { ...selectedResolutions } }
           : undefined
-        const ok = await library.syncTo(id, playlistIds, review)
+        const ok = await library.syncTo(id, playlistIds, review, convert)
         if (!ok) {
           error = library.syncError
           refreshToken += 1
@@ -789,6 +811,7 @@
                     {inspection.plan.tracks} tracks · {inspection.plan.playlists} playlists
                     {inspection.plan.estimatedPeakBytes == null ? ' · space estimate unavailable' : ` · ${inspection.plan.approximate ? 'approximately ' : ''}up to ${formatBytes(inspection.plan.estimatedPeakBytes)}`}
                   </p>
+                  <p class="mt-0.5 text-[11px] text-faint">{planChanges(inspection.plan)}</p>
                 {/if}
                 {#if informationCount > 0}
                   <label class="mt-2 flex items-center gap-2 text-[11px] text-muted">
@@ -855,6 +878,24 @@
         </div>
 
         <div class="mt-3 flex shrink-0 flex-col gap-2.5">
+          <label class="flex flex-col gap-1 text-[12px] text-muted">
+            Convert audio
+            <select
+              class="h-8 rounded-md border border-line bg-bg px-2 text-[12px] text-fg"
+              bind:value={convertKey}
+              disabled={locked}
+            >
+              <option value="">Don't convert</option>
+              {#each presets as preset (presetKey(preset))}
+                <option value={presetKey(preset)}>{presetLabel(preset)}</option>
+              {/each}
+            </select>
+            {#if convert}
+              <span class="text-[11px] leading-snug text-faint">
+                Tracks not already {FORMAT_NAMES[convert.format]} are converted on the USB. Your library isn’t changed.
+              </span>
+            {/if}
+          </label>
           <button
             value="confirm"
             disabled={locked || pending || reviewing || reviewBlocked || reviewUnresolved || selectedIds.length === 0 || checked.size === 0}
