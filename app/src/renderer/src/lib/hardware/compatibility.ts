@@ -53,7 +53,9 @@ function failure(player: Player, facts: AudioFacts): { rank: number; text: strin
   if (facts.encoding === 'float') {
     return { rank: 1, text: facts.bitDepth ? `${facts.bitDepth}-bit float` : '32-bit float' }
   }
-  if (facts.encoding === 'other') return { rank: 2, text: 'Not integer PCM' }
+  if (facts.encoding === 'other') {
+    return { rank: 2, text: facts.kind?.toUpperCase() === 'MP4' ? 'Unknown audio codec' : 'Not integer PCM' }
+  }
   if (facts.channels != null && facts.channels > 0 && facts.channels !== 1 && facts.channels !== 2) {
     return { rank: 3, text: `${facts.channels} channels` }
   }
