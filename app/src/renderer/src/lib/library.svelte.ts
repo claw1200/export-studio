@@ -1,6 +1,7 @@
 import { api } from './api'
 import { browserPreviews } from './browserPreview.svelte'
 import { clearDetailCache } from './deck/session.svelte'
+import { clearWaveCache } from './deck/waves.svelte'
 import { cueStats, newestFirst, type SortKey, sortTracks, type TrackSort } from './library/sort'
 import { buildTree } from './library/tree'
 import { duplicateGroups, rankCopies } from './library/duplicates'
@@ -55,6 +56,7 @@ interface ProbeRecord {
 
 function dropCaches(): void {
   clearDetailCache()
+  clearWaveCache()
   browserPreviews.forget()
 }
 

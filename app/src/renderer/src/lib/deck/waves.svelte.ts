@@ -9,6 +9,11 @@ const PREVIEW_QUALITY = 2
 
 const cache = new Lru<string, WaveSamples>(2)
 
+/** Forget every analysed waveform, e.g. after a track was pointed at a different audio file. */
+export function clearWaveCache(): void {
+  cache.clear()
+}
+
 function usable(samples: WaveSamples | null, bands: boolean): WaveSamples | null {
   return samples && (!bands || samples.bands) ? samples : null
 }
