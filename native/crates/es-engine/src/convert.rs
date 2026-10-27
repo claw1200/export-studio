@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use rb_anlz::decode::{self, Tags};
-use rb_anlz::write::{build_beatgrid, clear_extended_beatgrid, patch_tags, path_tag};
+use rb_anlz::decode::Tags;
+use rb_anlz::write::{patch_tags, path_tag, timeline_patches};
 use rb_library::{ConversionTarget, Library, Stream};
 
 use crate::import::file_type_code;
@@ -210,8 +210,8 @@ fn run_ffmpeg(command: &[String], partial: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Milliseconds that cues and the beat grid move after converting `source` to `target`, from what each file says
-/// about its own delay. `None` when either does not say, and nothing is moved.
+/// Milliseconds that cues, the beat grid and the detail waveforms move after converting `source` to `target`, from
+/// what each file says about its own delay. `None` when either does not say, and nothing is moved.
 #[must_use]
 pub fn delay_offset_ms(source: &Path, target: &Path) -> Option<i64> {
     rb_audio::conversion_shift_ms(source, target)
@@ -222,24 +222,6 @@ pub struct Outcome {
     pub ids: Vec<String>,
     pub originals: Vec<String>,
     pub failed: Vec<(String, String)>,
-}
-
-fn grid_patches(path: &Path, offset_ms: i64) -> Vec<(&'static str, Vec<u8>)> {
-    let Ok(tags) = Tags::read(path) else { return Vec::new() };
-    let mut out = Vec::new();
-    if let (Some(grid), Some(pqtz)) = (decode::beatgrid(&tags), tags.first("PQTZ")) {
-        let keep: Vec<usize> = (0..grid.times.len()).filter(|i| i64::from(grid.times[*i]) + offset_ms >= 0).collect();
-        if !keep.is_empty() {
-            let times: Vec<u32> = keep.iter().map(|i| u32::try_from(i64::from(grid.times[*i]) + offset_ms).unwrap_or(0)).collect();
-            let beats: Vec<u16> = keep.iter().map(|i| grid.beats[*i]).collect();
-            let bpms: Vec<f64> = keep.iter().map(|i| grid.bpms[*i]).collect();
-            out.push(("PQTZ", build_beatgrid(pqtz, &times, &beats, &bpms)));
-        }
-    }
-    if let Some(pqt2) = tags.first("PQT2") {
-        out.push(("PQT2", clear_extended_beatgrid(pqt2)));
-    }
-    out
 }
 
 fn stored_path(path: &Path) -> String {
@@ -281,7 +263,9 @@ fn convert_one(lib: &mut Library, share: &Path, id: &str, preset: &Preset, mode:
                 let bytes = std::fs::read(source_file).map_err(|e| Error::Other(e.to_string()))?;
                 let mut replace = vec![("PPTH", path_tag(&format!("?/{name}")))];
                 if offset != 0 {
-                    replace.extend(grid_patches(source_file, offset));
+                    if let Ok(tags) = Tags::parse(bytes.clone()) {
+                        replace.extend(timeline_patches(&tags, offset));
+                    }
                 }
                 let patched = patch_tags(&bytes, &replace, &[]).map_err(|e| Error::Other(e.to_string()))?;
                 if let Some(parent) = path.parent() {
