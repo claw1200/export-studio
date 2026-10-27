@@ -874,7 +874,13 @@ export class Library {
     return this.devicePlaylists[volumeId]
   }
 
-  async syncTo(volumeId: string, playlistIds: string[], review?: import('../../../preload/engine').SyncDecisions): Promise<boolean> {
+  /** Sync playlists to a USB. With `convert`, tracks not already in its format go onto the USB converted. */
+  async syncTo(
+    volumeId: string,
+    playlistIds: string[],
+    review?: import('../../../preload/engine').SyncDecisions,
+    convert?: ConvertPreset
+  ): Promise<boolean> {
     if (this.syncing) return false
     if (!playlistIds.length) {
       this.syncError = 'Select a playlist to sync'
@@ -884,7 +890,7 @@ export class Library {
     this.syncError = null
     this.syncProgress = { phase: 'reading' }
     try {
-      await api.usbSync(volumeId, playlistIds, review)
+      await api.usbSync(volumeId, playlistIds, review, convert)
       const refreshPlaylists = volumeId in this.devicePlaylists
       const playlists = { ...this.devicePlaylists }
       delete playlists[volumeId]
