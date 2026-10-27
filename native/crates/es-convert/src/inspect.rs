@@ -299,7 +299,11 @@ fn mp4_walk(file: &mut File, end: u64, depth: u32, size: u64, out: &mut Mp4) -> 
 fn mp4(file: &mut File, size: u64) -> Audio {
     let mut out = Mp4::default();
     let _ = file.seek(SeekFrom::Start(0)).and_then(|_| mp4_walk(file, size, 0, size, &mut out));
-    let (kind, encoding) = if &out.codec == b"alac" { ("ALAC", "alac") } else { ("AAC", "aac") };
+    let (kind, encoding) = match &out.codec {
+        b"alac" => ("ALAC", "alac"),
+        b"mp4a" => ("AAC", "aac"),
+        _ => ("MP4", "other"),
+    };
     Audio { kind, sample_rate: out.rate, bit_depth: out.bits, channels: out.channels, bitrate: 0, encoding }
 }
 

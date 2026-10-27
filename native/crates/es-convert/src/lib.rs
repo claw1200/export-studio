@@ -284,6 +284,9 @@ mod tests {
         assert!(matches_format(&file, &wav(24, 96000)));
         assert!(!matches_format(&file, &clean_preset(&json!({"format": "aiff"})).unwrap()));
         assert!(!matches_format(&dir.path().join("missing.wav"), &wav(16, 44100)));
+        let bare_mp4 = dir.path().join("a.m4a");
+        std::fs::write(&bare_mp4, [&[0, 0, 0, 16][..], b"ftypM4A ", &[0; 4]].concat()).unwrap();
+        assert!(!matches_format(&bare_mp4, &clean_preset(&json!({"format": "aac"})).unwrap()), "no codec is not AAC");
     }
 
     #[test]

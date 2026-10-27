@@ -41,9 +41,12 @@ impl AudioConverter for Ffmpeg {
         es_convert::encode(source, destination, &self.preset).map_err(io::Error::other)?;
         let info = es_tags::read(destination).map_err(io::Error::other)?;
         let narrow = |value: i64| u32::try_from(value).unwrap_or(0);
+        let requested = narrow(self.preset.bitrate.unwrap_or(0));
+        // Only MP3 is encoded at a constant bitrate; AAC's is an average the encoder may undershoot.
+        let bitrate = if self.preset.format == "mp3" { requested } else { Some(narrow(info.bitrate)).filter(|b| *b > 0).unwrap_or(requested) };
         Ok(ConvertedAudio {
             offset_ms: es_convert::delay_offset_ms(source, destination).unwrap_or(0),
-            bitrate: self.preset.bitrate.map_or_else(|| narrow(info.bitrate), narrow),
+            bitrate,
             sample_rate: narrow(info.sample_rate),
             bit_depth: u16::try_from(info.bit_depth).unwrap_or(0),
         })
