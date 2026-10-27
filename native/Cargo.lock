@@ -579,6 +579,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "es-convert"
+version = "0.1.0"
+dependencies = [
+ "rb-audio",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "uuid",
+]
+
+[[package]]
 name = "es-deck"
 version = "0.1.0"
 dependencies = [
@@ -605,11 +617,11 @@ name = "es-engine"
 version = "0.1.0"
 dependencies = [
  "es-backup",
+ "es-convert",
  "es-index",
  "es-tags",
  "image",
  "rb-anlz",
- "rb-audio",
  "rb-device",
  "rb-library",
  "rb-model",

@@ -6,11 +6,12 @@ pub mod browse;
 pub mod convert;
 pub mod device_import;
 pub mod import;
-pub mod inspect;
 pub mod library;
 pub mod relocate;
 pub mod place;
 pub mod sync;
+
+pub use es_convert::inspect;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -36,3 +37,9 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+impl From<es_convert::Error> for Error {
+    fn from(error: es_convert::Error) -> Self {
+        Self::Other(error.0)
+    }
+}

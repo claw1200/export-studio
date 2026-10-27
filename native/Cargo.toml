@@ -18,6 +18,7 @@ es-index = { path = "crates/es-index" }
 es-tags = { path = "crates/es-tags" }
 es-engine = { path = "crates/es-engine" }
 es-backup = { path = "crates/es-backup" }
+es-convert = { path = "crates/es-convert" }
 rb-anlz = { path = "../es-rekordbox-sdk/crates/rb-anlz" }
 rb-audio = { path = "../es-rekordbox-sdk/crates/rb-audio" }
 rb-device = { path = "../es-rekordbox-sdk/crates/rb-device" }

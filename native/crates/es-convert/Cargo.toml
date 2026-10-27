@@ -1,0 +1,16 @@
+[package]
+name = "es-convert"
+description = "Encoding audio files to a chosen format with ffmpeg, and what a conversion does to the timeline."
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+rb-audio.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -8,11 +8,11 @@ publish.workspace = true
 [dependencies]
 rb-library.workspace = true
 es-backup.workspace = true
+es-convert.workspace = true
 es-index.workspace = true
 es-tags.workspace = true
 rb-device.workspace = true
 rb-anlz.workspace = true
-rb-audio.workspace = true
 unicode-normalization = "0.1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 thiserror.workspace = true
