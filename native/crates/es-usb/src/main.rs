@@ -1,14 +1,17 @@
 //! Versioned JSON transport for the application-independent USB export service.
 
+mod convert;
+
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use rb_model::source::{Playlist, Source, Tag, Track};
 use serde::Deserialize;
 
-const JOB_SCHEMA_VERSION: u32 = 3;
+const JOB_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, thiserror::Error)]
 enum JobError {
@@ -39,6 +42,9 @@ struct Job {
     playlists: Vec<Playlist>,
     #[serde(default)]
     decisions: Option<rb_model::conflict::Decisions>,
+    /// The format tracks not already in it are converted to on the stick.
+    #[serde(default)]
+    conversion: Option<serde_json::Value>,
 }
 
 fn default_operation() -> String { "export".into() }
@@ -52,7 +58,8 @@ fn emit(value: &serde_json::Value) -> io::Result<()> {
 
 fn phase(stage: &str) -> &'static str {
     match stage {
-        "copying" | "converting" => "copy",
+        "copying" => "copy",
+        "converting" => "convert",
         "database" => "writing",
         "verifying" => "verifying",
         "publishing" => "publishing",
@@ -72,8 +79,18 @@ fn parse_job(bytes: &[u8]) -> Result<Job, JobError> {
     Ok(job)
 }
 
+fn converter(job: &Job) -> Result<Option<Arc<dyn rb_usb::AudioConverter + Send>>, JobError> {
+    let Some(raw) = job.conversion.as_ref().filter(|v| !v.is_null()) else { return Ok(None) };
+    let preset = es_convert::clean_preset(raw).map_err(|error| JobError::Message(error.to_string()))?;
+    if job.operation == "export" {
+        es_convert::ffmpeg_path().map_err(|error| JobError::Message(error.to_string()))?;
+    }
+    Ok(Some(Arc::new(convert::Ffmpeg::new(preset))))
+}
+
 fn run(path: &Path) -> Result<(), JobError> {
     let job = parse_job(&fs::read(path)?)?;
+    let converter = converter(&job)?;
     let source = Source {
         db_id: job.db_id,
         automatic: job.automatic,
@@ -84,6 +101,7 @@ fn run(path: &Path) -> Result<(), JobError> {
     let options = rb_usb::Options {
         settings_dir: job.settings_dir,
         decisions: job.decisions,
+        converter,
     };
     if job.operation == "inspect" {
         let inspection = rb_usb::inspect(&job.destination, &source, &options)?;
@@ -153,6 +171,18 @@ mod tests {
     fn accepts_current_job_schema() {
         let job = serde_json::json!({ "schemaVersion": JOB_SCHEMA_VERSION, "destination": "/tmp", "tracks": [], "playlists": [] });
         assert!(parse_job(job.to_string().as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn a_conversion_is_checked_like_the_library_s() {
+        let job = |conversion: serde_json::Value| {
+            let raw = serde_json::json!({ "schemaVersion": JOB_SCHEMA_VERSION, "operation": "inspect", "destination": "/tmp", "tracks": [], "playlists": [], "conversion": conversion });
+            parse_job(raw.to_string().as_bytes()).and_then(|job| converter(&job))
+        };
+        assert!(job(serde_json::Value::Null).is_ok_and(|c| c.is_none()));
+        let wav = job(serde_json::json!({ "format": "wav", "bitDepth": 16, "sampleRate": 44100 })).ok().flatten();
+        assert_eq!(wav.map(|c| (c.extension().to_owned(), c.profile().to_owned())), Some(("wav".into(), "es-ffmpeg-v1:wav-16-44100".into())));
+        assert!(job(serde_json::json!({ "format": "ogg" })).is_err());
     }
 
     #[test]

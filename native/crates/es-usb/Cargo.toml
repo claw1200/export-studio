@@ -10,6 +10,9 @@ description = "Export Studio command for USB sync."
 workspace = true
 
 [dependencies]
+es-convert.workspace = true
+es-tags.workspace = true
+rb-anlz.workspace = true
 rb-model.workspace = true
 rb-usb.workspace = true
 serde = { workspace = true }

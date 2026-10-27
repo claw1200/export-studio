@@ -10,11 +10,12 @@ use rb_library::Library;
 use rb_model::conflict::{Decisions, Inspection};
 use serde_json::{json, Value};
 
+use crate::convert::Preset;
 use crate::{Error, Result};
 
 /// What rekordbox's own analysis marks a fully analysed track with.
 const ANALYSED: i64 = 105;
-const JOB_SCHEMA_VERSION: u32 = 3;
+const JOB_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone)]
 pub enum Progress {
@@ -126,7 +127,7 @@ fn track_job(share: &Path, track: &ExportTrack) -> Value {
     })
 }
 
-fn job(share: &Path, volume: &Path, bundle: &Bundle, operation: &str, decisions: Option<&Decisions>) -> Result<Value> {
+fn job(share: &Path, volume: &Path, bundle: &Bundle, operation: &str, decisions: Option<&Decisions>, convert: Option<&Preset>) -> Result<Value> {
     let tracks: Vec<Value> = bundle.tracks.iter().map(|t| track_job(share, t)).collect();
     let known: std::collections::HashSet<i64> = bundle.tracks.iter().map(|t| num(&t.id)).collect();
     let mut playlists = Vec::new();
@@ -154,6 +155,9 @@ fn job(share: &Path, volume: &Path, bundle: &Bundle, operation: &str, decisions:
         "settingsDir": find_settings().map(|p| p.to_string_lossy().into_owned()),
         "myTags": tags, "tracks": tracks, "playlists": playlists,
         "decisions": decisions,
+        "conversion": convert.map(|p| json!({
+            "format": p.format, "bitDepth": p.bit_depth, "sampleRate": p.sample_rate, "bitrate": p.bitrate,
+        })),
     }))
 }
 
@@ -198,21 +202,24 @@ impl UsbPublisher for CommandPublisher {
     }
 }
 
-/// Copy the bundle's playlists onto `volume` and publish both device databases.
+/// Copy the bundle's playlists onto `volume` and publish both device databases. With `convert`, tracks not
+/// already in its format go onto the stick converted; the library and its files are left as they are.
 pub fn sync_volume(
     lib: &Library,
     volume: &Path,
     playlist_ids: &[String],
     decisions: Option<&Decisions>,
+    convert: Option<&Preset>,
     on_progress: &dyn Fn(Progress),
 ) -> Result<Outcome> {
     let publisher = CommandPublisher::discover()?;
-    sync_volume_with_publisher(lib, volume, playlist_ids, decisions, &publisher, on_progress)
+    sync_volume_with_publisher(lib, volume, playlist_ids, decisions, convert, &publisher, on_progress)
 }
 
-pub fn inspect_volume(lib: &Library, volume: &Path, playlist_ids: &[String]) -> Result<Inspection> {
+/// What syncing would change. `convert` must be what the sync will be given.
+pub fn inspect_volume(lib: &Library, volume: &Path, playlist_ids: &[String], convert: Option<&Preset>) -> Result<Inspection> {
     let publisher = CommandPublisher::discover()?;
-    inspect_volume_with_publisher(lib, volume, playlist_ids, &publisher)
+    inspect_volume_with_publisher(lib, volume, playlist_ids, convert, &publisher)
 }
 
 pub fn recovery_required(volume: &Path) -> bool {
@@ -227,13 +234,14 @@ pub fn inspect_volume_with_publisher(
     lib: &Library,
     volume: &Path,
     playlist_ids: &[String],
+    convert: Option<&Preset>,
     publisher: &impl UsbPublisher,
 ) -> Result<Inspection> {
     let volume = volume.canonicalize()
         .map_err(|_| Error::Other(format!("Volume is not mounted: {}", volume.display())))?;
     if !volume.is_dir() { return Err(Error::Other(format!("Volume is not mounted: {}", volume.display()))); }
     let bundle = lib.export_bundle(playlist_ids)?;
-    let body = job(&lib.share_dir(), &volume, &bundle, "inspect", None)?;
+    let body = job(&lib.share_dir(), &volume, &bundle, "inspect", None, convert)?;
     let result = publisher.publish(&body, &|_| {})?;
     serde_json::from_value(result.get("inspection").cloned()
         .ok_or_else(|| Error::Other("USB inspection returned no diagnostics".into()))?)
@@ -246,6 +254,7 @@ pub fn sync_volume_with_publisher(
     volume: &Path,
     playlist_ids: &[String],
     decisions: Option<&Decisions>,
+    convert: Option<&Preset>,
     publisher: &impl UsbPublisher,
     on_progress: &dyn Fn(Progress),
 ) -> Result<Outcome> {
@@ -256,7 +265,7 @@ pub fn sync_volume_with_publisher(
         return Err(Error::Other(format!("Volume is not mounted: {}", volume.display())));
     }
     let bundle = lib.export_bundle(playlist_ids)?;
-    let body = job(&lib.share_dir(), &volume, &bundle, "export", decisions)?;
+    let body = job(&lib.share_dir(), &volume, &bundle, "export", decisions, convert)?;
     let result = publisher.publish(&body, on_progress)?;
     let tracks = result.get("tracks").and_then(Value::as_i64).unwrap_or(0);
     let playlists = result.get("playlists").and_then(Value::as_i64).unwrap_or(0);
@@ -337,11 +346,20 @@ mod tests {
     #[test]
     fn usb_job_declares_its_schema_version() {
         let directory = tempfile::tempdir().unwrap();
-        let body = job(directory.path(), directory.path(), &Bundle::default(), "export", None).unwrap();
+        let body = job(directory.path(), directory.path(), &Bundle::default(), "export", None, None).unwrap();
 
         assert_eq!(body["schemaVersion"], JOB_SCHEMA_VERSION);
         assert_eq!(body["operation"], "export");
         assert!(body.get("overwrite").is_none());
+        assert!(body["conversion"].is_null());
+    }
+
+    #[test]
+    fn a_conversion_travels_as_a_preset_es_usb_can_check_again() {
+        let directory = tempfile::tempdir().unwrap();
+        let preset = crate::convert::clean_preset(&json!({ "format": "wav", "bitDepth": 24, "sampleRate": 44100 })).unwrap();
+        let body = job(directory.path(), directory.path(), &Bundle::default(), "inspect", None, Some(&preset)).unwrap();
+        assert_eq!(crate::convert::clean_preset(&body["conversion"]).unwrap(), preset);
     }
 
     #[test]
@@ -360,6 +378,7 @@ mod tests {
             &library,
             &volume,
             &["playlist-1".into()],
+            None,
             None,
             &FakePublisher,
             &|_| {},
@@ -380,7 +399,7 @@ mod tests {
         let library = Library::open_live(&database_path, Guard::Off).unwrap();
         let volume = directory.path().join("STICK");
         std::fs::create_dir_all(&volume).unwrap();
-        let review = inspect_volume_with_publisher(&library, &volume, &["playlist-1".into()], &FakePublisher).unwrap();
+        let review = inspect_volume_with_publisher(&library, &volume, &["playlist-1".into()], None, &FakePublisher).unwrap();
         assert_eq!(review.token, "fixture");
         assert!(review.diagnostics.is_empty());
     }
