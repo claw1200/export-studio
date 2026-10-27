@@ -5,6 +5,10 @@ version.workspace = true
 publish.workspace = true
 
 [dependencies]
+rb-audio.workspace = true
 symphonia.workspace = true
 rubato.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+mp3lame-encoder = "0.2.5"

@@ -16,8 +16,6 @@ const TIMEOUT: Duration = Duration::from_secs(60 * 30);
 const BIT_DEPTHS: [i64; 2] = [16, 24];
 const BITRATES: [i64; 7] = [96, 128, 160, 192, 224, 256, 320];
 const SAMPLE_RATES: [i64; 4] = [44100, 48000, 88200, 96000];
-const MP3_SCAN_BYTES: usize = 1 << 16;
-const MP3_DECODER_DELAY: i64 = 529;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -212,96 +210,11 @@ fn run_ffmpeg(command: &[String], partial: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Samples an MP3 decoder that ignores gapless data adds at the start, and the sample rate, read from the
-/// encoder delay in the LAME/Xing Info tag. `None` when the file has no such tag.
-fn mp3_delay(path: &Path) -> Option<(i64, i64)> {
-    let mut file = std::fs::File::open(path).ok()?;
-    let mut data = vec![0u8; MP3_SCAN_BYTES];
-    let mut filled = 0;
-    while filled < data.len() {
-        let n = file.read(&mut data[filled..]).ok()?;
-        if n == 0 {
-            break;
-        }
-        filled += n;
-    }
-    data.truncate(filled);
-    let mut start = 0usize;
-    if data.starts_with(b"ID3") && data.len() >= 10 {
-        let size = (usize::from(data[6]) << 21) | (usize::from(data[7]) << 14) | (usize::from(data[8]) << 7) | usize::from(data[9]);
-        start = 10 + size + if data[5] & 0x10 != 0 { 10 } else { 0 };
-        if start >= data.len() {
-            use std::io::{Seek, SeekFrom};
-            file.seek(SeekFrom::Start(start as u64)).ok()?;
-            data.clear();
-            data.resize(MP3_SCAN_BYTES, 0);
-            let mut got = 0;
-            while got < data.len() {
-                let n = file.read(&mut data[got..]).ok()?;
-                if n == 0 {
-                    break;
-                }
-                got += n;
-            }
-            data.truncate(got);
-            start = 0;
-        }
-    }
-    let last = data.len().saturating_sub(4).min(start + 4096);
-    let (pos, (side, rate, crc)) = (start..last).find_map(|p| frame_header(&data, p).map(|h| (p, h)))?;
-    let tag = pos + 4 + if crc { 2 } else { 0 } + side;
-    if !matches!(data.get(tag..tag + 4)?, b"Xing" | b"Info") {
-        return None;
-    }
-    let flags = u32::from_be_bytes(data.get(tag + 4..tag + 8)?.try_into().ok()?);
-    let lame = tag + 8 + if flags & 1 != 0 { 4 } else { 0 } + if flags & 2 != 0 { 4 } else { 0 } + if flags & 4 != 0 { 100 } else { 0 } + if flags & 8 != 0 { 4 } else { 0 };
-    if !matches!(data.get(lame..lame + 4)?, b"LAME" | b"Lavc" | b"Lavf") || lame + 24 > data.len() {
-        return None;
-    }
-    let packed = (i64::from(data[lame + 21]) << 16) | (i64::from(data[lame + 22]) << 8) | i64::from(data[lame + 23]);
-    let (delay, padding) = (packed >> 12, packed & 0xFFF);
-    if delay == 0 && padding == 0 {
-        return None;
-    }
-    Some((delay + MP3_DECODER_DELAY, i64::from(rate)))
-}
-
-/// Side info size, sample rate and whether a CRC follows, of the MPEG audio frame header at `pos`.
-fn frame_header(data: &[u8], pos: usize) -> Option<(usize, u32, bool)> {
-    let h = data.get(pos..pos + 4)?;
-    if h[0] != 0xFF || h[1] & 0xE0 != 0xE0 {
-        return None;
-    }
-    let version = (h[1] >> 3) & 3;
-    let layer = (h[1] >> 1) & 3;
-    let rate_index = usize::from((h[2] >> 2) & 3);
-    if version == 1 || layer != 1 || rate_index == 3 {
-        return None;
-    }
-    let base = [44100u32, 48000, 32000][rate_index];
-    let rate = base / if version == 3 { 1 } else if version == 2 { 2 } else { 4 };
-    let mono = (h[3] >> 6) == 3;
-    let side = match (version == 3, mono) {
-        (true, true) => 17,
-        (true, false) => 32,
-        (false, true) => 9,
-        (false, false) => 17,
-    };
-    Some((side, rate, h[1] & 1 == 0))
-}
-
-fn mp3_delay_ms(path: &Path) -> i64 {
-    if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("mp3")) {
-        return 0;
-    }
-    mp3_delay(path).map_or(0, |(samples, rate)| (samples as f64 * 1000.0 / rate as f64).round_ties_even() as i64)
-}
-
-/// Milliseconds that cues and the beat grid move after converting `source` to `target`: a decoder that ignores
-/// the LAME tag plays an MP3 later by its encoder delay plus the decoder delay, which ffmpeg trims.
+/// Milliseconds that cues and the beat grid move after converting `source` to `target`, from what each file says
+/// about its own delay. `None` when either does not say, and nothing is moved.
 #[must_use]
-pub fn delay_offset_ms(source: &Path, target: &Path) -> i64 {
-    mp3_delay_ms(target) - mp3_delay_ms(source)
+pub fn delay_offset_ms(source: &Path, target: &Path) -> Option<i64> {
+    rb_audio::conversion_shift_ms(source, target)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -339,7 +252,7 @@ fn convert_one(lib: &mut Library, share: &Path, id: &str, preset: &Preset, mode:
     let target = convert_file(&source, preset)?;
     let done = (|| -> Result<String> {
         let info = es_tags::read(&target).map_err(|e| Error::Other(e.to_string()))?;
-        let offset = delay_offset_ms(&source, &target);
+        let offset = delay_offset_ms(&source, &target).unwrap_or(0);
         let nonzero = |v: i64| (v != 0).then_some(v);
         let old_files: Vec<PathBuf> = files.analysis_path.as_deref().map(|rel| rb_anlz::files(share, rel)).unwrap_or_default().into_iter().filter(|p| p.is_file()).collect();
         let carries = old_files.iter().any(|p| p.extension().is_some_and(|e| e == "DAT"));
@@ -453,22 +366,5 @@ mod tests {
         std::fs::write(dir.path().join("a.flac"), b"x").unwrap();
         assert_eq!(output_path(&source, ".flac"), dir.path().join("a (1).flac"));
         assert_eq!(output_path(&source, ".wav"), dir.path().join("a (1).wav"));
-    }
-
-    #[test]
-    fn an_info_tag_gives_the_encoder_delay() {
-        let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
-        frame.extend(vec![0u8; 32]);
-        frame.extend(b"Info");
-        frame.extend(0u32.to_be_bytes());
-        frame.extend(b"LAME");
-        frame.extend(vec![0u8; 17]);
-        frame.extend([0x00, 0x24, 0x00]);
-        frame.extend(vec![0u8; 64]);
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("a.mp3");
-        std::fs::write(&path, &frame).unwrap();
-        assert_eq!(mp3_delay(&path), Some((2 + MP3_DECODER_DELAY, 44100)));
-        assert_eq!(delay_offset_ms(&dir.path().join("x.wav"), &path), (((2 + MP3_DECODER_DELAY) as f64) * 1000.0 / 44100.0).round() as i64);
     }
 }

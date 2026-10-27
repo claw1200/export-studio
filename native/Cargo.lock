@@ -593,6 +593,8 @@ dependencies = [
 name = "es-decode"
 version = "0.1.0"
 dependencies = [
+ "mp3lame-encoder",
+ "rb-audio",
  "rubato",
  "symphonia",
  "thiserror 2.0.21",
@@ -607,6 +609,7 @@ dependencies = [
  "es-tags",
  "image",
  "rb-anlz",
+ "rb-audio",
  "rb-device",
  "rb-library",
  "rb-model",
@@ -1496,6 +1499,13 @@ dependencies = [
 [[package]]
 name = "rb-anlz"
 version = "0.1.0"
+
+[[package]]
+name = "rb-audio"
+version = "0.1.0"
+dependencies = [
+ "rbl-core",
+]
 
 [[package]]
 name = "rb-device"
