@@ -552,4 +552,158 @@ mod tests {
             "frame {k}: {got} vs {expected}"
         );
     }
+
+    const MP3_FRAME: usize = 1152;
+
+    /// A rising tone, so no two stretches of it look alike and a misplaced frame shows.
+    fn sweep(frame: u32, start: f64, rise: f64) -> f32 {
+        let t = f64::from(frame);
+        (t * start + t * t * rise).sin() as f32
+    }
+
+    /// A second of stereo audio as CBR 128 kbit/s MP3. `tag` adds a LAME Info frame in front.
+    fn encode(mode: mp3lame_encoder::Mode, tag: bool) -> Vec<u8> {
+        use mp3lame_encoder::{Bitrate, Builder, DualPcm, FlushNoGap};
+        let mut encoder = Builder::new()
+            .unwrap()
+            .with_num_channels(2)
+            .unwrap()
+            .with_sample_rate(44_100)
+            .unwrap()
+            .with_brate(Bitrate::Kbps128)
+            .unwrap()
+            .with_mode(mode)
+            .unwrap()
+            .with_to_write_vbr_tag(tag)
+            .unwrap()
+            .build()
+            .unwrap();
+        let left: Vec<f32> = (0..44_100).map(|i| sweep(i, 0.01, 3e-6) * 0.5).collect();
+        let right: Vec<f32> = (0..44_100).map(|i| sweep(i, 0.02, 2e-6) * 0.4).collect();
+        let mut bytes = Vec::with_capacity(mp3lame_encoder::max_required_buffer_size(left.len()));
+        encoder.encode_to_vec(DualPcm { left: &left, right: &right }, &mut bytes).unwrap();
+        bytes.reserve(7200);
+        encoder.flush_to_vec::<FlushNoGap>(&mut bytes).unwrap();
+        if tag {
+            let mut info = Vec::with_capacity(encoder.lame_tag_size());
+            encoder.lame_tag_encode_to_vec(&mut info).unwrap();
+            bytes[..info.len()].copy_from_slice(&info);
+        }
+        bytes
+    }
+
+    /// Marks every frame after the first as joint stereo with no joint coding, which decodes exactly as
+    /// stereo does, so rekordbox's frame map restarts at the second frame.
+    fn joint_after_first(mut bytes: Vec<u8>) -> Vec<u8> {
+        let mut at = 0;
+        let mut first = true;
+        while at + 4 <= bytes.len() {
+            let padding = usize::from((bytes[at + 2] >> 1) & 1);
+            if !first {
+                bytes[at + 3] = (bytes[at + 3] & 0x3F) | 0x40;
+            }
+            first = false;
+            at += 144 * 128_000 / 44_100 + padding;
+        }
+        bytes
+    }
+
+    fn mp3(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("es-decode-{}-{name}.mp3", std::process::id()));
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    fn read_all(path: &Path, rate: u32) -> (u64, Vec<f32>) {
+        let mut s = Streamer::open(path, rate).unwrap();
+        let total = s.total_frames();
+        let mut out = vec![0.0; 2 * 4096];
+        let mut all = Vec::new();
+        loop {
+            let n = s.fill(&mut out).unwrap();
+            if n == 0 {
+                return (total, all);
+            }
+            all.extend_from_slice(&out[..n * 2]);
+        }
+    }
+
+    fn left(samples: &[f32]) -> Vec<f32> {
+        samples.chunks_exact(2).map(|f| f[0]).collect()
+    }
+
+    fn close(a: &[f32], b: &[f32], tolerance: f32, what: &str) {
+        assert_eq!(a.len(), b.len(), "{what}: length");
+        let worst = a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0, f32::max);
+        assert!(worst <= tolerance, "{what}: differs by {worst}");
+    }
+
+    #[test]
+    fn a_negative_lead_drops_the_first_frame_and_keeps_the_rest_in_place() {
+        use mp3lame_encoder::Mode;
+        let plain = mp3("plain", &encode(Mode::Stereo, false));
+        let negative = mp3("negative", &joint_after_first(encode(Mode::Stereo, false)));
+        assert_eq!(rb_audio::rekordbox_lead_frames(&plain), 0);
+        assert_eq!(rb_audio::rekordbox_lead_frames(&negative), -(MP3_FRAME as i64));
+
+        let (_, whole) = read_all(&plain, 44_100);
+        let (_, trimmed) = read_all(&negative, 44_100);
+        assert_eq!(trimmed.len(), whole.len() - 2 * MP3_FRAME);
+        assert_eq!(trimmed, whole[2 * MP3_FRAME..]);
+
+        let mut s = Streamer::open(&negative, 44_100).unwrap();
+        let mut reference = Streamer::open(&plain, 44_100).unwrap();
+        for target in [0usize, 12_345, 30_000] {
+            assert_eq!(s.seek(target as u64).unwrap(), target as u64);
+            let mut out = vec![0.0; 2 * 256];
+            assert_eq!(s.fill(&mut out).unwrap(), 256);
+            assert_eq!(s.position(), target as u64 + 256);
+            // Seeking an MP3 with no index is inexact, so the check is that the same decoded frame is reached.
+            reference.seek((target + MP3_FRAME) as u64).unwrap();
+            let mut expected = vec![0.0; 2 * 256];
+            reference.fill(&mut expected).unwrap();
+            assert_eq!(out, expected, "seek to {target}");
+        }
+        s.seek(0).unwrap();
+        let mut start = vec![0.0; 2 * 256];
+        s.fill(&mut start).unwrap();
+        assert_eq!(start, trimmed[..2 * 256]);
+    }
+
+    #[test]
+    fn a_negative_lead_stays_aligned_when_resampled() {
+        use mp3lame_encoder::Mode;
+        let plain = mp3("plain-48", &encode(Mode::Stereo, false));
+        let negative = mp3("negative-48", &joint_after_first(encode(Mode::Stereo, false)));
+        let (_, whole) = read_all(&plain, 48_000);
+        let (_, trimmed) = read_all(&negative, 48_000);
+        // 1,152 frames at 44.1 kHz is 1,254.04 at 48 kHz.
+        let shift = 1_254;
+        let (whole, trimmed) = (left(&whole), left(&trimmed));
+        assert!((whole.len() as i64 - shift as i64 - trimmed.len() as i64).abs() <= 2);
+        close(&trimmed[2_000..20_000], &whole[2_000 + shift..20_000 + shift], 0.01, "resampled");
+
+        let mut s = Streamer::open(&negative, 48_000).unwrap();
+        let mut reference = Streamer::open(&plain, 48_000).unwrap();
+        for target in [0usize, 24_000] {
+            s.seek(target as u64).unwrap();
+            let mut out = vec![0.0; 2 * 512];
+            assert_eq!(s.fill(&mut out).unwrap(), 512);
+            // The same source frame in the unshifted file, which sits `shift` output frames later.
+            reference.seek((target + shift) as u64).unwrap();
+            let mut expected = vec![0.0; 2 * 512];
+            reference.fill(&mut expected).unwrap();
+            assert_eq!(out, expected, "seek to {target}");
+        }
+    }
+
+    #[test]
+    fn a_positive_lead_reports_the_decoded_length() {
+        use mp3lame_encoder::Mode;
+        let path = mp3("tagged", &encode(Mode::JointStereo, true));
+        assert_eq!(rb_audio::rekordbox_lead_frames(&path), MP3_FRAME as i64);
+        let (total, all) = read_all(&path, 44_100);
+        assert_eq!(total as usize, all.len() / 2);
+        assert!(all[..2 * MP3_FRAME].iter().all(|&s| s == 0.0));
+    }
 }

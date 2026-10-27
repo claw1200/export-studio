@@ -593,6 +593,7 @@ dependencies = [
 name = "es-decode"
 version = "0.1.0"
 dependencies = [
+ "mp3lame-encoder",
  "rb-audio",
  "rubato",
  "symphonia",
