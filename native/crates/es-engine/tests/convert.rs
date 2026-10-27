@@ -82,6 +82,7 @@ fn a_delay_moves_the_grid_and_the_detail_waveforms() {
     let relative = lib.track_files(&id).unwrap().unwrap().analysis_path.unwrap();
     let read = |suffix: &str| Tags::read(&rb_anlz::file(&share, &relative, suffix).unwrap()).unwrap();
     let before = decode::rgb(&read("EXT")).unwrap();
+    let before_bands = decode::bands(&read("2EX"), "PWV7").unwrap();
 
     let preset = clean_preset(&json!({ "format": "mp3", "bitrate": 128 })).unwrap();
     let out = convert_tracks(&mut lib, &share, std::slice::from_ref(&id), &preset, Mode::Update, &|_, _, _| {});
@@ -94,8 +95,13 @@ fn a_delay_moves_the_grid_and_the_detail_waveforms() {
     let columns = usize::try_from((offset * 150 + 500) / 1000).unwrap();
     let after = decode::rgb(&read("EXT")).unwrap();
     assert_eq!(after.length, before.length + columns);
+    assert!(after.heights[..columns].iter().chain(&after.colors[..columns * 3]).all(|v| *v == 0), "the new start is silent");
     assert_eq!(after.heights[columns..], before.heights[..]);
-    assert_eq!(decode::bands(&read("2EX"), "PWV7").unwrap().length, before.length + columns);
+    assert_eq!(after.colors[columns * 3..], before.colors[..]);
+    let bands = decode::bands(&read("2EX"), "PWV7").unwrap();
+    assert_eq!(bands.length, before_bands.length + columns);
+    assert!(bands.bands[..columns * 3].iter().all(|v| *v == 0), "the new start is silent");
+    assert_eq!(bands.bands[columns * 3..], before_bands.bands[..]);
 }
 
 #[test]
