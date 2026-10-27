@@ -709,6 +709,7 @@ impl LibraryService {
         volume: &Path,
         playlist_ids: &[String],
         decisions: Option<&rb_model::conflict::Decisions>,
+        convert: Option<&crate::convert::Preset>,
         emit: &impl Fn(ServiceEvent),
     ) -> Result<crate::sync::Outcome> {
         let database = self
@@ -716,7 +717,7 @@ impl LibraryService {
             .as_ref()
             .ok_or_else(|| crate::Error::Other("Library not open".into()))?
             .database();
-        crate::sync::sync_volume(database, volume, playlist_ids, decisions, &|progress| {
+        crate::sync::sync_volume(database, volume, playlist_ids, decisions, convert, &|progress| {
             emit(ServiceEvent::UsbSyncProgress(progress));
         })
     }
@@ -725,13 +726,14 @@ impl LibraryService {
         &self,
         volume: &Path,
         playlist_ids: &[String],
+        convert: Option<&crate::convert::Preset>,
     ) -> Result<rb_model::conflict::Inspection> {
         let database = self
             .session
             .as_ref()
             .ok_or_else(|| crate::Error::Other("Library not open".into()))?
             .database();
-        crate::sync::inspect_volume(database, volume, playlist_ids)
+        crate::sync::inspect_volume(database, volume, playlist_ids, convert)
     }
 
     pub fn usb_recovery_required(&self, volume: &Path) -> bool {

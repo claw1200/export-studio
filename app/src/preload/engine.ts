@@ -18,10 +18,32 @@ export interface SyncDiagnostic {
   allowedResolutions: SyncResolution[]
 }
 
+export interface SyncPlan {
+  tracks: number
+  playlists: number
+  estimatedPeakBytes: number | null
+  approximate: boolean
+  /** Selected tracks copied as they are, converted, or left as the stick has them. */
+  copy: number
+  convert: number
+  keep: number
+  /** Tracks the sync takes off the stick. */
+  remove: number
+  /** The stick already holds exactly what the sync would write. */
+  upToDate: boolean
+}
+
 export interface SyncInspection {
   token: string
   diagnostics: SyncDiagnostic[]
-  plan: { tracks: number; playlists: number; estimatedPeakBytes: number | null; approximate: boolean } | null
+  plan: SyncPlan | null
+}
+
+export interface SyncConversion {
+  format: string
+  sampleRate?: number
+  bitDepth?: number
+  bitrate?: number
 }
 
 export interface SyncDecisions {
@@ -118,8 +140,8 @@ export interface EngineCommandParams {
   'track.relocate': { moves: Record<string, string> }
   'usb.eject': { volumeId: string }
   'usb.format': { volumeId: string }
-  'usb.syncReview': { volumeId: string; playlistIds: string[] }
-  'usb.sync': { volumeId: string; playlistIds: string[]; review?: SyncDecisions }
+  'usb.syncReview': { volumeId: string; playlistIds: string[]; convert?: SyncConversion }
+  'usb.sync': { volumeId: string; playlistIds: string[]; review?: SyncDecisions; convert?: SyncConversion }
   'usb.recoveryStatus': { volumeId: string }
   'usb.recover': { volumeId: string }
   'usb.import': { volumeId: string; folder?: string | null; policy?: PlaylistPolicy }

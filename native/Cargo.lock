@@ -682,6 +682,9 @@ dependencies = [
 name = "es-usb"
 version = "1.9.0"
 dependencies = [
+ "es-convert",
+ "es-tags",
+ "rb-anlz",
  "rb-model",
  "rb-usb",
  "serde",

@@ -24,8 +24,8 @@ pub(crate) enum UsbOp {
     Media(String),
     ImportPreview { volume: String, folder: Option<String>, policy: Option<String> },
     Import { volume: String, folder: Option<String>, policy: Option<String> },
-    SyncReview { volume: String, playlists: Vec<String> },
-    Sync { volume: String, playlists: Vec<String>, decisions: Option<serde_json::Value> },
+    SyncReview { volume: String, playlists: Vec<String>, convert: Option<serde_json::Value> },
+    Sync { volume: String, playlists: Vec<String>, decisions: Option<serde_json::Value>, convert: Option<serde_json::Value> },
     RecoveryStatus(String),
     Recover(String),
 }
@@ -98,6 +98,11 @@ fn sync_review_value(review: &impl serde::Serialize) -> napi::Result<serde_json:
         value["plan"]["estimatedPeakBytes"] = json!(bytes as f64);
     }
     Ok(value)
+}
+
+/// The format a sync converts to; none when the caller sent none.
+fn preset(raw: Option<&Value>) -> napi::Result<Option<es_engine::convert::Preset>> {
+    raw.filter(|v| !v.is_null()).map(es_engine::convert::clean_preset).transpose().map_err(failure)
 }
 
 fn volume_value(volume: Volume) -> serde_json::Value {
@@ -236,9 +241,10 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
                 "failed": outcome.failed.iter().map(|(title, error)| json!({ "title": title, "error": error })).collect::<Vec<_>>(),
             }))
         }
-        UsbOp::SyncReview { volume, playlists } => {
+        UsbOp::SyncReview { volume, playlists, convert } => {
             let volume = listed(volume)?;
-            let review = service.usb_sync_review(&volume, playlists).map_err(failure)?;
+            let convert = preset(convert.as_ref())?;
+            let review = service.usb_sync_review(&volume, playlists, convert.as_ref()).map_err(failure)?;
             sync_review_value(&review)
         }
         UsbOp::RecoveryStatus(volume) => {
@@ -252,11 +258,12 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
             publish_volumes(core);
             Ok(json!({ "recovered": true }))
         }
-        UsbOp::Sync { volume, playlists, decisions } => {
+        UsbOp::Sync { volume, playlists, decisions, convert } => {
             let volume = listed(volume)?;
             let emit = |event| core.emit_service_event(event);
             let decisions = decisions.as_ref().map(|value| serde_json::from_value(value.clone())).transpose().map_err(failure)?;
-            let result = service.usb_sync(&volume, playlists, decisions.as_ref(), &emit);
+            let convert = preset(convert.as_ref())?;
+            let result = service.usb_sync(&volume, playlists, decisions.as_ref(), convert.as_ref(), &emit);
             core.devices.forget(&volume);
             let result = result.map_err(failure)?;
             publish_volumes(core);
