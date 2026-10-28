@@ -175,9 +175,13 @@
       if (type !== 'playlist' || !library.writable) return
       const target = playlistMoveTarget(e, node)
       if (!target) return
+      const key = `${type}:${node.id}`
+      if (target.placement === 'inside' && node.kind === 'folder' && !expanded.has(key)) {
+        expandSoon(key, () => expanded.add(key))
+      }
       e.preventDefault()
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-      treeDrop = { key: `${type}:${node.id}`, placement: target.placement }
+      treeDrop = { key, placement: target.placement }
       return
     }
     const files = !library.dragging && isFileDrag(e)
