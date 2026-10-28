@@ -377,6 +377,11 @@ impl LibraryService {
         self.playlist_tracks(id)
     }
 
+    pub fn playlist_tree_move(&mut self, id: &str, parent: &str, index: usize) -> Result<Vec<es_index::Node>> {
+        self.edit(|tx| tx.move_playlist(id, parent, index))?;
+        self.playlists()
+    }
+
     pub fn playlist_create(
         &mut self,
         name: &str,
@@ -1240,6 +1245,22 @@ mod tests {
 
         assert_eq!(ids, ["track-1"]);
         assert_eq!(service.playlist_tracks("playlist-1").unwrap(), ["track-1"]);
+    }
+
+    #[test]
+    fn playlist_tree_move_refreshes_the_tree() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = fixture::build(directory.path(), 1).unwrap();
+        {
+            let connection = fixture::connect(&path).unwrap();
+            Rows(&connection).playlist("playlist-1", "Test playlist", 0).unwrap();
+            Rows(&connection).playlist("folder-1", "Folder", 1).unwrap();
+        }
+        let mut service = writable_fixture_service(directory.path(), &path);
+
+        let nodes = service.playlist_tree_move("playlist-1", "folder-1", 0).unwrap();
+
+        assert_eq!(nodes.iter().find(|node| node.id == "playlist-1").unwrap().parent_id, "folder-1");
     }
 
     #[test]

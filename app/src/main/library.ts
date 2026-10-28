@@ -73,6 +73,7 @@ const WRITES: CommandHandlers = {
   'playlist.add': (lib, p) => lib.playlistAdd(text(p?.id), list(p?.trackIds)),
   'playlist.remove': (lib, p) => lib.playlistRemove(text(p?.id), list(p?.trackIds)),
   'playlist.move': (lib, p) => lib.playlistMove(text(p?.id), list(p?.trackIds), Number(p?.index ?? 0)),
+  'playlist.treeMove': (lib, p) => lib.playlistTreeMove(text(p?.id), text(p?.parent), Number(p?.index ?? 0)),
   'playlist.create': (lib, p) =>
     lib.playlistCreate(
       text(p?.name),

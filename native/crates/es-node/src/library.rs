@@ -178,6 +178,7 @@ enum Op {
     PlaylistAdd(String, Vec<String>),
     PlaylistRemove(String, Vec<String>),
     PlaylistMove(String, Vec<String>, u32),
+    PlaylistTreeMove { id: String, parent: String, index: u32 },
     PlaylistCreate { name: String, parent: Option<String>, folder: bool, ids: Vec<String> },
     PlaylistRename(String, String),
     PlaylistDelete(String),
@@ -202,6 +203,7 @@ impl Run {
             Op::Histories => "library.histories",
             Op::MyTags => "library.myTags",
             Op::PlaylistMembers => "library.playlistMembers",
+            Op::PlaylistTreeMove { .. } => "playlist.treeMove",
             Op::DailyBackup => "backup.daily",
             Op::BackupCreate => "backup.create",
             Op::CueSetHot(_, _, _) => "cue.setHot",
@@ -459,6 +461,9 @@ impl Run {
             Op::PlaylistRemove(id, ids) => return json_of(&service.playlist_remove(id, ids).map_err(failure)?),
             Op::PlaylistMove(id, ids, index) => {
                 return json_of(&service.playlist_move(id, ids, *index as usize).map_err(failure)?);
+            }
+            Op::PlaylistTreeMove { id, parent, index } => {
+                return json_of(&service.playlist_tree_move(id, parent, *index as usize).map_err(failure)?);
             }
             Op::PlaylistCreate { name, parent, folder, ids } => {
                 let (id, playlists) = service.playlist_create(name, parent.as_deref(), *folder, ids).map_err(failure)?;
@@ -724,6 +729,11 @@ impl RekordboxLibrary {
     #[napi(ts_return_type = "Promise<unknown>")]
     pub fn playlist_move(&self, id: String, track_ids: Vec<String>, index: u32) -> AsyncTask<Run> {
         self.run(Op::PlaylistMove(id, track_ids, index))
+    }
+
+    #[napi(ts_return_type = "Promise<unknown>")]
+    pub fn playlist_tree_move(&self, id: String, parent: String, index: u32) -> AsyncTask<Run> {
+        self.run(Op::PlaylistTreeMove { id, parent, index })
     }
 
     #[napi(ts_return_type = "Promise<unknown>")]

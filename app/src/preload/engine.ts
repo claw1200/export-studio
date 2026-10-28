@@ -109,6 +109,7 @@ export interface EngineCommandParams {
   'playlist.add': { id: string; trackIds: string[] }
   'playlist.remove': { id: string; trackIds: string[] }
   'playlist.move': { id: string; trackIds: string[]; index: number }
+  'playlist.treeMove': { id: string; parent: string; index: number }
   'playlist.create': { name: string; parentId?: string | null; folder: boolean; trackIds: string[] }
   'playlist.rename': { id: string; name: string }
   'playlist.delete': { id: string }
