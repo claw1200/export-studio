@@ -67,6 +67,8 @@ export const api = {
   removeFromPlaylist: (id: string, trackIds: string[]) => call<string[]>('playlist.remove', { id, trackIds }),
   moveInPlaylist: (id: string, trackIds: string[], index: number) =>
     call<string[]>('playlist.move', { id, trackIds, index }),
+  movePlaylistTree: (id: string, parent: string, index: number) =>
+    call<TreeItem[]>('playlist.treeMove', { id, parent, index }),
   createPlaylist: (name: string, parentId: string, folder: boolean, trackIds: string[]) =>
     call<{ id: string; playlists: TreeItem[] }>('playlist.create', { name, parentId, folder, trackIds }),
   renamePlaylist: (id: string, name: string) => call<TreeItem[]>('playlist.rename', { id, name }),

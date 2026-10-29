@@ -26,6 +26,7 @@
   } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import { droppedPaths, isFileDrag } from '$lib/library/drop'
+  import { PLAYLIST_TREE_DRAG_TYPE } from '$lib/library.svelte'
   import { buildTree, type TreeNode } from '$lib/library/tree'
   import { menuAt, tidy, type MenuEntry, type MenuRequest } from '$lib/menu'
   import { SEPARATOR, unlockEntry } from '$lib/trackMenu'
@@ -75,6 +76,8 @@
 
   const expanded = new SvelteSet<string>()
   const collapsedSections = new SvelteSet<string>(['histories'])
+  let treeDragId = $state<string | null>(null)
+  let treeDrop = $state<{ key: string; placement: 'before' | 'after' | 'inside' } | null>(null)
 
   type SourceType = 'playlist' | 'history' | 'tag'
 
@@ -106,6 +109,51 @@
     return (type === 'playlist' && node.kind === 'playlist') || (type === 'tag' && node.kind === 'tag')
   }
 
+  function isPlaylistTreeDrag(e: DragEvent): boolean {
+    return !!e.dataTransfer?.types.includes(PLAYLIST_TREE_DRAG_TYPE)
+  }
+
+  function playlistDragStart(e: DragEvent, type: SourceType, node: TreeNode): void {
+    if (type !== 'playlist') return
+    if (!library.writable) {
+      e.preventDefault()
+      return
+    }
+    treeDragId = node.id
+    const transfer = e.dataTransfer
+    if (!transfer) return
+    transfer.effectAllowed = 'move'
+    transfer.setData(PLAYLIST_TREE_DRAG_TYPE, node.id)
+  }
+
+  function playlistDragEnd(): void {
+    treeDragId = null
+    treeDrop = null
+  }
+
+  function playlistMoveTarget(
+    e: DragEvent,
+    node: TreeNode
+  ): { parent: string; index: number; placement: 'before' | 'after' | 'inside' } | null {
+    const draggedId = treeDragId ?? e.dataTransfer?.getData(PLAYLIST_TREE_DRAG_TYPE)
+    if (!draggedId || draggedId === node.id) return null
+    const bounds = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const position = (e.clientY - bounds.top) / bounds.height
+    const placement = node.kind === 'folder' && position >= 0.25 && position <= 0.75
+      ? 'inside'
+      : position < 0.5
+        ? 'before'
+        : 'after'
+    const parent = placement === 'inside' ? node.id : node.parentId
+    const siblings = library.playlists
+      .filter((item) => item.parentId === parent && item.id !== draggedId)
+      .sort((a, b) => a.seq - b.seq)
+    const targetIndex = siblings.findIndex((item) => item.id === node.id)
+    const index = placement === 'inside' ? siblings.length : targetIndex + Number(placement === 'after')
+    if (targetIndex < 0 && placement !== 'inside') return null
+    return { parent, index, placement }
+  }
+
   function expandSoon(key: string, expand: () => void): void {
     if (expandKey === key) return
     clearTimeout(expandTimer)
@@ -123,6 +171,19 @@
   }
 
   function dragOver(e: DragEvent, type: SourceType, node: TreeNode): void {
+    if (isPlaylistTreeDrag(e)) {
+      if (type !== 'playlist' || !library.writable) return
+      const target = playlistMoveTarget(e, node)
+      if (!target) return
+      const key = `${type}:${node.id}`
+      if (target.placement === 'inside' && node.kind === 'folder' && !expanded.has(key)) {
+        expandSoon(key, () => expanded.add(key))
+      }
+      e.preventDefault()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+      treeDrop = { key, placement: target.placement }
+      return
+    }
     const files = !library.dragging && isFileDrag(e)
     if (!library.dragging && !files) return
     const key = `${type}:${node.id}`
@@ -185,11 +246,21 @@
     const into = e.relatedTarget
     if (into instanceof Node && (e.currentTarget as HTMLElement).contains(into)) return
     if (dropKey === key) dropKey = null
+    if (treeDrop?.key === key) treeDrop = null
     cancelExpand(key)
   }
 
   function drop(e: DragEvent, type: SourceType, node: TreeNode): void {
     dropKey = null
+    if (isPlaylistTreeDrag(e)) {
+      const draggedId = treeDragId ?? e.dataTransfer?.getData(PLAYLIST_TREE_DRAG_TYPE)
+      const target = playlistMoveTarget(e, node)
+      if (!draggedId || !target || type !== 'playlist' || !library.writable) return
+      e.preventDefault()
+      treeDrop = null
+      void library.movePlaylistTree(draggedId, target.parent, target.index)
+      return
+    }
     if (!library.dragging && isFileDrag(e)) {
       if (type !== 'playlist' || node.kind !== 'playlist' || !library.writable) return
       e.preventDefault()
@@ -425,20 +496,33 @@
     {:else}
       <button
         class={[
-          'group flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-left text-[12.5px]',
-          dropKey === key
+          'group relative flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-left text-[12.5px]',
+          treeDrop?.key === key && treeDrop.placement === 'inside'
+            ? 'bg-accent-soft text-fg ring-1 ring-accent/70 ring-inset'
+            : dropKey === key
             ? 'bg-accent-soft text-fg ring-1 ring-accent/70 ring-inset'
             : active
               ? 'bg-select text-fg'
               : 'text-muted hover:bg-hover hover:text-fg'
         ]}
         style:padding-left="{8 + depth * 14}px"
+        draggable={type === 'playlist' && library.writable}
         onclick={() => open(type, node)}
         oncontextmenu={type === 'playlist' ? (e) => playlistMenu(e, node) : undefined}
+        ondragstart={(e) => playlistDragStart(e, type, node)}
+        ondragend={playlistDragEnd}
         ondragover={(e) => dragOver(e, type, node)}
         ondragleave={(e) => dragLeave(e, key)}
         ondrop={(e) => drop(e, type, node)}
       >
+        {#if treeDrop?.key === key && treeDrop.placement !== 'inside'}
+          <span
+            class={[
+              'pointer-events-none absolute inset-x-1 z-10 h-px bg-accent',
+              treeDrop.placement === 'before' ? 'top-0' : 'bottom-0'
+            ]}
+          ></span>
+        {/if}
         {@render icon(node, type, isOpen)}
         <span class="min-w-0 flex-1 truncate">{node.name || 'Untitled'}</span>
         {#if !isFolder}

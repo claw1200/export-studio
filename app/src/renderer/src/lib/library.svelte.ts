@@ -29,6 +29,7 @@ import type {
 } from './types'
 
 export const TRACK_DRAG_TYPE = 'application/x-exportstudio-tracks'
+export const PLAYLIST_TREE_DRAG_TYPE = 'application/x-exportstudio-playlist-tree'
 
 /** How cover art is drawn in the browser. Fill uses the column width and crops the bottom. */
 export type BrowserArtwork = 'fill' | 'whole'
@@ -796,6 +797,13 @@ export class Library {
     this.renamingId = result.id
     if (trackIds.length) await this.refreshMembers()
     return result.id
+  }
+
+  async movePlaylistTree(id: string, parent: string, index: number): Promise<boolean> {
+    const result = await this.edit(() => api.movePlaylistTree(id, parent, index))
+    if (!result) return false
+    this.applyPlaylists(result)
+    return true
   }
 
   async renamePlaylist(id: string, name: string): Promise<void> {

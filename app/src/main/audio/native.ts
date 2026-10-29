@@ -136,6 +136,7 @@ export interface NativeLibrary {
   playlistAdd(id: string, trackIds: string[]): Promise<unknown>
   playlistRemove(id: string, trackIds: string[]): Promise<unknown>
   playlistMove(id: string, trackIds: string[], index: number): Promise<unknown>
+  playlistTreeMove(id: string, parent: string, index: number): Promise<unknown>
   playlistCreate(name: string, parentId: string | null, folder: boolean, trackIds: string[]): Promise<unknown>
   playlistRename(id: string, name: string): Promise<unknown>
   playlistDelete(id: string): Promise<unknown>
