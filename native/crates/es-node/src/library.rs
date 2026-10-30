@@ -783,6 +783,16 @@ impl RekordboxLibrary {
     }
 
     #[napi(ts_return_type = "Promise<unknown>")]
+    pub fn usb_settings(&self, volume: String) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::Settings(volume)))
+    }
+
+    #[napi(ts_return_type = "Promise<unknown>")]
+    pub fn usb_set_settings(&self, volume: String, settings: Value) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::SetSettings(volume, settings)))
+    }
+
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_playlists(&self, volume: String) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::Playlists(volume)))
     }

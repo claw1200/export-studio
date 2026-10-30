@@ -16,6 +16,8 @@ pub(crate) enum UsbOp {
     List,
     Eject(String),
     Format(String),
+    Settings(String),
+    SetSettings(String, Value),
     Playlists(String),
     Libraries(String),
     Selection(String),
@@ -157,6 +159,23 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
             core.devices.forget(Path::new(id));
             publish_volumes(core);
             Ok(Value::Null)
+        }
+        UsbOp::Settings(id) => {
+            let volume = listed(id)?;
+            let settings = rb_device::settings::read(&volume).map_err(failure)?;
+            Ok(crate::usb_settings::view(&settings))
+        }
+        UsbOp::SetSettings(id, value) => {
+            let volume = listed(id)?;
+            if rb_library::rekordbox_running() {
+                return Err(failure("Close rekordbox before changing device settings"));
+            }
+            let current = rb_device::settings::read(&volume).map_err(failure)?;
+            let next = crate::usb_settings::edited(&current, value)?;
+            rb_device::settings::write_changes(&volume, &current, &next).map_err(failure)?;
+            core.devices.forget(&volume);
+            let saved = rb_device::settings::read(&volume).map_err(failure)?;
+            Ok(crate::usb_settings::view(&saved))
         }
         UsbOp::Playlists(volume) => {
             let volume = mounted(volume)?;

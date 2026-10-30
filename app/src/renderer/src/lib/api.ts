@@ -26,7 +26,7 @@ import type {
   UsbImportResult,
   Volume
 } from './types'
-import type { SyncDecisions, SyncInspection } from '../../../preload/engine'
+import type { DeviceSettings, SyncDecisions, SyncInspection } from '../../../preload/engine'
 
 const call = window.api.call
 
@@ -76,6 +76,9 @@ export const api = {
   addTag: (id: string, trackIds: string[]) => call<Track[]>('tag.add', { id, trackIds }),
   removeTag: (id: string, trackIds: string[]) => call<Track[]>('tag.remove', { id, trackIds }),
   usbList: () => call<Volume[]>('usb.list'),
+  usbSettings: (volumeId: string) => call<DeviceSettings>('usb.settings', { volumeId }),
+  usbSetSettings: (volumeId: string, settings: DeviceSettings) =>
+    call<DeviceSettings>('usb.setSettings', { volumeId, settings }),
   usbEject: (volumeId: string) => call<void>('usb.eject', { volumeId }),
   usbPlaylists: (volumeId: string) => call<TreeItem[]>('usb.playlists', { volumeId }),
   usbLibraries: (volumeId: string) => call<DeviceLibraryView[]>('usb.libraries', { volumeId }),

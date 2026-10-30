@@ -22,6 +22,7 @@
     Copy,
     Eject,
     FolderSync,
+    Settings2,
     LoaderCircle
   } from '@lucide/svelte'
   import { getApp } from '$lib/context'
@@ -33,6 +34,7 @@
   import type { Source, View, Volume } from '$lib/types'
   import ConfirmDialog from './ConfirmDialog.svelte'
   import ContextMenu from './ContextMenu.svelte'
+  import DeviceSettingsDialog from './DeviceSettingsDialog.svelte'
   import ImportDialog from './ImportDialog.svelte'
   import SyncDialog from './SyncDialog.svelte'
   import ViewDialog from './ViewDialog.svelte'
@@ -42,6 +44,7 @@
   const { library, player, audition } = getApp()
 
   let ejectingId = $state<string | null>(null)
+  let deviceSettingsId = $state<string | null>(null)
 
   function trackOnVolume(trackId: string | null | undefined, volumeId: string): boolean {
     if (!trackId?.startsWith('usb:')) return false
@@ -386,6 +389,12 @@
         }
       },
       SEPARATOR,
+      {
+        label: 'Device settings...',
+        icon: Settings2,
+        disabled: library.syncing || ejectingId === volume.id,
+        onselect: () => (deviceSettingsId = volume.id)
+      },
       {
         label: 'Eject',
         icon: Eject,
@@ -749,6 +758,10 @@
 
 {#if importing}
   <ImportDialog volumeId={importing} onclose={() => (importing = null)} />
+{/if}
+
+{#if deviceSettingsId}
+  <DeviceSettingsDialog volumeId={deviceSettingsId} onclose={() => (deviceSettingsId = null)} />
 {/if}
 
 {#if viewDialog}

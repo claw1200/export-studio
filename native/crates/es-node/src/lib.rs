@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 mod library;
 mod usb;
+mod usb_settings;
 
 use es_deck::{DeckEvent, DeckSnapshot, Engine, EventSink};
 use napi::bindgen_prelude::*;

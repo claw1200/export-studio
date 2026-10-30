@@ -1,4 +1,34 @@
 export type PlaylistPolicy = 'skipExisting' | 'merge' | 'createNew'
+export interface DeviceMenuSlot {
+  id: number
+  menuItem: number
+  name: string
+  sequence: number
+  visible: boolean
+}
+
+export interface DeviceSettings {
+  snapshot: string
+  hasDisplaySettings: boolean
+  display: {
+    overview: 'half' | 'full'
+    color: 'blue' | 'rgb' | '3band'
+    keyDisplay: 'classic' | 'alphanumeric'
+    position: 'center' | 'left'
+  }
+  library: {
+    deviceName: string
+    backgroundColor: number
+    categories: DeviceMenuSlot[]
+    sorts: DeviceMenuSlot[]
+    subColumn: number | null
+    colors: { id: number; name: string }[]
+  } | null
+  deviceLibraryBackground: number | null
+  hasDeviceLibrary: boolean
+  hasOneLibrary: boolean
+}
+
 export type ConvertMode = 'copy' | 'update' | 'update_delete'
 
 export type SyncResolution = 'use_library' | 'restore_from_library' | 'discard_device_edits'
@@ -86,6 +116,8 @@ export interface EngineCommandParams {
   'track.findMissing': { ids: string[]; directory: string }
   'track.inspect': { tracks: { id: string; size?: number | string; mtime?: string | null }[] }
   'usb.list': undefined
+  'usb.settings': { volumeId: string }
+  'usb.setSettings': { volumeId: string; settings: DeviceSettings }
   'usb.playlists': { volumeId: string }
   'usb.libraries': { volumeId: string }
   'usb.selection': { volumeId: string }
