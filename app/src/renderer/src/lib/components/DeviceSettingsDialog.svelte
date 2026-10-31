@@ -273,6 +273,12 @@
               {@render background('Device Library background', settings.deviceLibraryBackground, (value) => {
                 if (settings) settings.deviceLibraryBackground = value
               })}
+            {:else}
+              <p class="text-[12px] text-muted">
+                Device Library background unavailable: {settings.hasDeviceLibrary
+                  ? 'no readable background setting.'
+                  : 'no Device Library database.'}
+              </p>
             {/if}
             {#if settings.library}
               {@render background('OneLibrary background', settings.library.backgroundColor, (value) => {
