@@ -118,6 +118,8 @@ export interface NativeLibrary {
   trackFindMissing(ids: string[], directory: string): Promise<unknown>
   trackInspect(tracks: string): Promise<unknown>
   usbList(): Promise<unknown>
+  usbSettings(volume: string): Promise<unknown>
+  usbSetSettings(volume: string, settings: unknown): Promise<unknown>
   usbEject(volume: string): Promise<unknown>
   usbFormat(volume: string): Promise<unknown>
   usbPlaylists(volume: string): Promise<unknown>
