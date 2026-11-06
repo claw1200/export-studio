@@ -7,15 +7,20 @@ export type Column = {
   width: number
   min: number
   max: number
+  /** Width the cell content needs, in em of the row text. The column can't be narrower than this plus padding. */
+  fit?: number
   fr?: number
   align?: 'right' | 'center'
   sort?: SortKey
 }
 
+/** One whole cue star plus the visible edge of the two it overlaps when the column is narrow. */
+const CUE_FIT = 1.12 + 2 * 0.36
+
 export const COLUMNS: Column[] = [
   { id: 'index', name: '#', label: '#', width: 44, min: 36, max: 72, align: 'right', sort: 'position' },
-  { id: 'color', name: 'Colour', label: 'Colour', width: 80, min: 72, max: 160, align: 'center', sort: 'color' },
-  { id: 'art', name: 'Artwork', label: 'Artwork', width: 88, min: 76, max: 180 },
+  { id: 'color', name: 'Colour', label: 'Colour', width: 80, min: 20, max: 160, align: 'center', sort: 'color' },
+  { id: 'art', name: 'Artwork', label: 'Artwork', width: 88, min: 32, max: 180 },
   { id: 'title', name: 'Title', label: 'Title', width: 220, min: 120, max: 640, fr: 2.2, sort: 'title' },
   { id: 'artist', name: 'Artist', label: 'Artist', width: 150, min: 80, max: 480, fr: 1.4, sort: 'artist' },
   { id: 'album', name: 'Album', label: 'Album', width: 120, min: 72, max: 480, fr: 1, sort: 'album' },
@@ -23,9 +28,29 @@ export const COLUMNS: Column[] = [
   { id: 'bpm', name: 'BPM', label: 'BPM', width: 64, min: 48, max: 120, align: 'right', sort: 'bpm' },
   { id: 'key', name: 'Key', label: 'Key', width: 52, min: 40, max: 120, align: 'center', sort: 'key' },
   { id: 'duration', name: 'Time', label: 'Time', width: 60, min: 48, max: 120, align: 'right', sort: 'duration' },
-  { id: 'compat', name: 'Hardware', label: 'Hardware', width: 104, min: 96, max: 180, align: 'center', sort: 'compat' },
+  {
+    id: 'compat',
+    name: 'Hardware',
+    label: 'Hardware',
+    width: 104,
+    min: 24,
+    max: 180,
+    fit: 0.8,
+    align: 'center',
+    sort: 'compat'
+  },
   { id: 'wave', name: 'Waveform', label: 'Waveform', width: 148, min: 80, max: 480, sort: 'cueCount' },
-  { id: 'cue', name: 'CUE', label: 'CUE', width: 72, min: 52, max: 110, align: 'center', sort: 'cueStars' },
+  {
+    id: 'cue',
+    name: 'CUE',
+    label: 'CUE',
+    width: 72,
+    min: 24,
+    max: 110,
+    fit: CUE_FIT,
+    align: 'center',
+    sort: 'cueStars'
+  },
   { id: 'rating', name: 'Rating', label: 'Rating', width: 78, min: 64, max: 140, sort: 'rating' },
   { id: 'dateAdded', name: 'Added', label: 'Added', width: 92, min: 64, max: 180, sort: 'dateAdded' },
   { id: 'fileType', name: 'Type', label: 'Type', width: 58, min: 44, max: 120, sort: 'fileType' }
@@ -33,6 +58,15 @@ export const COLUMNS: Column[] = [
 
 export const BROWSER_COLUMNS_KEY = 'browserColumns'
 export const COLUMN_LAYOUT_VERSION = 3
+
+/** Horizontal padding of a browser cell, in pixels. */
+export const CELL_PADDING = 16
+
+/** The narrowest a column can be at a row text size: its content, not its heading, sets the limit. */
+export function minColumnWidth(column: Column, fontSize: number): number {
+  if (!column.fit) return column.min
+  return Math.min(column.max, Math.max(column.min, Math.ceil(column.fit * fontSize) + CELL_PADDING))
+}
 
 export const BROWSER_ROW_HEIGHT_KEY = 'browserRowHeight'
 /** Track row height in the browser, in pixels. The default is the height rows had before it could change. */

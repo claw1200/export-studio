@@ -9,6 +9,7 @@
     defaultHidden,
     defaultOrder,
     readColumnPrefs,
+    minColumnWidth,
     rowFontSize,
     stackedRowHeight,
     type Column
@@ -64,7 +65,7 @@
     if (duplicateView && column.id === 'index') return Math.max(width, 72)
     // The alternative style's square cover is as tall as the row; keep room for it and the cell padding.
     if (stacked && column.id === 'art') return Math.max(width, ROW + 16)
-    return width
+    return Math.max(width, minColumnWidth(column, rowFont))
   }
 
   function headerLabel(column: Column): string {
@@ -126,7 +127,7 @@
     handle.setPointerCapture(e.pointerId)
     const cell = handle.parentElement
     const measured = cell?.getBoundingClientRect().width ?? widths[column.id]
-    const startW = Math.min(column.max, Math.max(column.min, Math.round(measured)))
+    const startW = Math.min(column.max, Math.max(minColumnWidth(column, rowFont), Math.round(measured)))
     const wasSized = sized.includes(column.id)
     widths[column.id] = startW
     if (column.fr && !wasSized) sized = [...sized, column.id]
@@ -139,7 +140,7 @@
     const column = COLUMNS.find((item) => item.id === current.id)
     if (!column) return
     const next = Math.round(current.startW + e.clientX - current.startX)
-    widths[column.id] = Math.min(column.max, Math.max(column.min, next))
+    widths[column.id] = Math.min(column.max, Math.max(minColumnWidth(column, rowFont), next))
   }
 
   function endResize(): void {
@@ -593,11 +594,16 @@
       {@const preview = browserPreviews.preview(track.id)}
       {@const labels = CUE_STARS.filter((star) => preview?.[star.key]).map((star) => star.label)}
       {#if labels.length}
-        <span class="flex items-center gap-0.5" aria-label={labels.join(', ')} title={labels.join(', ')}>
+        <!-- In a narrow column the stars shrink their boxes and overlap; the last one always shows whole. -->
+        <span
+          class="flex max-w-full min-w-0 items-center gap-0.5"
+          aria-label={labels.join(', ')}
+          title={labels.join(', ')}
+        >
           {#each CUE_STARS as star (star.key)}
             {#if preview?.[star.key]}
-              <span class="inline-flex" style:color={star.color} aria-hidden="true">
-                <Star class="size-[1.12em] fill-current" strokeWidth={0} />
+              <span class="inline-flex min-w-[0.36em] shrink last:shrink-0" style:color={star.color} aria-hidden="true">
+                <Star class="size-[1.12em] shrink-0 fill-current" strokeWidth={0} />
               </span>
             {/if}
           {/each}
