@@ -68,6 +68,17 @@
     return Math.max(width, columnFloor(column))
   }
 
+  /**
+   * In the alternative style a cover directly before the title reads as one merged column. The title heading
+   * then starts over the cover, at the left edge of the merged column, like every other heading.
+   */
+  const headingShift = $derived.by(() => {
+    if (!stacked) return 0
+    const at = shownColumns.findIndex((column) => column.id === 'title')
+    const before = at > 0 ? shownColumns[at - 1] : undefined
+    return before?.id === 'art' ? columnWidth(before) : 0
+  })
+
   function fixedArt(column: Column): boolean {
     return stacked && column.id === 'art'
   }
@@ -696,6 +707,7 @@
                   column.align === 'center' && 'justify-center',
                   library.sort?.key === column.sort && 'text-fg'
                 ]}
+                style:margin-left={column.id === 'title' && headingShift ? `-${headingShift}px` : undefined}
                 onclick={() => {
                   if (suppressSort) return
                   library.toggleSort(column.sort!)
