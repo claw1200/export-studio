@@ -384,9 +384,9 @@
     const selected = library.selectedTracks
     const loose = selected.filter((item) => item.collected === false)
     const owned = selected.filter((item) => item.collected !== false)
-    rowMenu = menuAt(
-      e,
-      loose.length && !owned.length ? 'File' : 'Track',
+    if (owned.length) void library.loadPlaylistContents()
+    // Read lazily, so playlist membership icons appear once the contents load.
+    rowMenu = menuAt(e, loose.length && !owned.length ? 'File' : 'Track', () =>
       tidy([
         ...(owned.length
           ? trackMenu(library, player, owned, {
@@ -440,6 +440,7 @@
       return
     }
     library.dragging = ids
+    void library.loadPlaylistContents()
     const transfer = e.dataTransfer
     if (!transfer) return
     transfer.effectAllowed = 'copyMove'

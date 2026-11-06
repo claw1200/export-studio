@@ -1,5 +1,6 @@
 import {
   AudioWaveform,
+  Check,
   FileAudio,
   FilePlus,
   FileSearch,
@@ -9,6 +10,7 @@ import {
   ListMusic,
   ListPlus,
   LockOpen,
+  Minus,
   Palette,
   Pencil,
   Plus,
@@ -21,6 +23,7 @@ import { TRACK_COLORS } from './format'
 import { matchesPreset, presetLabel } from './convertPresets'
 import { loadPresets } from './convertPresetStore'
 import type { Library } from './library.svelte'
+import { membership, type Membership } from './library/membership'
 import type { TreeNode } from './library/tree'
 import { tidy, type MenuEntry } from './menu'
 import type { Player } from './player.svelte'
@@ -54,15 +57,28 @@ export function unlockEntry(library: Library, player: Player): MenuEntry {
 }
 const REVEAL_LABEL = window.api.platform === 'darwin' ? 'Show in Finder' : 'Show in Explorer'
 
-function playlistItems(nodes: TreeNode[], add: (id: string) => void): MenuEntry[] {
+/** Icons for adding tracks to a playlist that holds none, some, or all of them. */
+export const MEMBERSHIP_ICONS: Record<Membership, typeof Check> = { none: Plus, some: Minus, all: Check }
+
+/** Which of the membership icons fits `ids` for a playlist, or none while its contents are still loading. */
+export function membershipIcon(library: Library, playlistId: string, ids: string[]): typeof Check | undefined {
+  const contents = library.playlistContents.get(playlistId)
+  return contents && MEMBERSHIP_ICONS[membership(contents, ids)]
+}
+
+function playlistItems(
+  nodes: TreeNode[],
+  icon: (id: string) => typeof Check | undefined,
+  add: (id: string) => void
+): MenuEntry[] {
   return nodes.flatMap((node): MenuEntry[] => {
     const label = node.name || 'Untitled'
     if (node.kind === 'folder') {
-      const children = playlistItems(node.children, add)
+      const children = playlistItems(node.children, icon, add)
       return [{ label, icon: Folder, items: children.length ? children : [{ kind: 'header', label: 'No playlists' }] }]
     }
     if (node.kind !== 'playlist') return []
-    return [{ label, icon: ListMusic, onselect: () => add(node.id) }]
+    return [{ label, icon: icon(node.id) ?? ListMusic, onselect: () => add(node.id) }]
   })
 }
 
@@ -123,7 +139,11 @@ export function trackMenu(library: Library, player: Player, tracks: Track[], act
       items: tidy([
         { label: 'New playlist', icon: Plus, onselect: () => void library.createPlaylist('root', false, ids) },
         SEPARATOR,
-        ...playlistItems(library.playlistTree, (id) => void library.addToPlaylist(id, ids))
+        ...playlistItems(
+          library.playlistTree,
+          (id) => membershipIcon(library, id, ids),
+          (id) => void library.addToPlaylist(id, ids)
+        )
       ])
     },
     !device && playlist?.kind === 'playlist' && {
@@ -260,7 +280,11 @@ export function fileMenu(
           }
         },
         SEPARATOR,
-        ...playlistItems(library.playlistTree, (id) => actions.importFiles(paths, id))
+        ...playlistItems(
+          library.playlistTree,
+          () => MEMBERSHIP_ICONS.none,
+          (id) => actions.importFiles(paths, id)
+        )
       ])
     },
     single && {
