@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Mixer } from '$lib/mixer.svelte'
 
-  /** A horizontal fader from A to B. Drag the cap or the track; double-click centres it. */
+  /** A horizontal fader from A to B. Drag the cap or the track, or scroll over it; double-click centres it. */
   let { mixer }: { mixer: Mixer } = $props()
 
   const KEY_STEP = 0.05
@@ -43,6 +43,30 @@
     mixer.commitCrossfader()
   }
 
+  /** Fader travel per pixel of scroll: a typical mouse-wheel notch (~100px) moves it a tenth. */
+  const WHEEL_PER_PX = 0.001
+  /** The position is saved this long after scrolling stops rather than on every wheel event. */
+  const WHEEL_COMMIT_MS = 300
+  let wheelCommit: ReturnType<typeof setTimeout> | undefined
+  /**
+   * Where scrolling has taken the fader before the centre snap. Small trackpad deltas would
+   * otherwise each land inside the snap and be pulled back, so the fader could never leave centre.
+   */
+  let wheelRaw: number | null = null
+
+  function onwheel(e: WheelEvent): void {
+    e.preventDefault()
+    const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
+    const px = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? delta * 16 : delta
+    wheelRaw = Math.min(1, Math.max(0, (wheelRaw ?? mixer.crossfader) + px * WHEEL_PER_PX))
+    mixer.setCrossfader(wheelRaw)
+    clearTimeout(wheelCommit)
+    wheelCommit = setTimeout(() => {
+      wheelRaw = null
+      mixer.commitCrossfader()
+    }, WHEEL_COMMIT_MS)
+  }
+
   function centre(): void {
     mixer.setCrossfader(0.5)
     mixer.commitCrossfader()
@@ -65,13 +89,14 @@
       : mixer.crossfader < 0.5
         ? `${Math.round((0.5 - mixer.crossfader) * 200)}% towards A`
         : `${Math.round((mixer.crossfader - 0.5) * 200)}% towards B`}
-    title="Drag to fade between the decks. Double-click to centre."
+    title="Drag or scroll to fade between the decks. Double-click to centre."
     {onpointerdown}
     {onpointermove}
     onpointerup={end}
     onpointercancel={end}
     ondblclick={centre}
     {onkeydown}
+    {onwheel}
   >
     <div class="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-raised"></div>
     <div class="absolute top-1/2 left-1/2 h-3 w-px -translate-y-1/2 bg-line"></div>

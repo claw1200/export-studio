@@ -58,6 +58,33 @@
         : `${track.key} at the track’s own pitch. Click to clear the key shift.`
   )
   const signed = (n: number): string => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '')
+
+  /** Vertical travel, in pixels, per step when dragging a stepper's value. */
+  const DRAG_STEP_PX = 8
+  /** Where the drag started counting from, and whether it has stepped (so the release is not a click). */
+  let drag: { pointer: number; y: number; moved: boolean } | null = null
+
+  function dragDown(e: PointerEvent): void {
+    if (e.button !== 0) return
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    drag = { pointer: e.pointerId, y: e.clientY, moved: false }
+  }
+
+  function dragMove(e: PointerEvent, onstep: (step: number) => void): void {
+    if (!drag || drag.pointer !== e.pointerId) return
+    const steps = Math.trunc((drag.y - e.clientY) / DRAG_STEP_PX)
+    if (!steps) return
+    drag.y -= steps * DRAG_STEP_PX
+    drag.moved = true
+    onstep(steps)
+  }
+
+  /** A release after a drag swallows the click that follows it, so dragging does not also reset. */
+  function dragClick(onreset: () => void): void {
+    const moved = drag?.moved
+    drag = null
+    if (!moved) onreset()
+  }
 </script>
 
 {#snippet stepper(
@@ -81,13 +108,16 @@
     >
     <button
       class={[
-        'tabular flex h-full min-w-[60px] items-center justify-center gap-1 px-1 font-mono text-[11.5px] font-semibold hover:bg-hover disabled:pointer-events-none',
+        'tabular flex h-full min-w-[60px] cursor-ns-resize touch-none items-center justify-center gap-1 px-1 font-mono text-[11.5px] font-semibold hover:bg-hover disabled:pointer-events-none',
         valueClass
       ]}
       style:color={color ?? undefined}
       {disabled}
-      {title}
-      onclick={onreset}
+      title="{title.replace(/\.?$/, '.')} Drag up or down to change it."
+      onpointerdown={dragDown}
+      onpointermove={(e) => dragMove(e, onstep)}
+      onpointercancel={() => (drag = null)}
+      onclick={() => dragClick(onreset)}
     >
       <span class="text-[9px] font-sans font-semibold tracking-wide text-faint uppercase">{name}</span>
       {value}
