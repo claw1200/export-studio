@@ -1,9 +1,9 @@
 <script lang="ts">
   import { Minus, Plus } from '@lucide/svelte'
-  import { getApp } from '$lib/context'
+  import { getPlayer } from '$lib/deck/context'
   import type { WaveformMode } from '$lib/waveform/data'
 
-  const { player } = getApp()
+  const player = getPlayer()
   const display = player.display
 
   const MODES: { id: WaveformMode; label: string }[] = [

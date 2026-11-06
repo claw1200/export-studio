@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { getApp } from '$lib/context'
+  import { getPlayer } from '$lib/deck/context'
   import type { TempoMap } from '$lib/tempo-map'
   import { setupCanvas } from '$lib/waveform/canvas'
   import { drawDetail } from '$lib/waveform/detail'
   import { trackBandFall } from '$lib/waveform/fall'
   import { gridHandleIndex } from '$lib/waveform/markers'
 
-  const { player } = getApp()
+  const player = getPlayer()
 
   let width = $state(0)
   let height = $state(0)

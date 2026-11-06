@@ -41,7 +41,7 @@
 
   let { onsource }: { onsource?: () => void } = $props()
 
-  const { library, player, audition } = getApp()
+  const { library, decks, audition } = getApp()
 
   let ejectingId = $state<string | null>(null)
   let deviceSettingsId = $state<string | null>(null)
@@ -62,7 +62,7 @@
     if (library.syncing || ejectingId) return
     ejectingId = volume.id
     if (trackOnVolume(audition.trackId, volume.id)) audition.stop()
-    if (trackOnVolume(player.track?.id, volume.id)) player.eject()
+    decks.eject((id) => trackOnVolume(id, volume.id))
     try {
       await library.ejectDevice(volume.id)
     } catch (e) {
@@ -241,7 +241,7 @@
     menu = menuAt(
       e,
       'Collection',
-      tidy([...importItems(), !library.writable && SEPARATOR, !library.writable && unlockEntry(library, player)])
+      tidy([...importItems(), !library.writable && SEPARATOR, !library.writable && unlockEntry(library, decks)])
     )
   }
 
@@ -316,7 +316,7 @@
     menu = menuAt(
       e,
       'Playlists',
-      tidy([...createItems('root'), !library.writable && SEPARATOR, !library.writable && unlockEntry(library, player)])
+      tidy([...createItems('root'), !library.writable && SEPARATOR, !library.writable && unlockEntry(library, decks)])
     )
   }
 
@@ -337,7 +337,7 @@
         { label: 'Rename', icon: Pencil, disabled: locked, onselect: () => (library.renamingId = node.id) },
         { label: 'Delete', icon: Trash2, danger: true, disabled: locked, onselect: () => (deleting = node) },
         locked && SEPARATOR,
-        locked && unlockEntry(library, player)
+        locked && unlockEntry(library, decks)
       ])
     )
   }

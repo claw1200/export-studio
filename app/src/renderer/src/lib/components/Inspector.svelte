@@ -17,10 +17,16 @@
   import EditableText from './EditableText.svelte'
   import RatingStars from './RatingStars.svelte'
 
-  let { onjump, onedit }: { onjump: (seconds: number) => void; onedit: (tracks: Track[]) => void } = $props()
+  let { onedit }: { onedit: (tracks: Track[]) => void } = $props()
 
-  const { library, player } = getApp()
+  const { library, decks } = getApp()
   const track = $derived(library.selected)
+  /** The deck with the selected track loaded, preferring the focused one. Its cues can be jumped to. */
+  const holder = $derived.by(() => {
+    if (!track) return null
+    if (decks.focused?.track?.id === track.id) return decks.focused
+    return decks.withTrack(track.id)[0] ?? null
+  })
   const loose = $derived(track?.collected === false)
   const deviceTrack = $derived(track?.id.startsWith('usb:') ?? false)
   const editable = $derived(library.writable && !loose && !deviceTrack)
@@ -77,7 +83,7 @@
   }
 
   const tags = $derived(track ? track.myTags.map((id) => library.tagNames.get(id)).filter(Boolean) : [])
-  const canRemoveCues = $derived(library.writable && !deviceTrack && !!player.detail && player.track?.id === track?.id)
+  const canRemoveCues = $derived(library.writable && !deviceTrack && !!holder?.detail)
 
   function removeCueLabel(cue: Cue): string {
     if (cue.kind === 'hot') return `Remove hot cue ${hotCueLetter(cue.slot)}`
@@ -258,7 +264,7 @@
         {@render cues(null)}
         {@render file()}
       {:then detail}
-        {@render cues(player.detail?.id === detail?.id ? player.detail : detail)}
+        {@render cues(holder?.detail && holder.detail.id === detail?.id ? holder.detail : detail)}
         {@render file()}
       {:catch}
         {@render file()}
@@ -286,15 +292,15 @@
             <li
               class="flex items-center rounded-md hover:bg-surface"
               onpointerenter={() => {
-                if (player.track?.id === track.id) player.setPreview(cue.id, cue.start / 1000)
+                holder?.setPreview(cue.id, cue.start / 1000)
               }}
-              onpointerleave={() => player.clearPreview(cue.id)}
+              onpointerleave={() => decks.all.forEach((player) => player.clearPreview(cue.id))}
             >
               <button
                 class="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-1 text-left text-[12px] disabled:cursor-default"
-                disabled={player.track?.id !== track.id}
-                title={player.track?.id === track.id ? 'Jump to cue' : 'Load the track to jump to cues'}
-                onclick={() => onjump(cue.start / 1000)}
+                disabled={!holder}
+                title={holder ? 'Jump to cue' : 'Load the track to jump to cues'}
+                onclick={() => holder?.seek(cue.start / 1000)}
               >
                 {#if cue.kind === 'hot'}
                   <span
@@ -316,8 +322,8 @@
               {#if canRemoveCues}
                 <button
                   class="mr-1 grid size-5 shrink-0 place-items-center rounded text-faint hover:bg-hover hover:text-danger disabled:hidden"
-                  disabled={player.editing}
-                  onclick={() => player.cues.deleteCue(cue)}
+                  disabled={holder?.editing}
+                  onclick={() => holder?.cues.deleteCue(cue)}
                   aria-label={removeCueLabel(cue)}
                   title="Remove cue"
                 >

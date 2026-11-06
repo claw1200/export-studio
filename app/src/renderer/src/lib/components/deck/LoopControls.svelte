@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { getApp } from '$lib/context'
+  import { getPlayer } from '$lib/deck/context'
 
-  const { player } = getApp()
+  const player = getPlayer()
 
   const noTrack = $derived(!player.track || !!player.audioError)
   const loopButton = (lit: boolean): string[] => [

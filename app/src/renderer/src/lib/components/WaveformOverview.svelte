@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { getApp } from '$lib/context'
+  import { getPlayer } from '$lib/deck/context'
   import { setupCanvas } from '$lib/waveform/canvas'
   import { CUE_POINT_COLOR } from '$lib/waveform/colors'
   import { drawOverview } from '$lib/waveform/overview'
   import WaveformMarks from './WaveformMarks.svelte'
 
-  const { player } = getApp()
+  const player = getPlayer()
 
   let width = $state(0)
   let height = $state(0)

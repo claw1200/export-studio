@@ -11,8 +11,13 @@ export class Audition {
   onBegan: (() => void) | null = null
   /** Starts the player again after a preview that paused it. */
   onEnded: (() => void) | null = null
-  private deck = new Deck(1)
+  private readonly deck: Deck
   private tookFocus = false
+
+  /** `slot` is the engine deck previews play on, kept apart from every player's. */
+  constructor(slot: number) {
+    this.deck = new Deck(slot)
+  }
 
   get position(): number {
     return this.deck.position

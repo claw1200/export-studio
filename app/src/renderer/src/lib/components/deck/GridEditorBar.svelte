@@ -10,13 +10,13 @@
     Unlink
   } from '@lucide/svelte'
   import type { Component } from 'svelte'
-  import { getApp } from '$lib/context'
+  import { getPlayer } from '$lib/deck/context'
   import { varies } from '$lib/tempo-map'
   import BpmField from '../BpmField.svelte'
 
   const { bpm: playheadBpm, onsave }: { bpm: number; onsave: () => void } = $props()
 
-  const { player } = getApp()
+  const player = getPlayer()
   const grid = player.grid
 
   const flag = $derived(grid.map?.flags[grid.sectionAtPlayhead])

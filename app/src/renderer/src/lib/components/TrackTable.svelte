@@ -49,7 +49,16 @@
     onconvert: (tracks: Track[], preset: ConvertPreset) => void
   } = $props()
 
-  const { library, player, keybinds, analysis } = getApp()
+  const { library, decks, keybinds, analysis } = getApp()
+  /** Tracks loaded on a deck, and whether any deck holding each is playing it. */
+  const onDeck = $derived.by(() => {
+    const tracks: Record<string, boolean> = {}
+    for (const player of decks.all) {
+      const id = player.track?.id
+      if (id) tracks[id] = tracks[id] || player.playing
+    }
+    return tracks
+  })
   const isMac = window.api.platform === 'darwin'
 
   const initial = readColumnPrefs(getSetting(BROWSER_COLUMNS_KEY))
@@ -389,7 +398,7 @@
     rowMenu = menuAt(e, loose.length && !owned.length ? 'File' : 'Track', () =>
       tidy([
         ...(owned.length
-          ? trackMenu(library, player, owned, {
+          ? trackMenu(library, decks, owned, {
               edit: onedit,
               autoRelocate: onautorelocate,
               remove: onremove,
@@ -402,7 +411,7 @@
         ...(loose.length
           ? fileMenu(
               library,
-              player,
+              decks,
               loose,
               {
                 importFiles: (paths, playlistId) => void library.importFiles(paths, playlistId),
@@ -553,8 +562,8 @@
 
 {#snippet cell(column: Column, track: Track, index: number)}
   {#if column.id === 'index'}
-    {#if player.track?.id === track.id}
-      <AudioLines class={['ml-auto size-[1.12em] text-accent', player.playing && 'animate-pulse']} />
+    {#if track.id in onDeck}
+      <AudioLines class={['ml-auto size-[1.12em] text-accent', onDeck[track.id] && 'animate-pulse']} />
     {:else}
       {@const group = duplicateView ? library.positions.get(track.id) : undefined}
       <span class={track.missing ? 'text-warn/70' : 'text-faint'} title={group ? `Group ${group}` : undefined}>

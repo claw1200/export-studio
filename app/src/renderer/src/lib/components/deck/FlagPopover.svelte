@@ -1,13 +1,13 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import { X } from '@lucide/svelte'
-  import { getApp } from '$lib/context'
+  import { getPlayer } from '$lib/deck/context'
   import { formatBeatLength, formatClock } from '$lib/format'
   import { MAX_GRID_BPM, MIN_GRID_BPM, MIN_RAMP_BEATS, varies } from '$lib/tempo-map'
 
   const { xOf, width }: { xOf: (ms: number) => number; width: number } = $props()
 
-  const { player } = getApp()
+  const player = getPlayer()
   const grid = player.grid
   const POPOVER_WIDTH = 248
   const EDGE_MARGIN = 8

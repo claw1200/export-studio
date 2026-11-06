@@ -26,7 +26,7 @@ import type { Library } from './library.svelte'
 import { membership, type Membership } from './library/membership'
 import type { TreeNode } from './library/tree'
 import { tidy, type MenuEntry } from './menu'
-import type { Player } from './player.svelte'
+import type { Decks } from './decks.svelte'
 import type { ConvertPreset, Track, TrackEdit } from './types'
 
 export type TrackMenuShortcut =
@@ -43,7 +43,7 @@ export interface TrackMenuActions {
 
 export const SEPARATOR: MenuEntry = { kind: 'separator' }
 
-export function unlockEntry(library: Library, player: Player): MenuEntry {
+export function unlockEntry(library: Library, decks: Decks): MenuEntry {
   const blocked = !!library.info?.rekordboxRunning
   return {
     label: blocked ? 'Close rekordbox to edit' : 'Unlock editing',
@@ -51,7 +51,7 @@ export function unlockEntry(library: Library, player: Player): MenuEntry {
     disabled: blocked || library.switching,
     onselect: () =>
       void library.setWritable(true).then((changed) => {
-        if (changed) void player.refreshDetail()
+        if (changed) void decks.refreshDetail()
       })
   }
 }
@@ -110,7 +110,7 @@ function shared<K extends keyof Track>(tracks: Track[], key: K): Track[K] | unde
   return tracks.every((t) => t[key] === first) ? first : undefined
 }
 
-export function trackMenu(library: Library, player: Player, tracks: Track[], actions: TrackMenuActions): MenuEntry[] {
+export function trackMenu(library: Library, decks: Decks, tracks: Track[], actions: TrackMenuActions): MenuEntry[] {
   const ids = tracks.map((t) => t.id)
   const single = tracks.length === 1 ? tracks[0] : null
   const locked = !library.writable
@@ -231,14 +231,14 @@ export function trackMenu(library: Library, player: Player, tracks: Track[], act
       onselect: () => actions.remove(tracks)
     },
     locked && !device && SEPARATOR,
-    locked && !device && unlockEntry(library, player)
+    locked && !device && unlockEntry(library, decks)
   ])
 }
 
 /** Right-click menu for file-list rows that are not in the collection. */
 export function fileMenu(
   library: Library,
-  player: Player,
+  decks: Decks,
   tracks: Track[],
   actions: {
     importFiles: (paths: string[], playlistId: string | null) => void
@@ -301,6 +301,6 @@ export function fileMenu(
       onselect: () => actions.deleteFiles(tracks)
     },
     includeUnlock && locked && SEPARATOR,
-    includeUnlock && locked && unlockEntry(library, player)
+    includeUnlock && locked && unlockEntry(library, decks)
   ])
 }

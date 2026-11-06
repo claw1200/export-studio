@@ -8,7 +8,7 @@
 
   let { track, wave, cues }: { track: Track; wave: BrowserWave | null; cues: Cue[] } = $props()
 
-  const { player, audition } = getApp()
+  const { decks, audition } = getApp()
 
   let width = $state(0)
   let height = $state(0)
@@ -30,7 +30,7 @@
     if (!width || !height || !wave) return
     const ctx = setupCanvas(canvas, width, height)
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    const bands = player.display.mode === '3band' ? wave.bands : null
+    const bands = decks.prefs.waveform.mode === '3band' ? wave.bands : null
     if (bands) drawStackedBands(ctx, bands, canvas.width, canvas.height)
     else if (wave.heights && wave.colors)
       drawAnalysisRgb(ctx, wave.heights, wave.colors, 0, wave.rgbLength, canvas.width, canvas.height, 'bottom')

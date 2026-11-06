@@ -1,10 +1,12 @@
 <script lang="ts">
   import { Pause, Play } from '@lucide/svelte'
   import { getApp } from '$lib/context'
+  import { getPlayer } from '$lib/deck/context'
   import { formatClock } from '$lib/format'
   import { chordLabel } from '$lib/keymap'
 
-  const { player, keybinds } = getApp()
+  const { keybinds } = getApp()
+  const player = getPlayer()
 
   const disabled = $derived(!player.track || !!player.audioError)
   const cueLit = $derived(player.cueHeld || (!player.playing && !!player.track && player.atCue))

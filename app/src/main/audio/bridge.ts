@@ -1,10 +1,8 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import type { AudioStatus, DeckCommand, DeckEvent, DeckTick, Tick, WaveAnalysis } from '../../preload/audio'
 import type { Library } from '../library'
+import { ENGINE_DECKS as DECKS } from '../../shared/engine'
 import { loadNative, type NativeEngine, type NativeModule } from './native'
-
-/** The playing deck, and a second one that auditions a browser row without loading it. */
-const DECKS = 2
 
 /** Position ticks per second while a deck is sounding. The renderer extrapolates between them. */
 const TICK_MS = 33

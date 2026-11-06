@@ -178,10 +178,6 @@ export class Deck {
     this.send({ op: 'masterTempo', deck: this.index, on })
   }
 
-  setVolume(gain: number): void {
-    this.send({ op: 'volume', gain })
-  }
-
   private hold(seconds: number): void {
     this.position = seconds
     this.anchor = pinned(this.anchor, seconds, performance.now())

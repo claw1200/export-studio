@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Music, Pencil } from '@lucide/svelte'
   import { artworkUrl } from '$lib/api'
-  import { getApp } from '$lib/context'
+  import { getPlayer } from '$lib/deck/context'
   import { formatBpm, keyColor, pitchSemitones, shiftKey } from '$lib/format'
 
   const {
@@ -11,7 +11,7 @@
     ongridedit
   }: { bpm: number; gridEditable: boolean; gridTitle: string; ongridedit: () => void } = $props()
 
-  const { player } = getApp()
+  const player = getPlayer()
   const track = $derived(player.track)
   const rate = $derived(player.tempo.rate)
   /** Master tempo holds the pitch, so the key stays. Otherwise it moves with the fader. */
