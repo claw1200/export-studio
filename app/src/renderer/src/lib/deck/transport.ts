@@ -52,6 +52,22 @@ export function pressHotCue(state: TransportState, cue: HotCueTarget): HotCueAct
     : { kind: 'hold', at: cue.start, loop }
 }
 
+/** A new memory or hot cue, in seconds. `end` is set for a loop. */
+export interface CueRange {
+  start: number
+  end: number | null
+}
+
+/**
+ * What setting a memory or hot cue at `at` stores. As on rekordbox, setting one while a loop plays,
+ * or at an exited loop's in point, saves the loop; otherwise it is a cue at `at`.
+ */
+export function cueToStore(at: number, loop: { start: number; end: number; active: boolean } | null): CueRange {
+  if (!loop || !(loop.end > loop.start)) return { start: at, end: null }
+  if (loop.active || Math.abs(at - loop.start) < CUE_TOLERANCE) return { start: loop.start, end: loop.end }
+  return { start: at, end: null }
+}
+
 /** A held CUE or hot cue, and whether pressing play during it made it stick. */
 export interface Hold {
   at: number

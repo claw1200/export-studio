@@ -1,4 +1,5 @@
 import { api } from './api'
+import { BROWSER_ROW_HEIGHT_KEY, clampRowHeight, readRowHeight } from './browserColumns'
 import { browserPreviews } from './browserPreview.svelte'
 import { clearDetailCache } from './deck/session.svelte'
 import { clearWaveCache } from './deck/waves.svelte'
@@ -31,11 +32,17 @@ import type {
 export const TRACK_DRAG_TYPE = 'application/x-exportstudio-tracks'
 export const PLAYLIST_TREE_DRAG_TYPE = 'application/x-exportstudio-playlist-tree'
 
-/** How cover art is drawn in the browser. Fill uses the column width and crops the bottom. */
-export type BrowserArtwork = 'fill' | 'whole'
+/**
+ * How track rows are drawn in the browser. Standard is one line with artwork filling the column width.
+ * Alternative shows the whole cover and stacks the artist under the title, in place of the Artist column.
+ */
+export type BrowserTrackStyle = 'standard' | 'alternative'
 
-function storedArtwork(): BrowserArtwork {
-  return getSetting('browserArtwork') === 'whole' ? 'whole' : 'fill'
+function storedTrackStyle(): BrowserTrackStyle {
+  const stored = getSetting('browserTrackStyle')
+  if (stored === 'standard' || stored === 'alternative') return stored
+  // Earlier versions only had an artwork setting; whole artwork maps to the alternative style.
+  return getSetting('browserArtwork') === 'whole' ? 'alternative' : 'standard'
 }
 
 function storedHidePresetTracks(): boolean {
@@ -84,6 +91,10 @@ export class Library {
   deviceTracks = $state.raw<Track[]>([])
   views = $state.raw<View[]>(loadViews())
   playlistMembers = $state.raw<ReadonlySet<string>>(new Set())
+  /** Track ids of each normal playlist, filled on demand by `loadPlaylistContents`. */
+  playlistContents = $state.raw<ReadonlyMap<string, ReadonlySet<string>>>(new Map())
+  private contentsLoading: Promise<void> | null = null
+  private contentsGeneration = 0
   /** Files under the open file view, in directory order. */
   fileEntries = $state.raw<FileEntry[]>([])
   syncing = $state(false)
@@ -115,7 +126,8 @@ export class Library {
   hideStreaming = $state(getSetting('hideStreaming') !== '0')
   hidePresetTracks = $state(storedHidePresetTracks())
   doubleClickToLoad = $state(getSetting('doubleClickToLoad') === '1')
-  browserArtwork = $state<BrowserArtwork>(storedArtwork())
+  browserTrackStyle = $state<BrowserTrackStyle>(storedTrackStyle())
+  browserRowHeight = $state(readRowHeight(getSetting(BROWSER_ROW_HEIGHT_KEY)))
   hardwareGreen = $state(storedPlayer('hardwareGreen', DEFAULT_GREEN))
   importing = $state(false)
   converting = $state(false)
@@ -429,9 +441,16 @@ export class Library {
     return true
   }
 
-  setBrowserArtwork(style: BrowserArtwork): void {
-    this.browserArtwork = style
-    setSetting('browserArtwork', style)
+  setBrowserTrackStyle(style: BrowserTrackStyle): void {
+    this.browserTrackStyle = style
+    setSetting('browserTrackStyle', style)
+  }
+
+  setBrowserRowHeight(height: number): void {
+    const next = clampRowHeight(height)
+    if (this.browserRowHeight === next) return
+    this.browserRowHeight = next
+    setSetting(BROWSER_ROW_HEIGHT_KEY, String(next))
   }
 
   setHardwareGreen(id: string): void {
@@ -551,6 +570,7 @@ export class Library {
 
   private applyPlaylistIds(id: string, ids: string[]): void {
     this.playlists = this.playlists.map((p) => (p.id === id ? { ...p, count: ids.length } : p))
+    this.playlistContents = new Map(this.playlistContents).set(id, new Set(ids))
     if (this.source.type === 'playlist' && this.source.id === id) this.sourceIds = ids
   }
 
@@ -689,6 +709,7 @@ export class Library {
     const gone = new Set(result.removed)
     this.tracks = this.tracks.filter((t) => !gone.has(t.id))
     this.playlists = result.playlists
+    this.forgetPlaylistContents()
     if (this.sourceIds) this.sourceIds = this.sourceIds.filter((id) => !gone.has(id))
     this.selection = new Set([...this.selection].filter((id) => !gone.has(id)))
     if (this.selectedId && gone.has(this.selectedId)) this.selectedId = null
@@ -802,6 +823,7 @@ export class Library {
     const result = await this.edit(() => api.createPlaylist(name, parentId, folder, trackIds))
     if (!result) return null
     this.playlists = result.playlists
+    if (!folder) this.playlistContents = new Map(this.playlistContents).set(result.id, new Set(trackIds))
     this.renamingId = result.id
     if (trackIds.length) await this.refreshMembers()
     return result.id
@@ -854,6 +876,7 @@ export class Library {
     this.histories = histories
     this.myTags = myTags
     this.playlistMembers = new Set(members)
+    this.forgetPlaylistContents()
     this.changed = false
     await this.setSource(this.source)
     profileStage('library.contentHydration', started)
@@ -1089,6 +1112,40 @@ export class Library {
       } else if (entry.loose) out.push(entry.loose)
     }
     return out
+  }
+
+  /** Fetch the tracks of every normal playlist not cached yet, so menus and drops can show membership. */
+  loadPlaylistContents(): Promise<void> {
+    if (this.contentsLoading) return this.contentsLoading
+    const missing = this.playlists.filter((p) => p.kind === 'playlist' && !this.playlistContents.has(p.id))
+    if (!missing.length) return Promise.resolve()
+    const generation = this.contentsGeneration
+    const load = async (): Promise<void> => {
+      const rows = await Promise.all(
+        missing.map((p) =>
+          api.playlistTracks(p.id).then(
+            (ids) => [p.id, new Set(ids)] as const,
+            () => null
+          )
+        )
+      )
+      if (generation !== this.contentsGeneration) return
+      const next = new Map(this.playlistContents)
+      // Entries written by an edit while this was loading are newer, so they stay.
+      for (const row of rows) if (row && !next.has(row[0])) next.set(row[0], row[1])
+      this.playlistContents = next
+    }
+    const loading = load().finally(() => {
+      if (this.contentsLoading === loading) this.contentsLoading = null
+    })
+    this.contentsLoading = loading
+    return loading
+  }
+
+  private forgetPlaylistContents(): void {
+    this.contentsGeneration++
+    this.contentsLoading = null
+    this.playlistContents = new Map()
   }
 
   private async refreshMembers(): Promise<void> {

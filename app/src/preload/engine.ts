@@ -136,8 +136,8 @@ export interface EngineCommandParams {
   'track.removeFromCollection': { ids: string[] }
   'track.update': { ids: string[]; fields: TrackEditFields; writeTags?: boolean }
   'track.import': { paths: string[]; playlistId?: string | null; artwork?: boolean }
-  'cue.setHot': { id: string; kind: number; ms: number }
-  'cue.addMemory': { id: string; ms: number }
+  'cue.setHot': { id: string; kind: number; ms: number; endMs?: number | null }
+  'cue.addMemory': { id: string; ms: number; endMs?: number | null }
   'cue.delete': { id: string; cueId: string }
   'cue.setColor': { id: string; cueId: string; colorIndex?: number | null }
   'playlist.add': { id: string; trackIds: string[] }

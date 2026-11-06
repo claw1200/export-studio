@@ -515,13 +515,19 @@ impl LibraryService {
         id: &str,
         kind: i64,
         ms: i64,
+        end_ms: Option<i64>,
     ) -> Result<Vec<es_index::detail::Cue>> {
-        self.edit(|tx| tx.set_hot_cue(id, kind, ms))?;
+        self.edit(|tx| tx.set_hot_cue(id, kind, ms, end_ms))?;
         self.cues(id)
     }
 
-    pub fn cue_add_memory(&mut self, id: &str, ms: i64) -> Result<Vec<es_index::detail::Cue>> {
-        self.edit(|tx| tx.add_memory_cue(id, ms))?;
+    pub fn cue_add_memory(
+        &mut self,
+        id: &str,
+        ms: i64,
+        end_ms: Option<i64>,
+    ) -> Result<Vec<es_index::detail::Cue>> {
+        self.edit(|tx| tx.add_memory_cue(id, ms, end_ms))?;
         self.cues(id)
     }
 
@@ -1394,7 +1400,7 @@ mod tests {
         let mut service = writable_fixture_service(directory.path(), &path);
         let snapshot_time = service.session().unwrap().snapshot_time();
 
-        let cues = service.cue_add_memory("track-1", 500).unwrap();
+        let cues = service.cue_add_memory("track-1", 500, None).unwrap();
 
         assert_eq!(cues.len(), 1);
         assert_eq!(service.session().unwrap().snapshot_time(), snapshot_time);
@@ -1403,6 +1409,30 @@ mod tests {
         service.set_writable(false, &|_| {}).unwrap();
         assert_eq!(service.cues("track-1").unwrap().len(), 1);
         assert!(!service.session().unwrap().source_changed());
+    }
+
+    #[test]
+    fn cues_set_with_an_end_read_back_as_loops() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = fixture::build(directory.path(), 1).unwrap();
+        {
+            let connection = fixture::connect(&path).unwrap();
+            Rows(&connection).track("track-1", "Test track").unwrap();
+        }
+        let mut service = writable_fixture_service(directory.path(), &path);
+
+        service.cue_add_memory("track-1", 500, Some(2500)).unwrap();
+        let cues = service.cue_set_hot("track-1", 1, 4000, Some(8000)).unwrap();
+
+        let mut ranges: Vec<_> = cues
+            .iter()
+            .map(|cue| (cue.kind, cue.slot, cue.start, cue.end))
+            .collect();
+        ranges.sort_unstable();
+        assert_eq!(
+            ranges,
+            [("hot", 1, 4000, Some(8000)), ("memory", 0, 500, Some(2500))]
+        );
     }
 
     #[test]

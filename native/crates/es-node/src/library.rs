@@ -161,8 +161,8 @@ enum Op {
     Convert { ids: Vec<String>, preset: String, mode: String },
     ApplyAnalysis(String, String),
     MediaResolve { kind: String, id: String, size: String },
-    CueSetHot(String, i64, i64),
-    CueAddMemory(String, i64),
+    CueSetHot(String, i64, i64, Option<i64>),
+    CueAddMemory(String, i64, Option<i64>),
     CueDelete(String, String),
     CueSetColor(String, String, Option<i64>),
     TrackUpdate(Vec<String>, String, bool),
@@ -206,8 +206,8 @@ impl Run {
             Op::PlaylistTreeMove { .. } => "playlist.treeMove",
             Op::DailyBackup => "backup.daily",
             Op::BackupCreate => "backup.create",
-            Op::CueSetHot(_, _, _) => "cue.setHot",
-            Op::CueAddMemory(_, _) => "cue.addMemory",
+            Op::CueSetHot(..) => "cue.setHot",
+            Op::CueAddMemory(..) => "cue.addMemory",
             Op::CueDelete(_, _) => "cue.delete",
             Op::CueSetColor(_, _, _) => "cue.setColor",
             Op::TrackDetail(_) => "track.detail",
@@ -453,8 +453,12 @@ impl Run {
             _ => {}
         }
         match &self.op {
-            Op::CueSetHot(id, kind, ms) => return json_of(&service.cue_set_hot(id, *kind, *ms).map_err(failure)?),
-            Op::CueAddMemory(id, ms) => return json_of(&service.cue_add_memory(id, *ms).map_err(failure)?),
+            Op::CueSetHot(id, kind, ms, end_ms) => {
+                return json_of(&service.cue_set_hot(id, *kind, *ms, *end_ms).map_err(failure)?);
+            }
+            Op::CueAddMemory(id, ms, end_ms) => {
+                return json_of(&service.cue_add_memory(id, *ms, *end_ms).map_err(failure)?);
+            }
             Op::CueDelete(id, cue_id) => return json_of(&service.cue_delete(id, cue_id).map_err(failure)?),
             Op::CueSetColor(id, cue_id, color) => {
                 return json_of(&service.cue_set_color(id, cue_id, *color).map_err(failure)?);
@@ -639,13 +643,13 @@ impl RekordboxLibrary {
     }
 
     #[napi(ts_return_type = "Promise<unknown>")]
-    pub fn cue_set_hot(&self, id: String, kind: i64, ms: i64) -> AsyncTask<Run> {
-        self.run(Op::CueSetHot(id, kind, ms))
+    pub fn cue_set_hot(&self, id: String, kind: i64, ms: i64, end_ms: Option<i64>) -> AsyncTask<Run> {
+        self.run(Op::CueSetHot(id, kind, ms, end_ms))
     }
 
     #[napi(ts_return_type = "Promise<unknown>")]
-    pub fn cue_add_memory(&self, id: String, ms: i64) -> AsyncTask<Run> {
-        self.run(Op::CueAddMemory(id, ms))
+    pub fn cue_add_memory(&self, id: String, ms: i64, end_ms: Option<i64>) -> AsyncTask<Run> {
+        self.run(Op::CueAddMemory(id, ms, end_ms))
     }
 
     #[napi(ts_return_type = "Promise<unknown>")]

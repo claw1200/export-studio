@@ -30,7 +30,7 @@
   import { PLAYLIST_TREE_DRAG_TYPE } from '$lib/library.svelte'
   import { buildTree, type TreeNode } from '$lib/library/tree'
   import { menuAt, tidy, type MenuEntry, type MenuRequest } from '$lib/menu'
-  import { SEPARATOR, unlockEntry } from '$lib/trackMenu'
+  import { membershipIcon, SEPARATOR, unlockEntry } from '$lib/trackMenu'
   import type { Source, View, Volume } from '$lib/types'
   import ConfirmDialog from './ConfirmDialog.svelte'
   import ContextMenu from './ContextMenu.svelte'
@@ -476,8 +476,14 @@
       <Folder class="size-3.5 shrink-0 text-faint" />
     {/if}
   {:else}
+    {@const Mark =
+      type === 'playlist' && node.kind === 'playlist' && library.dragging
+        ? membershipIcon(library, node.id, library.dragging)
+        : undefined}
     <span class="w-3 shrink-0"></span>
-    {#if node.kind === 'smart'}
+    {#if Mark}
+      <Mark class="size-3.5 shrink-0 text-faint" />
+    {:else if node.kind === 'smart'}
       <Sparkles class="size-3.5 shrink-0 text-accent/80" />
     {:else if type === 'history'}
       <History class="size-3.5 shrink-0 text-faint" />

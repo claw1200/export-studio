@@ -68,8 +68,9 @@ const WRITES: CommandHandlers = {
   'track.update': (lib, p) => lib.trackUpdate(list(p?.ids), JSON.stringify(p?.fields ?? {}), Boolean(p?.writeTags)),
   'track.import': (lib, p) =>
     lib.trackImport(list(p?.paths), p?.playlistId == null ? null : text(p.playlistId), p?.artwork !== false),
-  'cue.setHot': (lib, p) => lib.cueSetHot(text(p?.id), Number(p?.kind), Number(p?.ms)),
-  'cue.addMemory': (lib, p) => lib.cueAddMemory(text(p?.id), Number(p?.ms)),
+  'cue.setHot': (lib, p) =>
+    lib.cueSetHot(text(p?.id), Number(p?.kind), Number(p?.ms), p?.endMs == null ? null : Number(p.endMs)),
+  'cue.addMemory': (lib, p) => lib.cueAddMemory(text(p?.id), Number(p?.ms), p?.endMs == null ? null : Number(p.endMs)),
   'cue.delete': (lib, p) => lib.cueDelete(text(p?.id), text(p?.cueId)),
   'cue.setColor': (lib, p) =>
     lib.cueSetColor(text(p?.id), text(p?.cueId), p?.colorIndex == null ? null : Number(p.colorIndex)),
