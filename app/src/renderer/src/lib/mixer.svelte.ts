@@ -53,6 +53,8 @@ export class Mixer {
   swapBass = $state(getSetting('swapBass') === 'true')
   /** Where the swap stands. Not reactive: only `apply` reads it, as the fader moves. */
   private swap: BassSwap = startBassSwap(this.crossfader)
+  /** Each deck's LOW knob, 0 fully left (killed) to 1 at the centre (unity), as the swap last set it. */
+  lows = $state.raw<[a: number, b: number]>([1, 1])
 
   constructor(
     readonly a: Player,
@@ -212,9 +214,11 @@ export class Mixer {
     this.b.setGain(b)
     if (this.swapBass) {
       this.swap = bassSwap(this.swap.anchor, this.crossfader)
-      this.a.setLow(bassLevel(1 - this.swap.share))
-      this.b.setLow(bassLevel(this.swap.share))
+      this.lows = [1 - this.swap.share, this.swap.share]
+      this.a.setLow(bassLevel(this.lows[0]))
+      this.b.setLow(bassLevel(this.lows[1]))
     } else {
+      this.lows = [1, 1]
       this.a.setLow(null)
       this.b.setLow(null)
     }

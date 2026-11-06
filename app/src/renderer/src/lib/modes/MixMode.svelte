@@ -6,6 +6,7 @@
   import type { Player } from '$lib/player.svelte'
   import type { Track } from '$lib/types'
   import Crossfader from '$lib/components/mix/Crossfader.svelte'
+  import EqKnob from '$lib/components/mix/EqKnob.svelte'
   import MixDeck from '$lib/components/mix/MixDeck.svelte'
   import LibraryBrowser from '$lib/components/LibraryBrowser.svelte'
   import type { ModeProps } from './types'
@@ -106,6 +107,10 @@
         : 'Swap bass: cut the low end of the deck being faded away from as the other comes in, done by the centre'}
       onclick={() => mixer.setSwapBass(!mixer.swapBass)}>SWAP BASS</button
     >
+    <div class="flex w-full justify-around">
+      <EqKnob label="A" value={mixer.lows[0]} active={mixer.swapBass} />
+      <EqKnob label="B" value={mixer.lows[1]} active={mixer.swapBass} />
+    </div>
   </div>
   {@render deck(b, 'B')}
 </div>
