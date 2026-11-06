@@ -24,6 +24,7 @@
     modes = [],
     mode,
     onmode,
+    inspectorToggle = true,
     inspectorOpen = $bindable(true),
     searchInput = $bindable(),
     settings = $bindable(null)
@@ -32,6 +33,8 @@
     modes?: readonly { id: string; label: string }[]
     mode?: string
     onmode?: (id: string) => void
+    /** The current mode has an info panel to toggle. */
+    inspectorToggle?: boolean
     inspectorOpen: boolean
     searchInput?: HTMLInputElement
     settings?: SettingsSection | null
@@ -258,16 +261,18 @@
       <Settings class="size-4" />
     </button>
 
-    <button
-      class={[
-        'no-drag grid size-7 place-items-center rounded-md hover:bg-hover',
-        inspectorOpen ? 'text-fg' : 'text-faint'
-      ]}
-      onclick={() => (inspectorOpen = !inspectorOpen)}
-      aria-label="Toggle inspector"
-      aria-pressed={inspectorOpen}
-    >
-      <PanelRight class="size-4" />
-    </button>
+    {#if inspectorToggle}
+      <button
+        class={[
+          'no-drag grid size-7 place-items-center rounded-md hover:bg-hover',
+          inspectorOpen ? 'text-fg' : 'text-faint'
+        ]}
+        onclick={() => (inspectorOpen = !inspectorOpen)}
+        aria-label="Toggle inspector"
+        aria-pressed={inspectorOpen}
+      >
+        <PanelRight class="size-4" />
+      </button>
+    {/if}
   </div>
 </header>

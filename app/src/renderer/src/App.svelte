@@ -200,6 +200,7 @@
     onmode={setMode}
     bind:searchInput
     bind:settings
+    inspectorToggle={mode.inspector}
     bind:inspectorOpen={
       () => inspectorOpen,
       (v) => {
@@ -237,7 +238,7 @@
     </div>
   {:else}
     {#key mode}
-      <mode.component {players} {actions} {inspectorOpen} />
+      <mode.component {players} {actions} inspectorOpen={mode.inspector && inspectorOpen} />
     {/key}
     <StatusBar />
   {/if}

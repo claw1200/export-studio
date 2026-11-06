@@ -1,29 +1,26 @@
 <script lang="ts">
-  import { LoaderCircle, Music, Repeat } from '@lucide/svelte'
+  import { LoaderCircle, Music } from '@lucide/svelte'
   import { artworkUrl } from '$lib/api'
   import { bpmAt } from '$lib/beat'
   import { setPlayer } from '$lib/deck/context'
-  import { cueColor, formatBpm, formatClock, hotCueLetter, keyColor } from '$lib/format'
-  import type { Mixer } from '$lib/mixer.svelte'
+  import { formatBpm, formatClock, keyColor } from '$lib/format'
   import type { Player } from '$lib/player.svelte'
-  import type { Cue } from '$lib/types'
   import WaveformDetail from '../WaveformDetail.svelte'
   import WaveformOverview from '../WaveformOverview.svelte'
 
   /**
-   * One side of the mixer: where the deck is in its track, and its cues to start it from. Set the
-   * playhead with a cue, the overview or by dragging the waveform; the mixer's play starts it.
+   * One side of the mixer: the track, where its playhead is, the scrolling waveform and an overview
+   * split into the sections between cues. Set the playhead by clicking the overview or dragging the
+   * scrolling waveform; the mixer's play starts it.
    */
   let {
     player,
-    mixer,
     label,
     focused,
     onfocus
   }: {
     /** Fixed for the component's life: key the deck on it to swap. */
     player: Player
-    mixer: Mixer
     label: string
     /** Double-clicked rows load here. */
     focused: boolean
@@ -35,22 +32,19 @@
 
   const track = $derived(player.track)
   const bpm = $derived(bpmAt(player.position, player.displayGrid, track?.bpm ?? 0))
-  const cues = $derived([...player.displayCues].sort((a, b) => a.start - b.start || a.slot - b.slot))
-  /** Within a millisecond counts as sitting on a cue. */
-  const atCue = (cue: Cue): boolean => Math.abs(player.position - cue.start / 1000) < 0.001
-
-  function cueLabel(cue: Cue): string {
-    return cue.kind === 'hot' ? hotCueLetter(cue.slot) : 'Memory'
-  }
-
-  /** Puts the playhead on the cue: a jump while playing, a new start point while stopped. */
-  function startFrom(cue: Cue): void {
-    const seconds = cue.start / 1000
-    if (player.playing) player.seek(seconds)
-    else player.stopAt(seconds)
-    mixer.placed(player, seconds)
-  }
 </script>
+
+{#snippet placeholder()}
+  <div class="grid h-full place-items-center px-4 text-center text-[12px] text-faint">
+    {#if player.loading}
+      <LoaderCircle class="size-4 animate-spin" />
+    {:else if track}
+      No analysis data for this track
+    {:else}
+      Double-click a track to load it on deck {label}
+    {/if}
+  </div>
+{/snippet}
 
 <section
   class={[
@@ -64,15 +58,7 @@
     {#if player.waveform}
       <WaveformDetail />
     {:else}
-      <div class="grid h-full place-items-center px-4 text-center text-[12px] text-faint">
-        {#if player.loading}
-          <LoaderCircle class="size-4 animate-spin" />
-        {:else if track}
-          No analysis data for this track
-        {:else}
-          Double-click a track to load it on deck {label}
-        {/if}
-      </div>
+      {@render placeholder()}
     {/if}
     <span
       class={[
@@ -113,42 +99,9 @@
     </div>
   </div>
 
-  <div class="h-10 px-3 pt-2">
-    <WaveformOverview />
-  </div>
-
-  <div class="flex min-h-[44px] flex-wrap content-start gap-1 px-3 pt-2 pb-3">
-    {#each cues as cue (cue.id)}
-      <button
-        class={[
-          'tabular flex h-6 items-center gap-1.5 rounded border px-1.5 text-[11px] transition-colors',
-          atCue(cue) ? 'border-fg/70 bg-hover text-fg' : 'border-line-soft text-muted hover:bg-hover hover:text-fg'
-        ]}
-        title="Start deck {label} from here{cue.comment ? `: ${cue.comment}` : ''}"
-        disabled={!!player.audioError}
-        onclick={() => startFrom(cue)}
-      >
-        {#if cue.kind === 'hot'}
-          <span
-            class="grid size-4 place-items-center rounded-sm text-[9.5px] font-bold text-bg"
-            style:background={cueColor(cue)}>{cueLabel(cue)}</span
-          >
-        {:else}
-          <span class="grid size-4 place-items-center" aria-label={cueLabel(cue)}>
-            <span class="size-1.5 rotate-45 rounded-[1px]" style:background={cueColor(cue)}></span>
-          </span>
-        {/if}
-        <span class="font-mono">{formatClock(cue.start)}</span>
-        {#if cue.end != null}
-          <Repeat class="size-2.5 text-faint" />
-        {/if}
-      </button>
-    {:else}
-      {#if track && !player.loading}
-        <span class="self-center text-[11.5px] text-faint"
-          >No cues. Click the overview or drag the waveform to set a start.</span
-        >
-      {/if}
-    {/each}
+  <div class="px-3 pt-2 pb-3">
+    <div class="relative h-16 overflow-hidden rounded bg-[oklch(0.12_0.005_260)]">
+      <WaveformOverview sections />
+    </div>
   </div>
 </section>

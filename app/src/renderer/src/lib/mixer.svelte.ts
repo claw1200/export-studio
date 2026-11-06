@@ -68,13 +68,6 @@ export class Mixer {
     else this.play()
   }
 
-  /** A deck's playhead was set by hand: that is where a later stop returns it. */
-  placed(player: Player, seconds: number): void {
-    const starts = this.starts
-    if (!starts) return
-    this.starts = player === this.a ? [seconds, starts[1]] : [starts[0], seconds]
-  }
-
   private apply(): void {
     const [a, b] = crossfade(this.crossfader)
     this.a.setGain(a)
