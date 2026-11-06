@@ -212,12 +212,14 @@ export interface UsbImportPreview {
   destination: string
   layout: string
   playlists: { name: string; folder: boolean; depth: number; tracks: number; exists: boolean }[]
+  histories: { name: string; tracks: number; exists: boolean }[]
   tracks: { title: string; artist: string; status: 'reuse' | 'copy' | 'missing' }[]
   counts: { reuse: number; copy: number; missing: number }
 }
 
 export interface UsbImportResult {
   playlists: number
+  histories: number
   tracks: number
   copied: number
   reused: number
@@ -335,5 +337,5 @@ export type Source =
   | { type: 'playlist'; id: string }
   | { type: 'history'; id: string }
   | { type: 'tag'; id: string }
-  | { type: 'device'; volumeId: string; playlistId: string | null }
+  | { type: 'device'; volumeId: string; playlistId: string | null; historyId?: string }
   | { type: 'view'; id: string }

@@ -119,9 +119,11 @@ export interface EngineCommandParams {
   'usb.settings': { volumeId: string }
   'usb.setSettings': { volumeId: string; settings: DeviceSettings }
   'usb.playlists': { volumeId: string }
+  'usb.histories': { volumeId: string }
   'usb.libraries': { volumeId: string }
   'usb.selection': { volumeId: string }
   'usb.tracks': { volumeId: string; playlistId?: string | null }
+  'usb.historyTracks': { volumeId: string; historyId: string }
   'usb.detail': { id: string }
   'usb.media': { id: string }
   'usb.importPreview': { volumeId: string; folder?: string | null; policy?: PlaylistPolicy }

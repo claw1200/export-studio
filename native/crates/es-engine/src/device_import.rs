@@ -1,18 +1,24 @@
-//! Copying a stick's playlists and tracks into the library.
+//! Copying a stick's playlists, histories and tracks into the library.
 //!
 //! Tracks the library already has are reused, and the rest are copied next to where rekordbox would put
 //! them, imported, and given the analysis and cues they had on the stick. What happens to a playlist
 //! the library already has is an explicit choice ([`PlaylistPolicy`]), not a side effect of its name.
+//!
+//! Each history session on the stick becomes a history at the top of the library's history tree, with
+//! its plays in order. A session counts as already imported, and is skipped whatever the policy, when
+//! the library has a history with the same name listing the same tracks in the same order; histories
+//! have no ids that survive the trip, so name and plays are what identify one. Plays of tracks that
+//! could not be imported are left out of the session.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use rb_library::{DeviceData, Library, NewCue, PlaylistKind, TrackEdit};
 use rb_device::paths::volume_path;
-use rb_device::{Cue as DeviceCue, Device, Playlist, Track as DeviceTrack};
+use rb_device::{Cue as DeviceCue, Device, History, Playlist, Track as DeviceTrack};
 
 use crate::import::{import_files, Options as FileOptions};
-use crate::place::{candidate, destination, place_copy};
+use crate::place::{candidate, destination, existing_copy, place_copy};
 use crate::{Error, Result};
 
 /// What to do with a stick playlist when the library already has one with that name in that place.
@@ -55,6 +61,14 @@ pub struct PlannedPlaylist {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedHistory {
+    pub name: String,
+    pub tracks: usize,
+    /// The library already has this session.
+    pub exists: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannedTrack {
     pub title: String,
     pub artist: String,
@@ -66,12 +80,14 @@ pub struct Plan {
     pub destination: PathBuf,
     pub layout: &'static str,
     pub playlists: Vec<PlannedPlaylist>,
+    pub histories: Vec<PlannedHistory>,
     pub tracks: Vec<PlannedTrack>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Outcome {
     pub playlists: usize,
+    pub histories: usize,
     pub tracks: usize,
     pub copied: usize,
     pub reused: usize,
@@ -134,7 +150,31 @@ fn children(device: &Device) -> Children<'_> {
     out
 }
 
-/// Tracks in the order the playlists list them, each once.
+/// The stick's history sessions, folders left out, oldest first.
+fn sessions(device: &Device) -> Vec<&History> {
+    // OneLibrary marks a history folder with attribute 1; a Device Library has none.
+    let mut out: Vec<&History> = device.histories.iter().filter(|h| h.attribute != 1).collect();
+    out.sort_by_key(|h| h.export_id);
+    out
+}
+
+fn history_name(row: &History) -> String {
+    let name = row.name.trim();
+    if name.is_empty() { "Untitled".into() } else { name.into() }
+}
+
+/// The library's histories, as name and plays, to recognise a session imported before.
+fn known_histories(lib: &Library) -> Result<Vec<(String, Vec<String>)>> {
+    let mut out = Vec::new();
+    for node in lib.histories()? {
+        if !node.is_folder {
+            out.push((node.name.trim().to_owned(), lib.history_track_ids(&node.id)?));
+        }
+    }
+    Ok(out)
+}
+
+/// Tracks in the order the playlists list them, then the histories, each once.
 fn ordered_tracks(children: &Children<'_>, device: &Device) -> Vec<i64> {
     let mut seen = Vec::new();
     let mut stack: Vec<&Playlist> = children.get(&0).map(|rows| rows.iter().rev().copied().collect()).unwrap_or_default();
@@ -144,6 +184,13 @@ fn ordered_tracks(children: &Children<'_>, device: &Device) -> Vec<i64> {
                 stack.extend(inner.iter().rev().copied());
             }
         }
+        for id in &row.track_ids {
+            if !seen.contains(id) && device.track(*id).is_some() {
+                seen.push(*id);
+            }
+        }
+    }
+    for row in sessions(device) {
         for id in &row.track_ids {
             if !seen.contains(id) && device.track(*id).is_some() {
                 seen.push(*id);
@@ -214,7 +261,43 @@ pub fn preview(lib: &Library, volume: &Path, device: &Device, options: &Options)
     let known = Known::new(lib, volume, options.policy)?;
     let mut playlists = Vec::new();
     plan_playlists(&kids, 0, Some("root"), 0, &known, &mut playlists);
-    Ok(Plan { destination: root, layout: if contents { "Contents/Artist/Album" } else { "Artist/Album" }, playlists, tracks })
+    let histories = plan_histories(lib, db_id, volume, device, &root, contents)?;
+    Ok(Plan { destination: root, layout: if contents { "Contents/Artist/Album" } else { "Artist/Album" }, playlists, histories, tracks })
+}
+
+/// The stick's sessions, and whether the library has each already. A play resolves to the library
+/// track an import would use: the library's own copy, or an earlier import's copy of the same file.
+fn plan_histories(lib: &Library, db_id: i64, volume: &Path, device: &Device, root: &Path, contents: bool) -> Result<Vec<PlannedHistory>> {
+    let sessions = sessions(device);
+    if sessions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let known = known_histories(lib)?;
+    let by_path: HashMap<String, String> = lib.tracks(None)?.into_iter().map(|t| (t.folder_path, t.id)).collect();
+    let mut resolved: HashMap<i64, Option<String>> = HashMap::new();
+    let mut resolve = |id: i64| -> Option<String> {
+        resolved
+            .entry(id)
+            .or_insert_with(|| {
+                let track = device.track(id)?;
+                library_copy(lib, db_id, track).or_else(|| {
+                    let audio = audio_of(volume, track)?;
+                    let file_name = if track.filename.is_empty() { audio.file_name()?.to_string_lossy().into_owned() } else { track.filename.clone() };
+                    let copy = existing_copy(&audio, &candidate(root, &track.artist, &track.album, &file_name, contents))?;
+                    by_path.get(copy.to_string_lossy().as_ref()).cloned()
+                })
+            })
+            .clone()
+    };
+    Ok(sessions
+        .into_iter()
+        .map(|row| {
+            let name = history_name(row);
+            let plays: Option<Vec<String>> = row.track_ids.iter().filter(|t| device.track(**t).is_some()).map(|t| resolve(*t)).collect();
+            let exists = plays.is_some_and(|plays| known.iter().any(|(n, ids)| *n == name && *ids == plays));
+            PlannedHistory { name, tracks: row.track_ids.len(), exists }
+        })
+        .collect())
 }
 
 fn find<'a>(nodes: &'a [rb_library::PlaylistNode], parent: &str, folder: bool, name: &str) -> Option<&'a rb_library::PlaylistNode> {
@@ -417,8 +500,8 @@ pub fn import_device(
     options: &Options,
     progress: &dyn Fn(Progress),
 ) -> Result<Outcome> {
-    if !device.playlists.iter().any(|p| !p.folder) {
-        return Err(Error::Other("This USB has no playlists to import".into()));
+    if !device.playlists.iter().any(|p| !p.folder) && sessions(device).is_empty() {
+        return Err(Error::Other("This USB has no playlists or histories to import".into()));
     }
     let db_id = lib.db_id()?;
     let kids = children(device);
@@ -477,17 +560,32 @@ pub fn import_device(
 
     let known = Known::new(lib, volume, options.policy)?;
     let wrapper_name = format!("Imported from {}", if device.device_name.is_empty() { volume.file_name().map_or_else(|| "device".into(), |n| n.to_string_lossy().into_owned()) } else { device.device_name.clone() });
+    let mut known_histories = known_histories(lib)?;
     let mut created = 0;
+    let mut histories = 0;
     lib.write(|tx| {
-        let parent = if options.policy == PlaylistPolicy::CreateNew {
+        let has_playlists = kids.values().flatten().any(|p| !p.folder);
+        let parent = if options.policy == PlaylistPolicy::CreateNew && has_playlists {
             created += 1;
             Some(tx.create_playlist(&wrapper_name, None, true, &[])?)
         } else {
             None
         };
-        create_playlists(tx, &kids, 0, parent, &known, &resolved, &mut created)
+        create_playlists(tx, &kids, 0, parent, &known, &resolved, &mut created)?;
+        for row in sessions(device) {
+            let name = history_name(row);
+            let plays: Vec<String> = row.track_ids.iter().filter_map(|t| resolved.get(t).cloned()).collect();
+            if plays.is_empty() || known_histories.iter().any(|(n, ids)| *n == name && *ids == plays) {
+                continue;
+            }
+            tx.create_history(&name, &plays)?;
+            known_histories.push((name, plays));
+            histories += 1;
+        }
+        Ok(())
     })?;
     outcome.playlists = created;
+    outcome.histories = histories;
     outcome.tracks = resolved.len();
     Ok(outcome)
 }

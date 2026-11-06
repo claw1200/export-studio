@@ -81,9 +81,12 @@ export const api = {
     call<DeviceSettings>('usb.setSettings', { volumeId, settings }),
   usbEject: (volumeId: string) => call<void>('usb.eject', { volumeId }),
   usbPlaylists: (volumeId: string) => call<TreeItem[]>('usb.playlists', { volumeId }),
+  usbHistories: (volumeId: string) => call<TreeItem[]>('usb.histories', { volumeId }),
   usbLibraries: (volumeId: string) => call<DeviceLibraryView[]>('usb.libraries', { volumeId }),
   usbSelection: (volumeId: string) => call<{ playlistIds: string[] }>('usb.selection', { volumeId }),
   usbTracks: (volumeId: string, playlistId: string | null) => call<Track[]>('usb.tracks', { volumeId, playlistId }),
+  usbHistoryTracks: (volumeId: string, historyId: string) =>
+    call<Track[]>('usb.historyTracks', { volumeId, historyId }),
   usbSyncReview: (volumeId: string, playlistIds: string[], convert?: ConvertPreset) =>
     call<SyncInspection>('usb.syncReview', { volumeId, playlistIds, convert }),
   usbSync: (volumeId: string, playlistIds: string[], review?: SyncDecisions, convert?: ConvertPreset) =>

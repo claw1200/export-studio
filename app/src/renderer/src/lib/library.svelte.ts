@@ -80,6 +80,7 @@ export class Library {
   info = $state.raw<LibraryInfo | null>(null)
   devices = $state.raw<Volume[]>([])
   devicePlaylists = $state.raw<Record<string, TreeItem[]>>({})
+  deviceHistories = $state.raw<Record<string, TreeItem[]>>({})
   deviceTracks = $state.raw<Track[]>([])
   views = $state.raw<View[]>(loadViews())
   playlistMembers = $state.raw<ReadonlySet<string>>(new Set())
@@ -185,7 +186,7 @@ export class Library {
     const grouped = this.listedDuplicates
     if (grouped) return grouped.groups
     const out = new Map<string, number>()
-    if (this.source.type === 'device' && this.source.playlistId) {
+    if (this.source.type === 'device' && (this.source.playlistId || this.source.historyId)) {
       this.deviceTracks.forEach((track, i) => {
         if (!out.has(track.id)) out.set(track.id, i + 1)
       })
@@ -252,6 +253,13 @@ export class Library {
     if (src.type === 'collection') return 'Collection'
     if (src.type === 'device') {
       const volume = this.devices.find((item) => item.id === src.volumeId)
+      if (src.historyId) {
+        return (
+          this.deviceHistories[src.volumeId]?.find((item) => item.id === src.historyId)?.name ??
+          volume?.name ??
+          'Device'
+        )
+      }
       if (!src.playlistId) return volume?.name ?? 'Device'
       return (
         this.devicePlaylists[src.volumeId]?.find((item) => item.id === src.playlistId)?.name ?? volume?.name ?? 'Device'
@@ -861,11 +869,9 @@ export class Library {
       const volumes = await api.usbList()
       const present = new Set(volumes.map((volume) => volume.id))
       this.devices = volumes
-      const playlists = { ...this.devicePlaylists }
-      for (const id of Object.keys(playlists)) {
-        if (!present.has(id)) delete playlists[id]
+      for (const id of Object.keys(this.devicePlaylists)) {
+        if (!present.has(id)) this.forgetDeviceLists(id)
       }
-      this.devicePlaylists = playlists
       if (this.source.type === 'device' && !present.has(this.source.volumeId)) {
         await this.setSource({ type: 'collection' })
       }
@@ -874,12 +880,23 @@ export class Library {
     }
   }
 
+  /** Loads a device's playlists and histories, once until the device changes. */
   async devicePlaylistTree(volumeId: string): Promise<TreeItem[]> {
     if (!this.devicePlaylists[volumeId]) {
-      const rows = await api.usbPlaylists(volumeId)
+      const [rows, histories] = await Promise.all([api.usbPlaylists(volumeId), api.usbHistories(volumeId)])
       this.devicePlaylists = { ...this.devicePlaylists, [volumeId]: rows }
+      this.deviceHistories = { ...this.deviceHistories, [volumeId]: histories }
     }
     return this.devicePlaylists[volumeId]
+  }
+
+  private forgetDeviceLists(volumeId: string): void {
+    const playlists = { ...this.devicePlaylists }
+    const histories = { ...this.deviceHistories }
+    delete playlists[volumeId]
+    delete histories[volumeId]
+    this.devicePlaylists = playlists
+    this.deviceHistories = histories
   }
 
   /** Sync playlists to a USB. With `convert`, tracks not already in its format go onto the USB converted. */
@@ -900,9 +917,7 @@ export class Library {
     try {
       await api.usbSync(volumeId, playlistIds, review, convert)
       const refreshPlaylists = volumeId in this.devicePlaylists
-      const playlists = { ...this.devicePlaylists }
-      delete playlists[volumeId]
-      this.devicePlaylists = playlists
+      this.forgetDeviceLists(volumeId)
       await this.refreshDevices()
       if (refreshPlaylists) await this.devicePlaylistTree(volumeId)
       if (this.source.type === 'device' && this.source.volumeId === volumeId) await this.setSource(this.source)
@@ -948,9 +963,7 @@ export class Library {
     this.syncProgress = { phase: 'format' }
     try {
       await api.usbFormat(volumeId)
-      const playlists = { ...this.devicePlaylists }
-      delete playlists[volumeId]
-      this.devicePlaylists = playlists
+      this.forgetDeviceLists(volumeId)
       await this.refreshDevices()
       if (this.source.type === 'device' && this.source.volumeId === volumeId) await this.setSource({ type: 'collection' })
       return true
@@ -1020,7 +1033,9 @@ export class Library {
       this.fileEntries = []
       this.sourceLoading = true
       try {
-        const rows = await api.usbTracks(source.volumeId, source.playlistId)
+        const rows = source.historyId
+          ? await api.usbHistoryTracks(source.volumeId, source.historyId)
+          : await api.usbTracks(source.volumeId, source.playlistId)
         if (token === this.sourceToken) this.deviceTracks = rows
       } catch (e) {
         if (token === this.sourceToken) {
@@ -1208,7 +1223,11 @@ export class Library {
     if (cur.type !== source.type) return false
     if (cur.type === 'collection') return true
     if (cur.type === 'device' && source.type === 'device') {
-      return cur.volumeId === source.volumeId && cur.playlistId === source.playlistId
+      return (
+        cur.volumeId === source.volumeId &&
+        cur.playlistId === source.playlistId &&
+        (cur.historyId ?? null) === (source.historyId ?? null)
+      )
     }
     return source.type !== 'collection' && source.type !== 'device' && 'id' in cur && cur.id === source.id
   }

@@ -129,7 +129,7 @@ fn same_bytes(left: &Path, right: &Path) -> bool {
 }
 
 /// An earlier copy of `source` at `wanted` or one of its numbered neighbours, if there is one.
-fn existing_copy(source: &Path, wanted: &Path) -> Option<PathBuf> {
+pub(crate) fn existing_copy(source: &Path, wanted: &Path) -> Option<PathBuf> {
     let parent = wanted.parent()?;
     let name = wanted.file_name()?.to_string_lossy().into_owned();
     for n in 0..TRIES {

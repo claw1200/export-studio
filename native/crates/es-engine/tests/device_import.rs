@@ -124,6 +124,96 @@ fn tracks_are_copied_imported_with_their_cues_and_put_in_new_playlists() {
     assert_eq!(nodes.iter().find(|n| n.name == "Folder").map(|f| f.id.as_str()), Some(set.parent_id.as_str()));
 }
 
+/// The stick as read, with a history folder and two sessions added the way a player records them.
+fn with_histories(w: &World) -> rb_device::Device {
+    let mut device = rb_device::read::read(&w.volume).unwrap().unwrap();
+    let id = |title: &str| device.tracks.iter().find(|t| t.title == title).unwrap().export_id;
+    let (first, second) = (id("First"), id("Second"));
+    let history = |export_id: i64, name: &str, attribute: i64, track_ids: Vec<i64>| rb_device::History { export_id, name: name.into(), parent_id: 0, seq: export_id, attribute, track_ids };
+    device.histories = vec![
+        history(1, "2024", 1, Vec::new()),
+        history(2, "HISTORY 001", 0, vec![second, first, second]),
+        history(3, "HISTORY 002", 0, vec![first]),
+    ];
+    device
+}
+
+fn import_with(w: &mut World, device: &rb_device::Device, policy: PlaylistPolicy) -> es_engine::device_import::Outcome {
+    let share = w.dir.path().join("lib/share");
+    let opts = options(w, policy);
+    import_device(&mut w.lib, &share, &w.volume, device, &opts, &|_| {}).unwrap()
+}
+
+fn history_titles(w: &World, name: &str) -> Vec<Vec<String>> {
+    let tracks = w.lib.tracks(None).unwrap();
+    w.lib
+        .histories()
+        .unwrap()
+        .into_iter()
+        .filter(|h| h.name == name)
+        .map(|h| w.lib.history_track_ids(&h.id).unwrap().iter().map(|id| tracks.iter().find(|t| &t.id == id).unwrap().title.clone()).collect())
+        .collect()
+}
+
+#[test]
+fn histories_are_imported_in_play_order_with_repeats() {
+    let Some(mut w) = world() else { return };
+    let device = with_histories(&w);
+    let plan = preview(&w.lib, &w.volume, &device, &options(&w, PlaylistPolicy::SkipExisting)).unwrap();
+    let planned: Vec<_> = plan.histories.iter().map(|h| (h.name.as_str(), h.tracks, h.exists)).collect();
+    assert_eq!(planned, [("HISTORY 001", 3, false), ("HISTORY 002", 1, false)], "folders are not offered");
+
+    let out = import_with(&mut w, &device, PlaylistPolicy::SkipExisting);
+    assert_eq!((out.histories, out.playlists, out.tracks), (2, 2, 2));
+    assert_eq!(history_titles(&w, "HISTORY 001"), [["Second", "First", "Second"]]);
+    assert_eq!(history_titles(&w, "HISTORY 002"), [["First"]]);
+    assert!(w.lib.histories().unwrap().iter().all(|h| !h.is_folder && h.parent_id == "root"));
+}
+
+#[test]
+fn a_history_imported_before_is_not_duplicated_whatever_the_policy() {
+    let Some(mut w) = world() else { return };
+    let device = with_histories(&w);
+    import_with(&mut w, &device, PlaylistPolicy::SkipExisting);
+    let plan = preview(&w.lib, &w.volume, &device, &options(&w, PlaylistPolicy::SkipExisting)).unwrap();
+    assert!(plan.histories.iter().all(|h| h.exists), "{:?}", plan.histories);
+
+    for policy in [PlaylistPolicy::SkipExisting, PlaylistPolicy::Merge, PlaylistPolicy::CreateNew] {
+        assert_eq!(import_with(&mut w, &device, policy).histories, 0);
+    }
+    assert_eq!(w.lib.histories().unwrap().len(), 2);
+}
+
+#[test]
+fn a_history_with_the_same_name_but_other_plays_is_a_different_session() {
+    let Some(mut w) = world() else { return };
+    let mut device = with_histories(&w);
+    import_with(&mut w, &device, PlaylistPolicy::SkipExisting);
+    let again = device.histories[2].track_ids[0];
+    device.histories[2].track_ids.push(again);
+    let out = import_with(&mut w, &device, PlaylistPolicy::SkipExisting);
+    assert_eq!(out.histories, 1);
+    assert_eq!(history_titles(&w, "HISTORY 002"), [vec!["First"], vec!["First", "First"]]);
+}
+
+#[test]
+fn a_stick_with_only_histories_can_be_imported() {
+    let Some(mut w) = world() else { return };
+    let mut device = with_histories(&w);
+    device.playlists.clear();
+    let out = import_with(&mut w, &device, PlaylistPolicy::CreateNew);
+    assert_eq!((out.histories, out.playlists, out.copied), (2, 0, 2));
+    assert!(w.lib.playlists().unwrap().iter().all(|n| !n.name.starts_with("Imported from ")), "no empty wrapper folder");
+
+    let mut empty = with_histories(&w);
+    empty.playlists.clear();
+    empty.histories.clear();
+    let share = w.dir.path().join("lib/share");
+    let opts = options(&w, PlaylistPolicy::SkipExisting);
+    let error = import_device(&mut w.lib, &share, &w.volume, &empty, &opts, &|_| {}).unwrap_err();
+    assert_eq!(error.to_string(), "This USB has no playlists or histories to import");
+}
+
 #[test]
 fn a_second_import_reuses_the_copies_and_makes_no_duplicates() {
     let Some(mut w) = world() else { return };
