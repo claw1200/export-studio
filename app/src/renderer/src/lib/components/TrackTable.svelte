@@ -63,7 +63,13 @@
   function columnWidth(column: Column): number {
     const width = widths[column.id] ?? column.width
     if (duplicateView && column.id === 'index') return Math.max(width, 72)
+    // Alternative covers are square and as tall as the row, so a wider column would only add empty space.
+    if (fixedArt(column)) return columnFloor(column)
     return Math.max(width, columnFloor(column))
+  }
+
+  function fixedArt(column: Column): boolean {
+    return stacked && column.id === 'art'
   }
 
   function columnFloor(column: Column): number {
@@ -707,7 +713,7 @@
                 {headerLabel(column)}
               </span>
             {/if}
-            {#if column.id !== 'issue'}
+            {#if column.id !== 'issue' && !fixedArt(column)}
               <div
                 class="group/resize absolute top-0 -right-1 z-20 h-full w-2 cursor-col-resize touch-none"
                 role="separator"
