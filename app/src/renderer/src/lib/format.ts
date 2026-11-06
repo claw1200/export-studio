@@ -23,8 +23,11 @@ export function formatTotal(seconds: number): string {
   return h ? `${h} h ${m} min` : `${m} min`
 }
 
+/** Whole BPMs show without decimals. Rounded to hundredths first, so float drift from a tempo change does not show as ".00". */
 export function formatBpm(bpm: number): string {
-  return bpm ? bpm.toFixed(bpm % 1 ? 2 : 0) : ''
+  if (!bpm) return ''
+  const hundredths = Math.round(bpm * 100)
+  return (hundredths / 100).toFixed(hundredths % 100 ? 2 : 0)
 }
 
 export function formatBeatLength(beats: number): string {
