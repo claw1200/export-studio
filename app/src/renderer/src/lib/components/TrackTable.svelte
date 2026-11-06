@@ -9,6 +9,7 @@
     defaultHidden,
     defaultOrder,
     readColumnPrefs,
+    rowFontSize,
     type Column
   } from '$lib/browserColumns'
   import { getApp } from '$lib/context'
@@ -230,8 +231,11 @@
     save()
   }
 
-  const ROW = 32
+  /** Height of the sticky column header, which stays the same at every row height. */
+  const HEADER = 32
   const OVERSCAN = 12
+  const ROW = $derived(library.browserRowHeight)
+  const rowFont = $derived(rowFontSize(ROW))
 
   let viewport = $state<HTMLDivElement>()
   let scrollTop = $state(0)
@@ -289,9 +293,8 @@
 
   export function ensureVisible(index: number): void {
     if (!viewport) return
-    const header = ROW
     const top = index * ROW
-    const visibleH = viewport.clientHeight - header
+    const visibleH = viewport.clientHeight - HEADER
     if (top < viewport.scrollTop) viewport.scrollTop = top
     else if (top + ROW > viewport.scrollTop + visibleH) viewport.scrollTop = top + ROW - visibleH
   }
@@ -492,7 +495,7 @@
   function autoScroll(e: DragEvent): void {
     if (!(library.dragging || fileDrop) || !library.canReorder || !viewport) return
     const rect = viewport.getBoundingClientRect()
-    if (e.clientY < rect.top + ROW + AUTOSCROLL_EDGE) viewport.scrollTop -= AUTOSCROLL_STEP
+    if (e.clientY < rect.top + HEADER + AUTOSCROLL_EDGE) viewport.scrollTop -= AUTOSCROLL_STEP
     else if (e.clientY > rect.bottom - AUTOSCROLL_EDGE) viewport.scrollTop += AUTOSCROLL_STEP
   }
 </script>
@@ -512,7 +515,7 @@
 {#snippet cell(column: Column, track: Track, index: number)}
   {#if column.id === 'index'}
     {#if player.track?.id === track.id}
-      <AudioLines class={['ml-auto size-3.5 text-accent', player.playing && 'animate-pulse']} />
+      <AudioLines class={['ml-auto size-[1.12em] text-accent', player.playing && 'animate-pulse']} />
     {:else}
       {@const group = duplicateView ? library.positions.get(track.id) : undefined}
       <span class={track.missing ? 'text-warn/70' : 'text-faint'} title={group ? `Group ${group}` : undefined}>
@@ -521,26 +524,29 @@
     {/if}
   {:else if column.id === 'color'}
     {#if TRACK_COLORS[track.color]}
-      <span class="block h-4 w-[3px] rounded-full" style:background={TRACK_COLORS[track.color].hex}></span>
+      <span class="block h-[1.28em] w-[3px] rounded-full" style:background={TRACK_COLORS[track.color].hex}></span>
     {/if}
   {:else if column.id === 'art'}
     {@const fill = library.browserArtwork === 'fill'}
     {#if track.hasArtwork}
       <img
-        src={artworkUrl(track.id, fill ? 'm' : 's')}
+        src={artworkUrl(track.id, fill || ROW > 40 ? 'm' : 's')}
         alt=""
         loading="lazy"
         decoding="async"
         draggable="false"
         class={fill
           ? 'absolute inset-0 size-full object-cover object-top'
-          : 'size-6 rounded-[3px] bg-raised object-cover'}
+          : 'size-[1.92em] rounded-[3px] bg-raised object-cover'}
       />
     {:else}
       <span
-        class={['grid place-items-center bg-raised text-faint', fill ? 'absolute inset-0' : 'size-6 rounded-[3px]']}
+        class={[
+          'grid place-items-center bg-raised text-faint',
+          fill ? 'absolute inset-0' : 'size-[1.92em] rounded-[3px]'
+        ]}
       >
-        <Music class={fill ? 'size-3.5' : 'size-3'} />
+        <Music class={fill ? 'size-[1.12em]' : 'size-[0.96em]'} />
       </span>
     {/if}
   {:else if column.id === 'title'}
@@ -560,7 +566,7 @@
   {:else if column.id === 'cue'}
     {#if track.collected === false}
       <span class="text-faint" title="Not in the collection" aria-label="Not in the collection">
-        <X class="size-3.5" />
+        <X class="size-[1.12em]" />
       </span>
     {:else}
       {@const preview = browserPreviews.preview(track.id)}
@@ -570,7 +576,7 @@
           {#each CUE_STARS as star (star.key)}
             {#if preview?.[star.key]}
               <span class="inline-flex" style:color={star.color} aria-hidden="true">
-                <Star class="size-3.5 fill-current" strokeWidth={0} />
+                <Star class="size-[1.12em] fill-current" strokeWidth={0} />
               </span>
             {/if}
           {/each}
@@ -578,7 +584,7 @@
       {/if}
     {/if}
   {:else if column.id === 'rating'}
-    <RatingStars value={track.rating} starClass="size-3" class="gap-px" />
+    <RatingStars value={track.rating} starClass="size-[0.96em]" class="gap-px" />
   {:else if column.id === 'compat'}
     {@const verdict = compatibilityOf(track)}
     <span
@@ -590,7 +596,7 @@
     >
       <span
         class={[
-          'block size-2.5 rounded-full',
+          'block size-[0.8em] rounded-full',
           verdict.color === 'green' && 'bg-ok',
           verdict.color === 'yellow' && 'bg-warn',
           verdict.color === 'red' && 'bg-danger'
@@ -600,7 +606,7 @@
   {:else if column.id === 'fileType'}
     <span
       class={[
-        'rounded border px-1 py-px text-[10px] font-medium',
+        'rounded border px-1 py-px text-[0.8em] font-medium',
         track.missing ? 'border-warn/40 text-warn' : 'border-line text-faint'
       ]}
     >
@@ -712,13 +718,14 @@
             {@const selected = library.selection.has(track.id)}
             <div
               class={[
-                'grid cursor-default items-center text-[12.5px]',
+                'grid cursor-default items-center',
                 selected ? 'bg-select' : 'hover:bg-surface',
                 track.missing ? 'text-warn' : selected ? 'text-fg' : 'text-muted',
                 library.canReorder && dragged.has(track.id) && 'opacity-40'
               ]}
               style:grid-template-columns={template}
               style:height="{ROW}px"
+              style:font-size="{rowFont}px"
               role="row"
               tabindex="-1"
               aria-selected={selected}
@@ -738,7 +745,7 @@
                     column.align === 'right' && 'justify-end',
                     column.align === 'center' && 'justify-center',
                     column.id === 'wave' && 'h-full px-1.5',
-                    column.id === 'art' && library.browserArtwork === 'fill' && 'relative h-8 px-0'
+                    column.id === 'art' && library.browserArtwork === 'fill' && 'relative h-full px-0'
                   ]}
                 >
                   {@render cell(column, track, index)}

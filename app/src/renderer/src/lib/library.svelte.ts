@@ -1,4 +1,5 @@
 import { api } from './api'
+import { BROWSER_ROW_HEIGHT_KEY, clampRowHeight, readRowHeight } from './browserColumns'
 import { browserPreviews } from './browserPreview.svelte'
 import { clearDetailCache } from './deck/session.svelte'
 import { clearWaveCache } from './deck/waves.svelte'
@@ -115,6 +116,7 @@ export class Library {
   hidePresetTracks = $state(storedHidePresetTracks())
   doubleClickToLoad = $state(getSetting('doubleClickToLoad') === '1')
   browserArtwork = $state<BrowserArtwork>(storedArtwork())
+  browserRowHeight = $state(readRowHeight(getSetting(BROWSER_ROW_HEIGHT_KEY)))
   hardwareGreen = $state(storedPlayer('hardwareGreen', DEFAULT_GREEN))
   importing = $state(false)
   converting = $state(false)
@@ -424,6 +426,13 @@ export class Library {
   setBrowserArtwork(style: BrowserArtwork): void {
     this.browserArtwork = style
     setSetting('browserArtwork', style)
+  }
+
+  setBrowserRowHeight(height: number): void {
+    const next = clampRowHeight(height)
+    if (this.browserRowHeight === next) return
+    this.browserRowHeight = next
+    setSetting(BROWSER_ROW_HEIGHT_KEY, String(next))
   }
 
   setHardwareGreen(id: string): void {

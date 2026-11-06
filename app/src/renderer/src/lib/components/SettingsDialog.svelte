@@ -24,6 +24,7 @@
   } from '@lucide/svelte'
   import { accent, DEFAULT_ACCENT } from '$lib/accent.svelte'
   import { BPM_RANGES, MAX_CONCURRENCY } from '$lib/analysis.svelte'
+  import { ROW_HEIGHT_MAX, ROW_HEIGHT_MIN, ROW_HEIGHT_STEP } from '$lib/browserColumns'
   import { backupDate, INTERVAL_CHOICES, KEEP_CHOICES } from '$lib/backups.svelte'
   import {
     BIT_DEPTHS,
@@ -300,6 +301,29 @@
               library.browserArtwork,
               (id) => library.setBrowserArtwork(id as BrowserArtwork)
             )}
+            <div class="flex items-center gap-3 rounded-md px-2 py-2">
+              <span class="min-w-0 flex-1">
+                <span class="block text-[12.5px] font-medium">Track height</span>
+                <span class="mt-0.5 block text-[11px] leading-snug text-faint">
+                  Height of each track in the browser. Text, artwork and waveforms scale with it. Lower fits more
+                  tracks, higher is easier to read.
+                </span>
+              </span>
+              <input
+                class="h-4 w-28 shrink-0 cursor-pointer accent-accent"
+                type="range"
+                min={ROW_HEIGHT_MIN}
+                max={ROW_HEIGHT_MAX}
+                step={ROW_HEIGHT_STEP}
+                aria-label="Track height"
+                aria-valuetext="{library.browserRowHeight} pixels"
+                value={library.browserRowHeight}
+                oninput={(e) => library.setBrowserRowHeight(Number(e.currentTarget.value))}
+              />
+              <span class="w-9 shrink-0 text-right font-mono text-[11px] text-muted tabular-nums">
+                {library.browserRowHeight}px
+              </span>
+            </div>
             {@render toggle(
               'Hide streaming tracks',
               'Leave tracks from streaming services out of the collection, playlists, histories and tags. They stay in rekordbox.',

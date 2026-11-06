@@ -34,6 +34,35 @@ export const COLUMNS: Column[] = [
 export const BROWSER_COLUMNS_KEY = 'browserColumns'
 export const COLUMN_LAYOUT_VERSION = 3
 
+export const BROWSER_ROW_HEIGHT_KEY = 'browserRowHeight'
+/** Track row height in the browser, in pixels. The default is the height rows had before it could change. */
+export const ROW_HEIGHT_DEFAULT = 32
+export const ROW_HEIGHT_MIN = 24
+export const ROW_HEIGHT_MAX = 56
+export const ROW_HEIGHT_STEP = 2
+/** Row text size at the default height; everything in a row is sized in em from it. */
+const ROW_FONT_DEFAULT = 12.5
+const ROW_FONT_MIN = 10
+
+/** Rounds a row height to the slider step and keeps it inside the range. */
+export function clampRowHeight(height: number): number {
+  if (!Number.isFinite(height)) return ROW_HEIGHT_DEFAULT
+  const stepped = Math.round((height - ROW_HEIGHT_MIN) / ROW_HEIGHT_STEP) * ROW_HEIGHT_STEP + ROW_HEIGHT_MIN
+  return Math.min(ROW_HEIGHT_MAX, Math.max(ROW_HEIGHT_MIN, stepped))
+}
+
+/** The stored row height, or the default when nothing usable is stored. */
+export function readRowHeight(raw: string | null): number {
+  if (raw == null || raw.trim() === '') return ROW_HEIGHT_DEFAULT
+  return clampRowHeight(Number(raw))
+}
+
+/** Row text size for a row height, in pixels. It grows with the row and never drops below a readable size. */
+export function rowFontSize(height: number): number {
+  const size = (ROW_FONT_DEFAULT * clampRowHeight(height)) / ROW_HEIGHT_DEFAULT
+  return Math.max(ROW_FONT_MIN, Math.round(size * 4) / 4)
+}
+
 const SHOWN_BY_DEFAULT = [
   'index',
   'compat',
