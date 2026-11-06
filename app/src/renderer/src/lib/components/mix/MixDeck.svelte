@@ -2,6 +2,8 @@
   import { LoaderCircle, Minus, Music, Plus } from '@lucide/svelte'
   import { artworkUrl } from '$lib/api'
   import { setPlayer } from '$lib/deck/context'
+  import { TrackDrop } from '$lib/deck/drop.svelte'
+  import { getApp } from '$lib/context'
   import { formatBpm, formatClock, keyColor, pitchSemitones, shiftKey } from '$lib/format'
   import { ownBpm, playingBpm, type Mixer } from '$lib/mixer.svelte'
   import type { Player } from '$lib/player.svelte'
@@ -32,6 +34,13 @@
 
   // svelte-ignore state_referenced_locally
   setPlayer(player)
+
+  const { library } = getApp()
+  // svelte-ignore state_referenced_locally
+  const drop = new TrackDrop(library, (track) => {
+    onfocus()
+    void player.load(track)
+  })
 
   const track = $derived(player.track)
   const rate = $derived(player.tempo.rate)
@@ -140,19 +149,30 @@
     {:else if track}
       No analysis data for this track
     {:else}
-      Double-click a track to load it on deck {label}
+      Double-click or drag a track here to load it on deck {label}
     {/if}
   </div>
 {/snippet}
 
 <section
   class={[
-    'flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border bg-surface transition-colors',
+    'relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border bg-surface transition-colors',
     focused ? 'border-accent/60' : 'border-line-soft'
   ]}
   onpointerdowncapture={onfocus}
   aria-label="Deck {label}"
+  ondragenter={drop.ondragenter}
+  ondragover={drop.ondragover}
+  ondragleave={drop.ondragleave}
+  ondrop={drop.ondrop}
 >
+  {#if drop.over}
+    <div
+      class="pointer-events-none absolute inset-0 z-30 grid place-items-center rounded-[inherit] border-2 border-accent bg-accent-soft"
+    >
+      <span class="rounded bg-bg/80 px-2 py-1 text-[12px] font-semibold text-accent">Load on deck {label}</span>
+    </div>
+  {/if}
   <div class="relative h-[104px] border-b border-line-soft bg-[oklch(0.12_0.005_260)]">
     {#if player.waveform}
       <WaveformDetail />

@@ -134,6 +134,8 @@ export class Library {
   convertProgress = $state.raw<{ done: number; total: number } | null>(null)
   renamingId = $state<string | null>(null)
   dragging = $state.raw<string[] | null>(null)
+  /** The row a drag of `dragging` was started on: what a deck loads when they are dropped on it. */
+  dragAnchor: string | null = null
   private noticeTimer: ReturnType<typeof setTimeout> | undefined
   private trackListeners = new Set<(tracks: Track[]) => void>()
   private importListeners = new Set<(tracks: Track[]) => void>()

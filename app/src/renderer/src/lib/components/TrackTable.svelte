@@ -449,6 +449,7 @@
       return
     }
     library.dragging = ids
+    library.dragAnchor = track.id
     void library.loadPlaylistContents()
     const transfer = e.dataTransfer
     if (!transfer) return
@@ -461,6 +462,7 @@
 
   function dragEnd(): void {
     library.dragging = null
+    library.dragAnchor = null
     dropIndex = null
   }
 
