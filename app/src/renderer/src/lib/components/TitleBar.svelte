@@ -173,7 +173,7 @@
         {:else}
           <Lock class="size-3" />
         {/if}
-        {library.writable ? 'Editing' : 'Read-only'}
+        {library.writable ? 'Editing' : 'Unlock Editing'}
       </button>
       <button
         class="no-drag flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-faint hover:bg-hover hover:text-muted disabled:opacity-50 disabled:hover:bg-transparent"
