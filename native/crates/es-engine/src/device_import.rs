@@ -284,7 +284,8 @@ fn plan_histories(lib: &Library, db_id: i64, volume: &Path, device: &Device, roo
                     let audio = audio_of(volume, track)?;
                     let file_name = if track.filename.is_empty() { audio.file_name()?.to_string_lossy().into_owned() } else { track.filename.clone() };
                     let copy = existing_copy(&audio, &candidate(root, &track.artist, &track.album, &file_name, contents))?;
-                    by_path.get(copy.to_string_lossy().as_ref()).cloned()
+                    // The library stores paths with forward slashes, as an import does.
+                    by_path.get(&copy.to_string_lossy().replace('\\', "/")).cloned()
                 })
             })
             .clone()
