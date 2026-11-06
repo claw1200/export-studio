@@ -63,9 +63,16 @@
   function columnWidth(column: Column): number {
     const width = widths[column.id] ?? column.width
     if (duplicateView && column.id === 'index') return Math.max(width, 72)
-    // The alternative style's square cover is as tall as the row; keep room for it and the cell padding.
-    if (stacked && column.id === 'art') return Math.max(width, ROW + 16)
-    return Math.max(width, minColumnWidth(column, rowFont))
+    return Math.max(width, columnFloor(column))
+  }
+
+  function columnFloor(column: Column): number {
+    if (column.id === 'art') {
+      // Alternative: room for the square cover, as tall as the row, plus cell padding.
+      // Standard: at least twice the row height, so the cover is always cropped to a strip from its top.
+      return Math.min(column.max, stacked ? ROW + 16 : ROW * 2)
+    }
+    return minColumnWidth(column, rowFont)
   }
 
   function headerLabel(column: Column): string {
@@ -127,7 +134,7 @@
     handle.setPointerCapture(e.pointerId)
     const cell = handle.parentElement
     const measured = cell?.getBoundingClientRect().width ?? widths[column.id]
-    const startW = Math.min(column.max, Math.max(minColumnWidth(column, rowFont), Math.round(measured)))
+    const startW = Math.min(column.max, Math.max(columnFloor(column), Math.round(measured)))
     const wasSized = sized.includes(column.id)
     widths[column.id] = startW
     if (column.fr && !wasSized) sized = [...sized, column.id]
@@ -140,7 +147,7 @@
     const column = COLUMNS.find((item) => item.id === current.id)
     if (!column) return
     const next = Math.round(current.startW + e.clientX - current.startX)
-    widths[column.id] = Math.min(column.max, Math.max(minColumnWidth(column, rowFont), next))
+    widths[column.id] = Math.min(column.max, Math.max(columnFloor(column), next))
   }
 
   function endResize(): void {
