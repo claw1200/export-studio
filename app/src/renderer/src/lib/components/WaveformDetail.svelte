@@ -11,8 +11,14 @@
   let width = $state(0)
   let height = $state(0)
   let drag: { x: number; position: number } | null = null
-  /** A beat handle being dragged: its section moves, or with Alt its tempo stretches to put the beat here. */
-  let gridDrag: { x: number; base: TempoMap; section: number; step: number; at: number; stretch: boolean } | null = null
+  let gridDrag: {
+    x: number
+    dragStart: TempoMap
+    section: number
+    step: number
+    beatMs: number
+    stretch: boolean
+  } | null = null
   let movingGrid = $state(false)
   let scrubbing = $state(false)
   let pointer = $state.raw<{ x: number; y: number } | null>(null)
@@ -118,13 +124,13 @@
     const handle = handleAt(point)
     const { map, draft } = player.grid
     if (map && draft && handle >= 0) {
-      const step = draft.steps[handle]
+      const step = draft.stepInSection[handle]
       gridDrag = {
         x: e.clientX,
-        base: map,
-        section: draft.sections[handle],
+        dragStart: map,
+        section: draft.sectionOfBeat[handle],
         step,
-        at: draft.times[handle],
+        beatMs: draft.times[handle],
         stretch: e.altKey && step !== 0
       }
       movingGrid = true
@@ -138,9 +144,10 @@
     const point = pointOf(e)
     if (point) pointer = point
     if (gridDrag) {
+      const { section, step, beatMs, stretch, dragStart } = gridDrag
       const ms = (e.clientX - gridDrag.x) * secondsPerPixel() * 1000
-      if (gridDrag.stretch) player.grid.stretch(gridDrag.section, gridDrag.step, gridDrag.at + ms, gridDrag.base)
-      else player.grid.shiftSection(gridDrag.section, ms, gridDrag.base)
+      if (stretch) player.grid.stretch(section, step, beatMs + ms, dragStart)
+      else player.grid.shiftSection(section, ms, dragStart)
       return
     }
     if (!drag) return

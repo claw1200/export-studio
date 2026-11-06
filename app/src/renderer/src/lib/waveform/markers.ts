@@ -74,12 +74,11 @@ export function paintBeatGrid(frame: Frame): void {
   })
 }
 
-/** A faint wash over each ramp, growing toward its end, so the tempo change reads at a glance. */
 function paintRamps(frame: Frame): void {
   const { ctx, view, pw, ph, toX } = frame
   for (const flag of view.tempoFlags ?? []) {
     if (flag.rampEndMs == null) continue
-    const x0 = toX(flag.ms / 1000)
+    const x0 = toX(flag.startMs / 1000)
     const x1 = toX(flag.rampEndMs / 1000)
     if (x1 < 0 || x0 > pw) continue
     const wash = ctx.createLinearGradient(x0, 0, x1, 0)
@@ -90,7 +89,6 @@ function paintRamps(frame: Frame): void {
   }
 }
 
-/** A dashed line where each section after the first begins. */
 function paintSectionBounds(frame: Frame): void {
   const { ctx, view, pw, ph, dpr, toX } = frame
   ctx.save()
@@ -99,7 +97,7 @@ function paintSectionBounds(frame: Frame): void {
   ctx.setLineDash([3 * dpr, 3 * dpr])
   for (const flag of view.tempoFlags ?? []) {
     if (flag.first) continue
-    const x = Math.round(toX(flag.ms / 1000)) + 0.5
+    const x = Math.round(toX(flag.startMs / 1000)) + 0.5
     if (x < -2 || x > pw + 2) continue
     ctx.beginPath()
     ctx.moveTo(x, 0)
@@ -137,6 +135,12 @@ export function gridHandleIndex(
   return best
 }
 
+const HANDLE_COLORS = {
+  flag: { normal: TEMPO_FLAG_COLOR, hot: '#cdb4ff' },
+  downbeat: { normal: '#ff4858', hot: '#ff6174' },
+  beat: { normal: 'rgba(255,255,255,0.92)', hot: '#ffffff' }
+}
+
 /** A vertical pill on each beat, centered on the grid line. Dragging one shifts the grid. */
 export function paintGridHandles(frame: Frame): void {
   const { ctx, view, dpr, ph, toX, wf, from, to } = frame
@@ -148,25 +152,16 @@ export function paintGridHandles(frame: Frame): void {
   const y = ph / 2
   const startMs = (from / wf.rate) * 1000
   const endMs = (to / wf.rate) * 1000
-  const flagTimes = (view.tempoFlags ?? []).map((f) => f.ms)
+  const flagStarts = (view.tempoFlags ?? []).map((flag) => flag.startMs)
   eachVisibleBeat(grid.times, startMs, endMs, (i) => {
     const x = Math.round(toX(grid.times[i] / 1000)) + line / 2
     const downbeat = grid.beats[i] === 1
     const hot = i === view.hotGridIndex
-    const flagged = flagTimes.some((ms) => Math.abs(ms - grid.times[i]) < 0.5)
+    const flagged = flagStarts.some((start) => Math.abs(start - grid.times[i]) < 0.5)
     ctx.beginPath()
     ctx.roundRect(x - w / 2, y - h / 2, w, h, w / 2)
-    ctx.fillStyle = flagged
-      ? hot
-        ? '#cdb4ff'
-        : TEMPO_FLAG_COLOR
-      : downbeat
-        ? hot
-          ? '#ff6174'
-          : '#ff4858'
-        : hot
-          ? '#ffffff'
-          : 'rgba(255,255,255,0.92)'
+    const kind = flagged ? 'flag' : downbeat ? 'downbeat' : 'beat'
+    ctx.fillStyle = HANDLE_COLORS[kind][hot ? 'hot' : 'normal']
     ctx.fill()
     ctx.lineWidth = Math.max(1, dpr)
     ctx.strokeStyle = 'rgba(0,0,0,0.5)'

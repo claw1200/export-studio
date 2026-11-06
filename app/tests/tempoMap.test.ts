@@ -10,26 +10,35 @@ type TempoFlag = import('../src/renderer/src/lib/tempo-map.ts').TempoFlag
 
 const DURATION = 240_000
 
-function flag(ms: number, bpm: number, extra: Partial<TempoFlag> = {}): TempoFlag {
-  return { id: tm.newFlagId(), ms, bpm, ramp: 0, beat: null, source: null, coord: 0, scale: 1, ...extra }
+function flag(startMs: number, bpm: number, extra: Partial<TempoFlag> = {}): TempoFlag {
+  return {
+    id: tm.newFlagId(),
+    startMs,
+    bpm,
+    rampBeats: 0,
+    beatNumber: null,
+    loaded: null,
+    savedBeat: 0,
+    savedBeatsPerBeat: 1,
+    ...extra
+  }
 }
 
-/** What save writes: whole milliseconds and hundredths of a BPM, as PQTZ stores them. */
-function saved(map: TempoMap): { times: number[]; beats: number[]; bpms: number[] } {
+function asSaved(map: TempoMap): { times: number[]; beats: number[]; bpms: number[] } {
   const g = tm.compileTempoMap(map)
-  return { times: g.times.map(Math.round), beats: g.beats, bpms: g.bpms.map((b: number) => Math.round(b * 100) / 100) }
+  return { times: g.times.map(Math.round), beats: g.beats, bpms: g.bpms.map(tm.roundBpm) }
 }
 
 function shape(map: TempoMap): string[] {
-  return map.flags.map((f) => `${f.bpm}${f.ramp ? `/ramp${f.ramp}` : ''}${tm.varies(f) ? '~' : ''}`)
+  return map.flags.map((f) => `${f.bpm}${f.rampBeats ? `/ramp${f.rampBeats}` : ''}${tm.varies(f) ? '~' : ''}`)
 }
 
 const DJ_EDIT: TempoMap = {
   durationMs: DURATION,
   flags: [
-    flag(412, 136, { beat: 1 }),
-    flag(412 + 128 * (60_000 / 136), 150, { ramp: 32 }),
-    flag(110_000, 174, { beat: 1 }),
+    flag(412, 136, { beatNumber: 1 }),
+    flag(412 + 128 * (60_000 / 136), 150, { rampBeats: 32 }),
+    flag(110_000, 174, { beatNumber: 1 }),
     flag(180_000, 140)
   ]
 }
@@ -37,7 +46,7 @@ const DJ_EDIT: TempoMap = {
 describe('tempo flags', () => {
   it('compiles a ramp as one tempo step per beat', () => {
     const g = tm.compileTempoMap(DJ_EDIT)
-    const start = g.starts[1]
+    const start = g.sectionStart[1]
     assert.equal(g.bpms[start - 1], 136)
     assert.ok(Math.abs(g.bpms[start] - (136 + 14 / 32)) < 1e-9)
     assert.equal(g.bpms[start + 31], 150)
@@ -45,21 +54,21 @@ describe('tempo flags', () => {
   })
 
   it('reads a saved grid back as the same flags, ramps included', () => {
-    const back = tm.tempoMapOf(saved(DJ_EDIT), DURATION)!
+    const back = tm.tempoMapOf(asSaved(DJ_EDIT), DURATION)!
     assert.deepEqual(shape(back), ['136', '150/ramp32', '174', '140'])
-    assert.equal(back.flags[2].beat, 1)
+    assert.equal(back.flags[2].beatNumber, 1)
   })
 
   it('saves an unedited grid exactly as it was loaded', () => {
-    const first = saved(DJ_EDIT)
-    const again = saved(tm.tempoMapOf(first, DURATION)!)
+    const first = asSaved(DJ_EDIT)
+    const again = asSaved(tm.tempoMapOf(first, DURATION)!)
     assert.deepEqual(again, first)
   })
 
   it('keeps a ramp after an edit elsewhere, and still reads it back as one flag', () => {
-    const loaded = tm.tempoMapOf(saved(DJ_EDIT), DURATION)!
+    const loaded = tm.tempoMapOf(asSaved(DJ_EDIT), DURATION)!
     const edited = tm.setFlagBpm(loaded, 1, 152)
-    assert.deepEqual(shape(tm.tempoMapOf(saved(edited), DURATION)!), ['136', '152/ramp32', '174', '140'])
+    assert.deepEqual(shape(tm.tempoMapOf(asSaved(edited), DURATION)!), ['136', '152/ramp32', '174', '140'])
   })
 
   it('reads a grid whose tempo wobbles beat by beat as one section', () => {
@@ -77,25 +86,25 @@ describe('tempo flags', () => {
     const map = tm.tempoMapOf({ times, beats, bpms }, times[times.length - 1] + 100)!
     assert.equal(map.flags.length, 1)
     assert.ok(tm.varies(map.flags[0]))
-    assert.deepEqual(saved(map).times, times)
+    assert.deepEqual(asSaved(map).times, times)
   })
 
   it('adds a flag without moving any beat', () => {
-    const before = saved(DJ_EDIT)
+    const before = asSaved(DJ_EDIT)
     const added = tm.addFlag(DJ_EDIT, 60_000)!
     assert.equal(added.map.flags.length, 5)
-    assert.deepEqual(saved(added.map), before)
+    assert.deepEqual(asSaved(added.map), before)
   })
 
   it('changes one section without moving the flags after it', () => {
     const map = tm.setFlagBpm(DJ_EDIT, 2, 175)
     assert.deepEqual(
-      map.flags.map((f) => f.ms),
-      DJ_EDIT.flags.map((f) => f.ms)
+      map.flags.map((f) => f.startMs),
+      DJ_EDIT.flags.map((f) => f.startMs)
     )
     const shifted = tm.shiftSection(DJ_EDIT, 2, 25)
-    assert.equal(shifted.flags[2].ms, 110_025)
-    assert.equal(shifted.flags[3].ms, 180_000)
+    assert.equal(shifted.flags[2].startMs, 110_025)
+    assert.equal(shifted.flags[3].startMs, 180_000)
   })
 
   it('stretches a section so a chosen beat lands on the target', () => {
@@ -112,12 +121,12 @@ describe('tempo flags', () => {
   })
 
   it('moves cues with the section they sit in', () => {
-    const loaded = tm.tempoMapOf(saved(DJ_EDIT), DURATION)!
+    const loaded = tm.tempoMapOf(asSaved(DJ_EDIT), DURATION)!
     const grid = tm.compileTempoMap(loaded)
-    const coord = grid.starts[2] + 8
+    const savedBeat = grid.sectionStart[2] + 8
     const shifted = tm.shiftSection(loaded, 2, 30)
-    const at = tm.timeAtCoord(shifted, tm.compileTempoMap(shifted), coord)
-    assert.ok(Math.abs(at - (grid.times[grid.starts[2] + 8] + 30)) < 1e-6)
+    const at = tm.timeOfSavedBeat(shifted, tm.compileTempoMap(shifted), savedBeat)
+    assert.ok(Math.abs(at - (grid.times[grid.sectionStart[2] + 8] + 30)) < 1e-6)
   })
 
   it('removes a flag and lets the section before carry on', () => {

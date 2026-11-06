@@ -1,10 +1,8 @@
 import type { Beatgrid, Cue } from '../types'
 import type { Waveform } from './data'
 
-/** A tempo flag as the waveform draws it while the grid is edited. */
 export interface TempoFlagMark {
-  ms: number
-  /** End of the flag's ramp, or null when it jumps. */
+  startMs: number
   rampEndMs: number | null
   first: boolean
 }
@@ -21,7 +19,6 @@ export interface DetailView {
   gridEditing: boolean
   /** Beat under the pointer while editing, or -1. Dragging its handle shifts the grid. */
   hotGridIndex: number
-  /** Tempo flags while the grid is edited. */
   tempoFlags?: TempoFlagMark[]
 }
 

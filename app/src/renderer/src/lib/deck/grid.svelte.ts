@@ -1,5 +1,5 @@
 import { api } from '../api'
-import { beatCoord } from '../beat'
+import { fractionalBeatIndex, nearestBeatIndex } from '../beat'
 import {
   addFlag,
   compileTempoMap,
@@ -7,6 +7,7 @@ import {
   moveFlag,
   rampEndMs,
   removeFlag,
+  roundBpm,
   sectionAt,
   setBarStart,
   setDownbeat,
@@ -17,7 +18,7 @@ import {
   stretchSection,
   type TempoMap,
   tempoMapOf,
-  timeAtCoord
+  timeOfSavedBeat
 } from '../tempo-map'
 import type { Beatgrid, Cue, CueMove } from '../types'
 import type { TempoFlagMark } from '../waveform/frame'
@@ -25,36 +26,28 @@ import type { TrackSession } from './session.svelte'
 import { storedFlag, storeFlag } from './stored'
 
 const HISTORY_LIMIT = 200
+const FLAG_JUMP_MARGIN_MS = 50
 
-/**
- * Beatgrid editing: the grid held as tempo flags while editing, with undo, and cues that can follow it.
- * Saved or discarded as a whole.
- */
+/** Beatgrid editing: the grid held as tempo flags, saved or discarded as a whole. */
 export class GridEditor {
   editing = $state(false)
   map = $state.raw<TempoMap | null>(null)
-  /** The flag whose options are open, by id. */
-  selected = $state<number | null>(null)
-  /** A flag just added, whose options open ready to type its tempo. */
-  added = $state<number | null>(null)
+  selectedFlagId = $state<number | null>(null)
+  justAddedFlagId = $state<number | null>(null)
   /** Cues move with the grid while it is edited. */
   link = $state(storedFlag('gridLink', true))
-  private history = $state.raw<TempoMap[]>([])
-  private future = $state.raw<TempoMap[]>([])
-  private initial: TempoMap | null = null
-  /** The map a drag started from, so one drag is one undo step. */
-  private gestureBase: TempoMap | null = null
+  private undoStack = $state.raw<TempoMap[]>([])
+  private redoStack = $state.raw<TempoMap[]>([])
+  private loadedMap: TempoMap | null = null
+  private dragStartMap: TempoMap | null = null
 
-  /** The per-beat grid the flags describe. */
   readonly draft: CompiledGrid | null
   /** The grid to draw: the draft while editing. */
   readonly grid: Beatgrid | null
   /** The cues to draw, moved with the draft when they are linked to it. */
   readonly cues: Cue[]
   readonly dirty: boolean
-  /** The section the playhead is in. */
-  readonly section: number
-  /** Where flags and their ramps sit, for drawing over the waveform. Empty when not editing. */
+  readonly sectionAtPlayhead: number
   readonly flagMarks: TempoFlagMark[]
 
   constructor(
@@ -62,26 +55,35 @@ export class GridEditor {
     /** The playhead, in seconds. */
     private position: () => number,
     /** The track's length in ms. */
-    private trackMs: () => number
+    private trackMs: () => number,
+    private seek: (seconds: number) => void
   ) {
     this.draft = $derived(this.map ? compileTempoMap(this.map) : null)
     this.grid = $derived(this.draft ?? this.session.detail?.beatgrid ?? null)
-    this.dirty = $derived(!!this.map && this.map !== this.initial)
-    this.section = $derived(this.map ? sectionAt(this.map, this.position() * 1000) : 0)
+    this.dirty = $derived(!!this.map && this.map !== this.loadedMap)
+    this.sectionAtPlayhead = $derived(this.map ? sectionAt(this.map, this.playheadMs) : 0)
     this.flagMarks = $derived.by(() => {
       const { map, draft } = this
       if (!map || !draft) return []
-      return map.flags.map((f, j) => ({ ms: f.ms, rampEndMs: rampEndMs(draft, map, j), first: j === 0 }))
+      return map.flags.map((flag, j) => ({
+        startMs: flag.startMs,
+        rampEndMs: rampEndMs(draft, map, j),
+        first: j === 0
+      }))
     })
     this.cues = $derived.by(() => {
       const cues = this.session.detail?.cues ?? []
       const saved = this.session.detail?.beatgrid
-      const map = this.map
-      const draft = this.draft
+      const { map, draft } = this
       if (!this.link || !this.dirty || !saved?.times.length || !map || !draft) return cues
-      const move = (ms: number): number => Math.max(0, Math.round(timeAtCoord(map, draft, beatCoord(saved, ms))))
+      const move = (ms: number): number =>
+        Math.max(0, Math.round(timeOfSavedBeat(map, draft, fractionalBeatIndex(saved, ms))))
       return cues.map((cue) => ({ ...cue, start: move(cue.start), end: cue.end == null ? null : move(cue.end) }))
     })
+  }
+
+  private get playheadMs(): number {
+    return this.position() * 1000
   }
 
   get canEdit(): boolean {
@@ -89,11 +91,11 @@ export class GridEditor {
   }
 
   get canUndo(): boolean {
-    return this.history.length > 0
+    return this.undoStack.length > 0
   }
 
   get canRedo(): boolean {
-    return this.future.length > 0
+    return this.redoStack.length > 0
   }
 
   begin(): void {
@@ -101,23 +103,23 @@ export class GridEditor {
     if (!grid?.times.length || this.editing) return
     const map = tempoMapOf(grid, Math.max(this.trackMs(), grid.times[grid.times.length - 1]))
     if (!map) return
-    this.initial = map
-    this.map = map
-    this.history = []
-    this.future = []
-    this.gestureBase = null
-    this.selected = null
+    this.reset(map)
     this.editing = true
     this.session.editError = null
   }
 
   cancel(): void {
+    this.reset(null)
     this.editing = false
-    this.map = null
-    this.initial = null
-    this.history = []
-    this.future = []
-    this.selected = null
+  }
+
+  private reset(map: TempoMap | null): void {
+    this.loadedMap = map
+    this.map = map
+    this.undoStack = []
+    this.redoStack = []
+    this.dragStartMap = null
+    this.selectedFlagId = null
   }
 
   setLink(on: boolean): void {
@@ -125,130 +127,107 @@ export class GridEditor {
     storeFlag('gridLink', on)
   }
 
-  /**
-   * Applies an edit. Pass `base` (the map a drag started from) to make every update of one drag a single
-   * undo step; the edit is then applied to `base`, not to the current map.
-   */
-  private apply(edit: (map: TempoMap) => TempoMap, base?: TempoMap | null): void {
+  /** Every update of one drag passes the same `dragStart`, so the whole drag is one undo step. */
+  private apply(edit: (map: TempoMap) => TempoMap, dragStart?: TempoMap | null): void {
     if (!this.editing || !this.map) return
-    const from = base ?? this.map
-    const next = edit(from)
-    if (base) {
-      if (this.gestureBase !== base) {
-        this.gestureBase = base
-        this.push(base)
-      }
+    const next = edit(dragStart ?? this.map)
+    if (dragStart) {
+      if (this.dragStartMap !== dragStart) this.pushUndo(dragStart)
+      this.dragStartMap = dragStart
     } else {
-      this.gestureBase = null
+      this.dragStartMap = null
       if (next === this.map) return
-      this.push(this.map)
+      this.pushUndo(this.map)
     }
     this.map = next
   }
 
-  private push(map: TempoMap): void {
-    this.history = [...this.history.slice(-HISTORY_LIMIT + 1), map]
-    this.future = []
+  private pushUndo(map: TempoMap): void {
+    this.undoStack = [...this.undoStack.slice(1 - HISTORY_LIMIT), map]
+    this.redoStack = []
   }
 
   undo(): void {
-    const previous = this.history[this.history.length - 1]
-    if (!this.editing || !previous || !this.map) return
-    this.future = [...this.future, this.map]
-    this.history = this.history.slice(0, -1)
-    this.gestureBase = null
-    this.map = previous
-    this.dropMissingSelection()
+    this.restore('undoStack', 'redoStack')
   }
 
   redo(): void {
-    const next = this.future[this.future.length - 1]
-    if (!this.editing || !next || !this.map) return
-    this.history = [...this.history, this.map]
-    this.future = this.future.slice(0, -1)
-    this.gestureBase = null
-    this.map = next
-    this.dropMissingSelection()
+    this.restore('redoStack', 'undoStack')
   }
 
-  private dropMissingSelection(): void {
-    if (this.selected != null && !this.map?.flags.some((f) => f.id === this.selected)) this.selected = null
+  private restore(from: 'undoStack' | 'redoStack', to: 'undoStack' | 'redoStack'): void {
+    const target = this[from].at(-1)
+    if (!this.editing || !target || !this.map) return
+    this[to] = [...this[to], this.map]
+    this[from] = this[from].slice(0, -1)
+    this.dragStartMap = null
+    this.map = target
+    if (!target.flags.some((flag) => flag.id === this.selectedFlagId)) this.selectedFlagId = null
   }
 
-  /** Shifts the section at the playhead by `ms`. */
   nudge(ms: number): void {
-    const j = this.section
+    const j = this.sectionAtPlayhead
     this.apply((map) => shiftSection(map, j, ms))
   }
 
-  /** Shifts section `j` of `base` by `ms`, for dragging a beat handle. */
-  shiftSection(j: number, ms: number, base: TempoMap): void {
-    this.apply((map) => shiftSection(map, j, ms), base)
+  shiftSection(j: number, ms: number, dragStart: TempoMap): void {
+    this.apply((map) => shiftSection(map, j, ms), dragStart)
   }
 
-  /** Retempos section `j` of `base` so its beat `k` lands on `targetMs`, for Alt-dragging a beat handle. */
-  stretch(j: number, k: number, targetMs: number, base: TempoMap): void {
-    this.apply((map) => stretchSection(map, j, k, targetMs), base)
+  stretch(j: number, step: number, targetMs: number, dragStart: TempoMap): void {
+    this.apply((map) => stretchSection(map, j, step, targetMs), dragStart)
   }
 
   setDownbeatHere(): void {
-    const ms = this.position() * 1000
+    const ms = this.playheadMs
     this.apply((map) => setDownbeat(map, ms))
   }
 
-  /** Sets the tempo of the section at the playhead. Pass `base` while dragging. */
-  setBpm(bpm: number, base?: TempoMap | null): void {
-    if (!(Number.isFinite(bpm) && bpm > 0)) return
-    const j = this.section
-    const ms = this.position() * 1000
-    this.apply((map) => setSectionBpm(map, j, bpm, ms), base)
+  setBpm(bpm: number, dragStart?: TempoMap | null): void {
+    if (Number.isFinite(bpm) && bpm > 0) this.scaleTempo(() => bpm, 1, dragStart)
   }
 
   halve(): void {
-    this.scaleTempo(0.5)
+    this.scaleTempo((bpm) => bpm / 2, 0.5)
   }
 
   double(): void {
-    this.scaleTempo(2)
+    this.scaleTempo((bpm) => bpm * 2, 2)
   }
 
-  private scaleTempo(factor: number): void {
-    const j = this.section
-    const ms = this.position() * 1000
-    this.apply((map) => setSectionBpm(map, j, map.flags[j].bpm * factor, ms, factor))
+  private scaleTempo(tempo: (bpm: number) => number, density: number, dragStart?: TempoMap | null): void {
+    const j = this.sectionAtPlayhead
+    const ms = this.playheadMs
+    this.apply((map) => setSectionBpm(map, j, tempo(map.flags[j].bpm), ms, density), dragStart)
   }
 
-  /** Adds a flag on the beat nearest `ms` and opens it. Opens the existing flag when that beat has one. */
   addFlagAt(ms: number): void {
-    const map = this.map
-    const draft = this.draft
+    const { map, draft } = this
     if (!this.editing || !map || !draft) return
     const added = addFlag(map, ms)
     if (added) {
       this.apply(() => added.map)
-      this.selected = added.id
-      this.added = added.id
+      this.selectedFlagId = this.justAddedFlagId = added.id
       return
     }
-    const flag = map.flags.find((f) => Math.abs(f.ms - ms) < 60_000 / f.bpm / 2)
-    if (flag) this.selected = flag.id
+    const at = nearestBeatIndex(draft.times, ms)
+    if (draft.stepInSection[at] === 0) this.selectedFlagId = map.flags[draft.sectionOfBeat[at]].id
   }
 
-  addFlagHere(): void {
-    this.addFlagAt(this.position() * 1000)
+  addFlagAtPlayhead(): void {
+    this.addFlagAt(this.playheadMs)
   }
 
-  moveFlag(j: number, ms: number, base: TempoMap): void {
-    this.apply((map) => moveFlag(map, j, ms), base)
+  moveFlag(j: number, ms: number, dragStart: TempoMap): void {
+    this.apply((map) => moveFlag(map, j, ms), dragStart)
   }
 
   setFlagBpm(j: number, bpm: number): void {
     if (Number.isFinite(bpm) && bpm > 0) this.apply((map) => setFlagBpm(map, j, bpm))
   }
 
-  /** Ramp length in beats; 0 makes the flag a jump. Pass `base` while dragging the ramp's end. */
-  setRamp(j: number, beats: number, base?: TempoMap | null): void {
-    this.apply((map) => setRamp(map, j, beats), base)
+  setRamp(j: number, beats: number, dragStart?: TempoMap | null): void {
+    this.apply((map) => setRamp(map, j, beats), dragStart)
   }
 
   setBarStart(j: number, on: boolean): void {
@@ -257,19 +236,21 @@ export class GridEditor {
 
   removeFlag(j: number): void {
     this.apply((map) => removeFlag(map, j))
-    this.dropMissingSelection()
+    this.selectedFlagId = null
   }
 
   select(id: number | null): void {
-    this.selected = id
+    this.selectedFlagId = id
   }
 
-  /** Time of the flag before or after the playhead, in seconds, or null. */
-  flagNear(direction: -1 | 1): number | null {
-    const ms = this.position() * 1000
-    const times = this.map?.flags.map((f) => f.ms) ?? []
-    const found = direction < 0 ? times.findLast((t) => t < ms - 50) : times.find((t) => t > ms + 50)
-    return found == null ? null : found / 1000
+  jumpToFlag(direction: -1 | 1): void {
+    const ms = this.playheadMs
+    const starts = this.map?.flags.map((flag) => flag.startMs) ?? []
+    const target =
+      direction < 0
+        ? starts.findLast((start) => start < ms - FLAG_JUMP_MARGIN_MS)
+        : starts.find((start) => start > ms + FLAG_JUMP_MARGIN_MS)
+    if (target != null) this.seek(target / 1000)
   }
 
   private movedCues(): CueMove[] {
@@ -290,11 +271,7 @@ export class GridEditor {
       this.cancel()
       return
     }
-    const grid = {
-      times: draft.times.map((t) => Math.round(t)),
-      beats: draft.beats,
-      bpms: draft.bpms.map((b) => Math.round(b * 100) / 100)
-    }
+    const grid = { times: draft.times.map(Math.round), beats: draft.beats, bpms: draft.bpms.map(roundBpm) }
     const moves = this.movedCues()
     const saved = await this.session.edit(
       (id) => api.setBeatgrid(id, grid, moves),

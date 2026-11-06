@@ -38,17 +38,12 @@
 
   $effect(() => keybinds.register({ 'deck.gridEdit': toggleGridEdit }))
 
-  function jumpToFlag(direction: -1 | 1): void {
-    const at = player.grid.flagNear(direction)
-    if (at != null) player.seek(at)
-  }
-
   $effect(() => {
     if (!player.grid.editing) return undefined
     return keybinds.register({
-      'grid.addFlag': () => player.grid.addFlagHere(),
-      'grid.previousFlag': () => jumpToFlag(-1),
-      'grid.nextFlag': () => jumpToFlag(1),
+      'grid.addFlag': () => player.grid.addFlagAtPlayhead(),
+      'grid.previousFlag': () => player.grid.jumpToFlag(-1),
+      'grid.nextFlag': () => player.grid.jumpToFlag(1),
       'grid.undo': () => player.grid.undo(),
       'grid.redo': () => player.grid.redo()
     })
@@ -69,7 +64,7 @@
 <svelte:window
   onkeydown={(e) => {
     if (e.key !== 'Escape' || e.defaultPrevented) return
-    if (player.grid.selected != null) player.grid.select(null)
+    if (player.grid.selectedFlagId != null) player.grid.select(null)
     else if (player.grid.editing && !player.editing) player.grid.cancel()
   }}
 />

@@ -105,12 +105,12 @@
   />
 
   {#if player.grid.editing}
-    {#each player.grid.flagMarks as flag (flag.ms)}
-      <span class="pointer-events-none absolute inset-y-0 w-px bg-[#b48cff]/80" style:left="{pct(flag.ms / 1000)}%"
+    {#each player.grid.flagMarks as flag (flag.startMs)}
+      <span class="pointer-events-none absolute inset-y-0 w-px bg-flag/80" style:left="{pct(flag.startMs / 1000)}%"
       ></span>
       <span
-        class="pointer-events-none absolute top-0 h-[6px] w-[6px] bg-[#b48cff]"
-        style:left="{pct(flag.ms / 1000)}%"
+        class="pointer-events-none absolute top-0 h-[6px] w-[6px] bg-flag"
+        style:left="{pct(flag.startMs / 1000)}%"
         style:clip-path="polygon(0 0, 100% 0, 0 100%)"
       ></span>
     {/each}

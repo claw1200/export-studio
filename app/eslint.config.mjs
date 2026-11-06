@@ -28,7 +28,6 @@ export default defineConfig(
     }
   },
   {
-    // Plain JavaScript scripts and tests can't declare return types.
     files: ['**/*.mjs'],
     rules: {
       '@typescript-eslint/explicit-function-return-type': 'off'

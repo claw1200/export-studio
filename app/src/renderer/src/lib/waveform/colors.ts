@@ -11,5 +11,4 @@ export const BANDS_LOW_TO_HIGH: { band: number; color: string }[] = [
 export const CUE_POINT_COLOR = '#ff8a1f'
 export const LOOP_ACTIVE_COLOR = '#ffb020'
 
-/** Tempo flags on the beatgrid: their pennants, section boundaries and ramps. */
 export const TEMPO_FLAG_COLOR = '#b48cff'

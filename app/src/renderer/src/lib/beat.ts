@@ -48,7 +48,7 @@ function beatFromAnchor(ms: number, anchor: number, bpm: number): number {
   return snapped
 }
 
-const BEATS_PER_BAR = 4
+export const BEATS_PER_BAR = 4
 const barCounts = new WeakMap<Beatgrid, Int32Array>()
 
 function barsThrough(grid: Beatgrid): Int32Array {
@@ -69,7 +69,7 @@ function beatIndexAt(grid: Beatgrid, ms: number): number {
   return ms < grid.times[0] ? -1 : lastIndexAtOrBefore(grid.times, ms)
 }
 
-function nearestBeatIndex(times: readonly number[], ms: number): number {
+export function nearestBeatIndex(times: readonly number[], ms: number): number {
   const next = firstIndexAtOrAfter(times, ms)
   if (next === 0) return 0
   if (next === times.length) return times.length - 1
@@ -94,11 +94,12 @@ export function bpmAt(seconds: number, grid: Beatgrid | null, fallback = 0): num
   return grid.bpms[lastIndexAtOrBefore(grid.times, seconds * 1000)]
 }
 
-/** Where `ms` sits in a grid, counted in its beats (fractional between beats). */
-export function beatCoord(grid: Beatgrid, ms: number): number {
+export const beatMs = (bpm: number): number => 60_000 / bpm
+
+export function fractionalBeatIndex(grid: Beatgrid, ms: number): number {
   const { times, bpms } = grid
   const last = times.length - 1
-  const step = (i: number): number => (bpms[i] > 0 ? 60_000 / bpms[i] : 500)
+  const step = (i: number): number => (bpms[i] > 0 ? beatMs(bpms[i]) : 500)
   if (ms < times[0]) return (ms - times[0]) / step(0)
   if (ms >= times[last]) return last + (ms - times[last]) / step(last)
   const i = lastIndexAtOrBefore(times, ms)
