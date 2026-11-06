@@ -34,7 +34,7 @@ fn scene() -> (tempfile::TempDir, Library, String, std::path::PathBuf) {
     let file = dir.path().join("Song.wav");
     wav(&file);
     let id = import_files(&mut lib, &share, &[file.to_string_lossy().into_owned()], &Options { artwork: false, playlist: None }).unwrap().ids[0].clone();
-    lib.write(|tx| tx.set_hot_cue(&id, 1, 500)).unwrap();
+    lib.write(|tx| tx.set_hot_cue(&id, 1, 500, None)).unwrap();
     (dir, lib, id, file)
 }
 

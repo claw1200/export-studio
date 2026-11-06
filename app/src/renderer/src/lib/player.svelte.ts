@@ -12,6 +12,7 @@ import { getSetting, setSetting } from './settings'
 import {
   beatLoop,
   CUE_TOLERANCE,
+  cueToStore,
   type Hold,
   pressCue,
   pressHotCue,
@@ -441,17 +442,19 @@ export class Player {
     setSetting('cuePlacement', placement)
   }
 
-  private placementMs(): number {
+  /** Where a new cue goes, in milliseconds, with the loop's out point when it saves a loop. */
+  private placement(): [ms: number, endMs: number | null] {
     const seconds = this.cuePlacement === 'cuePoint' ? this.cuePoint : this.position
-    return Math.round(this.quantised(seconds) * 1000)
+    const { start, end } = cueToStore(this.quantised(seconds), this.loop)
+    return [Math.round(start * 1000), end == null ? null : Math.round(end * 1000)]
   }
 
   setHotCue(kind: number): Promise<void> {
-    return this.cues.setHotCue(kind, this.placementMs())
+    return this.cues.setHotCue(kind, ...this.placement())
   }
 
   addMemoryCue(): Promise<void> {
-    return this.cues.addMemoryCue(this.placementMs())
+    return this.cues.addMemoryCue(...this.placement())
   }
 
   cueAtPlayhead(): Cue | null {

@@ -81,7 +81,7 @@ fn a_hand_edited_grid_is_written_and_moves_cues() {
     let (_dir, mut lib, id) = scene();
     let share = lib.share_dir();
     apply_analysis(&mut lib, &share, &id, &analysis(), ALL).unwrap();
-    lib.write(|tx| tx.set_hot_cue(&id, 1, 500)).unwrap();
+    lib.write(|tx| tx.set_hot_cue(&id, 1, 500, None)).unwrap();
     let cue = lib.cues(&id).unwrap().remove(0);
 
     let grid = Grid { times: vec![10, 500, 990], beats: vec![1, 2, 3], bpms: vec![122.0, 122.0, 122.0] };
