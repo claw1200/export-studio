@@ -3,7 +3,7 @@
 //! and resolves to JSON text in the shapes the interface already consumes.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
 use crate::usb::UsbOp;
@@ -219,7 +219,6 @@ impl Run {
 
     /// Backup calls that need nothing but the library's location.
     fn backup_op(&self, service: &LibraryService) -> napi::Result<Value> {
-        let emit = |event| self.core.emit_service_event(event);
         match &self.op {
             Op::BackupList => json_of(&service.backup_list()),
             Op::BackupSettings => json_of(&service.backup_settings()),
@@ -231,9 +230,20 @@ impl Run {
                 self.core.emit("backup.changed", &json!({}));
                 json_of(&backups)
             }
-            Op::BackupCreate => json_of(&service.backup_create(&emit).map_err(failure)?),
             _ => unreachable!("not a backup call"),
         }
+    }
+
+    /// Daily and manual backups: planned under the library lock, then made without it, so the
+    /// library stays readable while the archive is written.
+    fn backup_off_lock(&self, service: MutexGuard<'_, LibraryService>) -> napi::Result<Value> {
+        let daily = matches!(self.op, Op::DailyBackup);
+        let job = if daily { service.daily_backup_job() } else { Some(service.backup_create_job().map_err(failure)?) };
+        drop(service);
+        let Some(job) = job else { return Ok(json!(false)) };
+        let emit = |event| self.core.emit_service_event(event);
+        let made = job.run(&emit).map_err(failure)?;
+        if daily { Ok(json!(true)) } else { json_of(&made) }
     }
 
     fn perform(&self, service: &mut LibraryService) -> napi::Result<Value> {
@@ -253,16 +263,12 @@ impl Run {
                 service.reload().map_err(failure)?;
                 return json_of(&service.info().map_err(failure)?);
             }
-            Op::BackupList | Op::BackupCreate | Op::BackupDelete(_) | Op::BackupSettings | Op::BackupSetSettings { .. } => {
+            Op::BackupList | Op::BackupDelete(_) | Op::BackupSettings | Op::BackupSetSettings { .. } => {
                 return self.backup_op(service);
             }
             Op::BackupRestore(id) => {
                 let emit = |event| self.core.emit_service_event(event);
                 return json_of(&service.backup_restore(id, &emit).map_err(failure)?);
-            }
-            Op::DailyBackup => {
-                let emit = |event| self.core.emit_service_event(event);
-                return Ok(json!(service.daily_backup(&emit).map_err(failure)?));
             }
             _ => {}
         }
@@ -490,7 +496,11 @@ impl Task for Run {
         let mut service = self.core.service.lock().map_err(|_| failure("the library lock was poisoned"))?;
         let lock_wait_ms = waiting.elapsed().as_secs_f64() * 1000.0;
         let started = Instant::now();
-        let result = self.perform(&mut service);
+        let result = if matches!(self.op, Op::DailyBackup | Op::BackupCreate) {
+            self.backup_off_lock(service)
+        } else {
+            self.perform(&mut service)
+        };
         if profile {
             eprintln!(
                 "[library-profile] native op={operation} lock_wait_ms={lock_wait_ms:.1} operation_ms={:.1}",

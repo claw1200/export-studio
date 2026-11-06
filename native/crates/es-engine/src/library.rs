@@ -4,6 +4,7 @@
 //! work with domain and read-model types rather than JSON text.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use es_backup::Backups;
@@ -26,7 +27,83 @@ pub struct LibrarySession {
 
 pub struct LibraryService {
     session: Option<LibrarySession>,
-    backups: Backups,
+    backups: Arc<Backups>,
+    /// Held while a backup is made or restored, so only one runs at a time. Backup jobs hold it
+    /// without the service, so reads carry on; anything that also needs the service takes the
+    /// service first, then this.
+    backup_gate: Arc<Mutex<()>>,
+}
+
+/// A backup to make without holding the library service, so the library stays readable while
+/// the archive is written.
+pub struct BackupJob {
+    backups: Arc<Backups>,
+    gate: Arc<Mutex<()>>,
+    source: PathBuf,
+    reason: &'static str,
+}
+
+impl BackupJob {
+    /// Waits for any backup already running, then makes this one. An automatic backup is
+    /// skipped when the one it waited for made it unnecessary.
+    pub fn run(self, emit: &impl Fn(ServiceEvent)) -> Result<Option<Value>> {
+        let _gate = lock_gate(&self.gate);
+        if self.reason == "daily" && !(auto_enabled(&self.backups) && auto_due(&self.backups)) {
+            return Ok(None);
+        }
+        back_up(&self.backups, &self.source, self.reason, emit)
+    }
+}
+
+fn lock_gate(gate: &Mutex<()>) -> MutexGuard<'_, ()> {
+    gate.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn auto_enabled(backups: &Backups) -> bool {
+    backups.settings()["auto"].as_bool().unwrap_or(true)
+}
+
+fn auto_due(backups: &Backups) -> bool {
+    let profile = std::env::var_os("EXPORTSTUDIO_PROFILE_LIBRARY_OPEN").is_some();
+    let settings_started = SystemTime::now();
+    let settings = backups.settings();
+    let interval = settings["interval"].as_i64().unwrap_or(12) as f64 * 3600.0;
+    let settings_ms = settings_started.elapsed().map_or(0.0, |duration| duration.as_secs_f64() * 1000.0);
+    let lookup_started = SystemTime::now();
+    let created = backups.latest_automatic_created();
+    let lookup_ms = lookup_started.elapsed().map_or(0.0, |duration| duration.as_secs_f64() * 1000.0);
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |duration| duration.as_secs_f64());
+    let due = match created {
+        None => true,
+        Some(created) => now - created >= interval,
+    };
+    if profile {
+        eprintln!(
+            "[library-profile] backup.auto_due settings_ms={settings_ms:.1} latest_lookup_ms={lookup_ms:.1} interval_hours={:.1} latest_age_hours={:.2} due={due}",
+            interval / 3600.0,
+            created.map_or(-1.0, |created| (now - created) / 3600.0),
+        );
+    }
+    due
+}
+
+fn back_up(
+    backups: &Backups,
+    source: &Path,
+    reason: &str,
+    emit: &impl Fn(ServiceEvent),
+) -> Result<Option<Value>> {
+    let made = backups.create(source, reason, &|progress| {
+        emit(ServiceEvent::BackupProgress(progress))
+    });
+    emit(ServiceEvent::BackupProgress(
+        json!({ "stage": "done", "reason": reason }),
+    ));
+    let made = made?;
+    if made.is_some() {
+        emit(ServiceEvent::BackupChanged);
+    }
+    Ok(made)
 }
 
 #[derive(Debug)]
@@ -166,7 +243,8 @@ impl LibraryService {
         };
         Self {
             session: None,
-            backups: Backups::new(root, verify, rb_library::rekordbox_running),
+            backups: Arc::new(Backups::new(root, verify, rb_library::rekordbox_running)),
+            backup_gate: Arc::new(Mutex::new(())),
         }
     }
 
@@ -760,48 +838,6 @@ impl LibraryService {
             .or_else(Database::installed_path)
     }
 
-    fn auto_due(&self) -> bool {
-        let profile = std::env::var_os("EXPORTSTUDIO_PROFILE_LIBRARY_OPEN").is_some();
-        let settings_started = SystemTime::now();
-        let settings = self.backups().settings();
-        let interval = settings["interval"].as_i64().unwrap_or(12) as f64 * 3600.0;
-        let settings_ms = settings_started.elapsed().map_or(0.0, |duration| duration.as_secs_f64() * 1000.0);
-        let lookup_started = SystemTime::now();
-        let created = self.backups().latest_automatic_created();
-        let lookup_ms = lookup_started.elapsed().map_or(0.0, |duration| duration.as_secs_f64() * 1000.0);
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |duration| duration.as_secs_f64());
-        let due = match created {
-            None => true,
-            Some(created) => now - created >= interval,
-        };
-        if profile {
-            eprintln!(
-                "[library-profile] backup.auto_due settings_ms={settings_ms:.1} latest_lookup_ms={lookup_ms:.1} interval_hours={:.1} latest_age_hours={:.2} due={due}",
-                interval / 3600.0,
-                created.map_or(-1.0, |created| (now - created) / 3600.0),
-            );
-        }
-        due
-    }
-
-    fn back_up(
-        &self,
-        source: &Path,
-        reason: &str,
-        emit: &impl Fn(ServiceEvent),
-    ) -> Result<Option<Value>> {
-        let made = self.backups().create(source, reason, &|progress| {
-            emit(ServiceEvent::BackupProgress(progress))
-        })?;
-        emit(ServiceEvent::BackupProgress(
-            json!({ "stage": "done", "reason": reason }),
-        ));
-        if made.is_some() {
-            emit(ServiceEvent::BackupChanged);
-        }
-        Ok(made)
-    }
-
     pub fn backup_list(&self) -> Vec<Value> {
         let source = self.source();
         self.backups().list(source.as_deref())
@@ -822,10 +858,24 @@ impl LibraryService {
     }
 
     pub fn backup_create(&self, emit: &impl Fn(ServiceEvent)) -> Result<Option<Value>> {
+        self.backup_create_job()?.run(emit)
+    }
+
+    /// A manual backup, to run without holding the service.
+    pub fn backup_create_job(&self) -> Result<BackupJob> {
         let source = self.source().ok_or_else(|| {
             crate::Error::Other("No rekordbox library found on this computer".into())
         })?;
-        self.back_up(&source, "manual", emit)
+        Ok(self.job(source, "manual"))
+    }
+
+    fn job(&self, source: PathBuf, reason: &'static str) -> BackupJob {
+        BackupJob {
+            backups: Arc::clone(&self.backups),
+            gate: Arc::clone(&self.backup_gate),
+            source,
+            reason,
+        }
     }
 
     pub fn backup_delete(&self, id: &str) -> Result<Vec<Value>> {
@@ -838,6 +888,8 @@ impl LibraryService {
             crate::Error::Other("No rekordbox library found on this computer".into())
         })?;
         let backed_up = self.session.as_ref().is_some_and(LibrarySession::backed_up);
+        let gate = Arc::clone(&self.backup_gate);
+        let _gate = lock_gate(&gate);
         self.close();
         let restored = self.backups().restore(id, &source, &|progress| {
             emit(ServiceEvent::BackupProgress(progress))
@@ -852,31 +904,35 @@ impl LibraryService {
     }
 
     pub fn daily_backup(&self, emit: &impl Fn(ServiceEvent)) -> Result<bool> {
-        let Some(session) = self.session.as_ref() else {
+        let Some(job) = self.daily_backup_job() else {
             return Ok(false);
         };
-        let due = self.backups().settings()["auto"].as_bool().unwrap_or(true) && self.auto_due();
-        if due && !rb_library::rekordbox_running() {
-            self.back_up(session.source(), "daily", emit)?;
-        }
-        Ok(due)
+        job.run(emit)?;
+        Ok(true)
+    }
+
+    /// The daily backup when one is due, to run without holding the service.
+    pub fn daily_backup_job(&self) -> Option<BackupJob> {
+        let session = self.session.as_ref()?;
+        let due = auto_enabled(self.backups()) && auto_due(self.backups());
+        (due && !rb_library::rekordbox_running()).then(|| self.job(session.source().to_path_buf(), "daily"))
     }
 
     pub fn set_writable(&mut self, writable: bool, emit: &impl Fn(ServiceEvent)) -> Result<()> {
         let Some(session) = self.session.as_ref() else {
             return Err(crate::Error::Other("Library not open".into()));
         };
-        if writable
-            && !session.backed_up()
-            && self.backups().settings()["auto"].as_bool().unwrap_or(true)
-        {
+        if writable && !session.backed_up() && auto_enabled(self.backups()) {
             if rb_library::rekordbox_running() {
                 return Err(crate::Error::Other(
                     "Close rekordbox before editing the library".into(),
                 ));
             }
-            if self.auto_due() {
-                self.back_up(session.source(), "before-edit", emit)?;
+            // Wait for a daily backup already running; it may make this one unnecessary.
+            let gate = Arc::clone(&self.backup_gate);
+            let _gate = lock_gate(&gate);
+            if auto_due(self.backups()) {
+                back_up(self.backups(), session.source(), "before-edit", emit)?;
             }
             self.session
                 .as_mut()
@@ -1179,6 +1235,44 @@ mod tests {
 
         assert!(!service.daily_backup(&|_| {}).unwrap());
         assert!(!directory.path().join("backups").exists());
+    }
+
+    #[test]
+    fn daily_backup_job_runs_while_the_service_keeps_reading() {
+        if rb_library::rekordbox_running() {
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let path = fixture::build(directory.path(), 1).unwrap();
+        let service = std::sync::Mutex::new(LibraryService::with_backup_root(directory.path().join("backups")));
+        service.lock().unwrap().open(path, false, false).unwrap();
+
+        let job = service.lock().unwrap().daily_backup_job().expect("first backup is due");
+        let reader = service.lock().unwrap();
+        let made = std::thread::scope(|scope| scope.spawn(|| job.run(&|_| {})).join().unwrap()).unwrap();
+        reader.tracks().unwrap();
+        drop(reader);
+
+        assert!(made.is_some());
+        assert!(service.lock().unwrap().daily_backup_job().is_none());
+    }
+
+    #[test]
+    fn queued_daily_backup_is_skipped_once_another_has_run() {
+        if rb_library::rekordbox_running() {
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let path = fixture::build(directory.path(), 1).unwrap();
+        let mut service = LibraryService::with_backup_root(directory.path().join("backups"));
+        service.open(path, false, false).unwrap();
+
+        let first = service.daily_backup_job().unwrap();
+        let second = service.daily_backup_job().unwrap();
+
+        assert!(first.run(&|_| {}).unwrap().is_some());
+        assert!(second.run(&|_| {}).unwrap().is_none());
+        assert_eq!(service.backup_list().len(), 1);
     }
 
     #[test]
