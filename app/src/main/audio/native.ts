@@ -94,8 +94,8 @@ export interface NativeLibrary {
   historyTracks(id: string): Promise<unknown>
   trackDetail(id: string): Promise<unknown>
   mediaResolve(kind: string, id: string, size: string): Promise<unknown>
-  cueSetHot(id: string, kind: number, ms: number): Promise<unknown>
-  cueAddMemory(id: string, ms: number): Promise<unknown>
+  cueSetHot(id: string, kind: number, ms: number, endMs: number | null): Promise<unknown>
+  cueAddMemory(id: string, ms: number, endMs: number | null): Promise<unknown>
   cueDelete(id: string, cueId: string): Promise<unknown>
   cueSetColor(id: string, cueId: string, colorIndex: number | null): Promise<unknown>
   onEvent(callback: (event: string, data: string) => void): void

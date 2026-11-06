@@ -11,12 +11,14 @@ export class CueEditor {
     private grid: GridEditor
   ) {}
 
-  setHotCue(kind: number, ms: number): Promise<void> {
-    return this.write((id) => api.setHotCue(id, kind, ms))
+  /** With `endMs` the hot cue is a loop. */
+  setHotCue(kind: number, ms: number, endMs: number | null = null): Promise<void> {
+    return this.write((id) => api.setHotCue(id, kind, ms, endMs))
   }
 
-  addMemoryCue(ms: number): Promise<void> {
-    return this.write((id) => api.addMemoryCue(id, ms))
+  /** With `endMs` the memory cue is a loop. */
+  addMemoryCue(ms: number, endMs: number | null = null): Promise<void> {
+    return this.write((id) => api.addMemoryCue(id, ms, endMs))
   }
 
   deleteCue(cue: Cue): Promise<void> {
