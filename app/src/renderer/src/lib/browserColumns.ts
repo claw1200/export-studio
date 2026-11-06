@@ -51,6 +51,14 @@ export function clampRowHeight(height: number): number {
   return Math.min(ROW_HEIGHT_MAX, Math.max(ROW_HEIGHT_MIN, stepped))
 }
 
+/** Rows in the alternative track style are taller than the chosen height, to fit two lines and a bigger cover. */
+export const STACKED_ROW_SCALE = 1.5
+
+/** Row height for the alternative track style. Text keeps the size of the chosen height. */
+export function stackedRowHeight(height: number): number {
+  return Math.round(clampRowHeight(height) * STACKED_ROW_SCALE)
+}
+
 /** The stored row height, or the default when nothing usable is stored. */
 export function readRowHeight(raw: string | null): number {
   if (raw == null || raw.trim() === '') return ROW_HEIGHT_DEFAULT

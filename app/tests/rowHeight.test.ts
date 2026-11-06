@@ -4,8 +4,15 @@ import { describe, it } from 'node:test'
 
 register(new URL('./resolve-ts.mjs', import.meta.url).href)
 
-const { ROW_HEIGHT_DEFAULT, ROW_HEIGHT_MAX, ROW_HEIGHT_MIN, clampRowHeight, readRowHeight, rowFontSize } =
-  await import('../src/renderer/src/lib/browserColumns.ts')
+const {
+  ROW_HEIGHT_DEFAULT,
+  ROW_HEIGHT_MAX,
+  ROW_HEIGHT_MIN,
+  clampRowHeight,
+  readRowHeight,
+  rowFontSize,
+  stackedRowHeight
+} = await import('../src/renderer/src/lib/browserColumns.ts')
 
 describe('readRowHeight', () => {
   it('keeps the original 32px rows when nothing is stored', () => {
@@ -46,5 +53,17 @@ describe('rowFontSize', () => {
     assert.ok(rowFontSize(ROW_HEIGHT_MAX) > rowFontSize(ROW_HEIGHT_DEFAULT))
     assert.ok(rowFontSize(ROW_HEIGHT_MIN) >= 10)
     assert.ok(rowFontSize(ROW_HEIGHT_MIN) < rowFontSize(ROW_HEIGHT_DEFAULT))
+  })
+})
+
+describe('stackedRowHeight', () => {
+  it('makes alternative-style rows taller than the chosen height', () => {
+    assert.equal(stackedRowHeight(ROW_HEIGHT_DEFAULT), 48)
+    assert.equal(stackedRowHeight(ROW_HEIGHT_MIN), 36)
+    assert.equal(stackedRowHeight(ROW_HEIGHT_MAX), 84)
+  })
+
+  it('clamps the chosen height first', () => {
+    assert.equal(stackedRowHeight(1000), stackedRowHeight(ROW_HEIGHT_MAX))
   })
 })

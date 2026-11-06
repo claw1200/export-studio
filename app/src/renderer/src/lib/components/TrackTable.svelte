@@ -10,6 +10,7 @@
     defaultOrder,
     readColumnPrefs,
     rowFontSize,
+    stackedRowHeight,
     type Column
   } from '$lib/browserColumns'
   import { getApp } from '$lib/context'
@@ -60,7 +61,10 @@
 
   function columnWidth(column: Column): number {
     const width = widths[column.id] ?? column.width
-    return duplicateView && column.id === 'index' ? Math.max(width, 72) : width
+    if (duplicateView && column.id === 'index') return Math.max(width, 72)
+    // The alternative style's square cover is as tall as the row; keep room for it and the cell padding.
+    if (stacked && column.id === 'art') return Math.max(width, ROW + 16)
+    return width
   }
 
   function headerLabel(column: Column): string {
@@ -241,8 +245,8 @@
   /** Height of the sticky column header, which stays the same at every row height. */
   const HEADER = 32
   const OVERSCAN = 12
-  const ROW = $derived(library.browserRowHeight)
-  const rowFont = $derived(rowFontSize(ROW))
+  const ROW = $derived(stacked ? stackedRowHeight(library.browserRowHeight) : library.browserRowHeight)
+  const rowFont = $derived(rowFontSize(library.browserRowHeight))
 
   let viewport = $state<HTMLDivElement>()
   let scrollTop = $state(0)
@@ -544,16 +548,16 @@
         draggable="false"
         class={fill
           ? 'absolute inset-0 size-full object-cover object-top'
-          : 'size-[1.92em] rounded-[3px] bg-raised object-cover'}
+          : 'aspect-square h-full shrink-0 bg-raised object-cover'}
       />
     {:else}
       <span
         class={[
           'grid place-items-center bg-raised text-faint',
-          fill ? 'absolute inset-0' : 'size-[1.92em] rounded-[3px]'
+          fill ? 'absolute inset-0' : 'aspect-square h-full shrink-0'
         ]}
       >
-        <Music class={fill ? 'size-[1.12em]' : 'size-[0.96em]'} />
+        <Music class="size-[1.12em]" />
       </span>
     {/if}
   {:else if column.id === 'title' && stacked}
@@ -762,7 +766,7 @@
                     column.align === 'right' && 'justify-end',
                     column.align === 'center' && 'justify-center',
                     column.id === 'wave' && 'h-full px-1.5',
-                    column.id === 'art' && !stacked && 'relative h-full px-0'
+                    column.id === 'art' && (stacked ? 'h-full' : 'relative h-full px-0')
                   ]}
                 >
                   {@render cell(column, track, index)}
