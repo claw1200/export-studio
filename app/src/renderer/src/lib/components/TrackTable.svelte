@@ -9,6 +9,9 @@
     defaultHidden,
     defaultOrder,
     readColumnPrefs,
+    minColumnWidth,
+    rowFontSize,
+    stackedRowHeight,
     type Column
   } from '$lib/browserColumns'
   import { getApp } from '$lib/context'
@@ -59,18 +62,54 @@
 
   function columnWidth(column: Column): number {
     const width = widths[column.id] ?? column.width
-    return duplicateView && column.id === 'index' ? Math.max(width, 72) : width
+    if (duplicateView && column.id === 'index') return Math.max(width, 72)
+    // Alternative covers are square and as tall as the row, so a wider column would only add empty space.
+    if (fixedArt(column)) return columnFloor(column)
+    return Math.max(width, columnFloor(column))
+  }
+
+  /**
+   * In the alternative style a cover directly before the title reads as one merged column. The title heading
+   * then starts over the cover, at the left edge of the merged column, like every other heading.
+   */
+  const headingShift = $derived.by(() => {
+    if (!stacked) return 0
+    const at = shownColumns.findIndex((column) => column.id === 'title')
+    const before = at > 0 ? shownColumns[at - 1] : undefined
+    return before?.id === 'art' ? columnWidth(before) : 0
+  })
+
+  function fixedArt(column: Column): boolean {
+    return stacked && column.id === 'art'
+  }
+
+  function columnFloor(column: Column): number {
+    if (column.id === 'art') {
+      // Alternative: room for the square cover, as tall as the row, plus cell padding.
+      // Standard: at least twice the row height, so the cover is always cropped to a strip from its top.
+      return Math.min(column.max, stacked ? ROW + 16 : ROW * 2)
+    }
+    return minColumnWidth(column, rowFont)
   }
 
   function headerLabel(column: Column): string {
+    if (stacked && column.id === 'title') return 'Title / Artist'
+    // The cover sits beside the title like one merged column, so it needs no heading of its own.
+    if (stacked && column.id === 'art') return ''
     return duplicateView && column.id === 'index' ? 'Group' : column.label
+  }
+
+  /** The alternative track style stacks the artist under the title, so the Artist column steps aside. */
+  const stacked = $derived(library.browserTrackStyle === 'alternative')
+  function available(column: Column): boolean {
+    return !(stacked && column.id === 'artist')
   }
 
   const orderedColumns = $derived.by(() => {
     const rank = new Map(order.map((id, index) => [id, index]))
     return [...COLUMNS].sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
   })
-  const shownColumns = $derived(orderedColumns.filter((column) => !hidden.includes(column.id)))
+  const shownColumns = $derived(orderedColumns.filter((column) => available(column) && !hidden.includes(column.id)))
   const template = $derived(
     shownColumns
       .map((column) => {
@@ -92,7 +131,7 @@
 
   function toggleColumn(id: string): void {
     if (hidden.includes(id)) hidden = hidden.filter((item) => item !== id)
-    else if (hidden.length < COLUMNS.length - 1) hidden = [...hidden, id]
+    else if (shownColumns.length > 1) hidden = [...hidden, id]
     save()
   }
 
@@ -114,7 +153,7 @@
     handle.setPointerCapture(e.pointerId)
     const cell = handle.parentElement
     const measured = cell?.getBoundingClientRect().width ?? widths[column.id]
-    const startW = Math.min(column.max, Math.max(column.min, Math.round(measured)))
+    const startW = Math.min(column.max, Math.max(columnFloor(column), Math.round(measured)))
     const wasSized = sized.includes(column.id)
     widths[column.id] = startW
     if (column.fr && !wasSized) sized = [...sized, column.id]
@@ -127,7 +166,7 @@
     const column = COLUMNS.find((item) => item.id === current.id)
     if (!column) return
     const next = Math.round(current.startW + e.clientX - current.startX)
-    widths[column.id] = Math.min(column.max, Math.max(column.min, next))
+    widths[column.id] = Math.min(column.max, Math.max(columnFloor(column), next))
   }
 
   function endResize(): void {
@@ -152,7 +191,7 @@
   function columnItems(): MenuEntry[] {
     return [
       { kind: 'header', label: 'Columns' },
-      ...orderedColumns.map((column) => ({
+      ...orderedColumns.filter(available).map((column) => ({
         label: column.name,
         checked: !hidden.includes(column.id),
         keepOpen: true,
@@ -230,8 +269,11 @@
     save()
   }
 
-  const ROW = 32
+  /** Height of the sticky column header, which stays the same at every row height. */
+  const HEADER = 32
   const OVERSCAN = 12
+  const ROW = $derived(stacked ? stackedRowHeight(library.browserRowHeight) : library.browserRowHeight)
+  const rowFont = $derived(rowFontSize(library.browserRowHeight))
 
   let viewport = $state<HTMLDivElement>()
   let scrollTop = $state(0)
@@ -289,9 +331,8 @@
 
   export function ensureVisible(index: number): void {
     if (!viewport) return
-    const header = ROW
     const top = index * ROW
-    const visibleH = viewport.clientHeight - header
+    const visibleH = viewport.clientHeight - HEADER
     if (top < viewport.scrollTop) viewport.scrollTop = top
     else if (top + ROW > viewport.scrollTop + visibleH) viewport.scrollTop = top + ROW - visibleH
   }
@@ -493,7 +534,7 @@
   function autoScroll(e: DragEvent): void {
     if (!(library.dragging || fileDrop) || !library.canReorder || !viewport) return
     const rect = viewport.getBoundingClientRect()
-    if (e.clientY < rect.top + ROW + AUTOSCROLL_EDGE) viewport.scrollTop -= AUTOSCROLL_STEP
+    if (e.clientY < rect.top + HEADER + AUTOSCROLL_EDGE) viewport.scrollTop -= AUTOSCROLL_STEP
     else if (e.clientY > rect.bottom - AUTOSCROLL_EDGE) viewport.scrollTop += AUTOSCROLL_STEP
   }
 </script>
@@ -513,7 +554,7 @@
 {#snippet cell(column: Column, track: Track, index: number)}
   {#if column.id === 'index'}
     {#if player.track?.id === track.id}
-      <AudioLines class={['ml-auto size-3.5 text-accent', player.playing && 'animate-pulse']} />
+      <AudioLines class={['ml-auto size-[1.12em] text-accent', player.playing && 'animate-pulse']} />
     {:else}
       {@const group = duplicateView ? library.positions.get(track.id) : undefined}
       <span class={track.missing ? 'text-warn/70' : 'text-faint'} title={group ? `Group ${group}` : undefined}>
@@ -522,28 +563,41 @@
     {/if}
   {:else if column.id === 'color'}
     {#if TRACK_COLORS[track.color]}
-      <span class="block h-4 w-[3px] rounded-full" style:background={TRACK_COLORS[track.color].hex}></span>
+      <span class="block h-[1.28em] w-[3px] rounded-full" style:background={TRACK_COLORS[track.color].hex}></span>
     {/if}
   {:else if column.id === 'art'}
-    {@const fill = library.browserArtwork === 'fill'}
+    {@const fill = !stacked}
     {#if track.hasArtwork}
       <img
-        src={artworkUrl(track.id, fill ? 'm' : 's')}
+        src={artworkUrl(track.id, fill || ROW > 40 ? 'm' : 's')}
         alt=""
         loading="lazy"
         decoding="async"
         draggable="false"
         class={fill
           ? 'absolute inset-0 size-full object-cover object-top'
-          : 'size-6 rounded-[3px] bg-raised object-cover'}
+          : 'aspect-square h-full shrink-0 bg-raised object-cover'}
       />
     {:else}
       <span
-        class={['grid place-items-center bg-raised text-faint', fill ? 'absolute inset-0' : 'size-6 rounded-[3px]']}
+        class={[
+          'grid place-items-center bg-raised text-faint',
+          fill ? 'absolute inset-0' : 'aspect-square h-full shrink-0'
+        ]}
       >
-        <Music class={fill ? 'size-3.5' : 'size-3'} />
+        <Music class="size-[1.12em]" />
       </span>
     {/if}
+  {:else if column.id === 'title' && stacked}
+    <span class="flex min-w-0 flex-col leading-[1.2]">
+      <span class="flex min-w-0">
+        <span class={['truncate font-medium', track.missing ? 'text-warn' : 'text-fg']}>{track.title}</span>
+        {#if track.remixer}
+          <span class={['ml-1.5 truncate', track.missing ? 'text-warn/70' : 'text-faint']}>{track.remixer}</span>
+        {/if}
+      </span>
+      <span class={['truncate text-[0.88em]', track.missing ? 'text-warn/70' : 'text-muted']}>{track.artist}</span>
+    </span>
   {:else if column.id === 'title'}
     <span class={['truncate font-medium', track.missing ? 'text-warn' : 'text-fg']}>{track.title}</span>
     {#if track.remixer}
@@ -561,17 +615,22 @@
   {:else if column.id === 'cue'}
     {#if track.collected === false}
       <span class="text-faint" title="Not in the collection" aria-label="Not in the collection">
-        <X class="size-3.5" />
+        <X class="size-[1.12em]" />
       </span>
     {:else}
       {@const preview = browserPreviews.preview(track.id)}
       {@const labels = CUE_STARS.filter((star) => preview?.[star.key]).map((star) => star.label)}
       {#if labels.length}
-        <span class="flex items-center gap-0.5" aria-label={labels.join(', ')} title={labels.join(', ')}>
+        <!-- In a narrow column the stars shrink their boxes and overlap; the last one always shows whole. -->
+        <span
+          class="flex max-w-full min-w-0 items-center gap-0.5"
+          aria-label={labels.join(', ')}
+          title={labels.join(', ')}
+        >
           {#each CUE_STARS as star (star.key)}
             {#if preview?.[star.key]}
-              <span class="inline-flex" style:color={star.color} aria-hidden="true">
-                <Star class="size-3.5 fill-current" strokeWidth={0} />
+              <span class="inline-flex min-w-[0.36em] shrink last:shrink-0" style:color={star.color} aria-hidden="true">
+                <Star class="size-[1.12em] shrink-0 fill-current" strokeWidth={0} />
               </span>
             {/if}
           {/each}
@@ -579,7 +638,7 @@
       {/if}
     {/if}
   {:else if column.id === 'rating'}
-    <RatingStars value={track.rating} starClass="size-3" class="gap-px" />
+    <RatingStars value={track.rating} starClass="size-[0.96em]" class="gap-px" />
   {:else if column.id === 'compat'}
     {@const verdict = compatibilityOf(track)}
     <span
@@ -591,7 +650,7 @@
     >
       <span
         class={[
-          'block size-2.5 rounded-full',
+          'block size-[0.8em] rounded-full',
           verdict.color === 'green' && 'bg-ok',
           verdict.color === 'yellow' && 'bg-warn',
           verdict.color === 'red' && 'bg-danger'
@@ -601,7 +660,7 @@
   {:else if column.id === 'fileType'}
     <span
       class={[
-        'rounded border px-1 py-px text-[10px] font-medium',
+        'rounded border px-1 py-px text-[0.8em] font-medium',
         track.missing ? 'border-warn/40 text-warn' : 'border-line text-faint'
       ]}
     >
@@ -649,6 +708,7 @@
                   column.align === 'center' && 'justify-center',
                   library.sort?.key === column.sort && 'text-fg'
                 ]}
+                style:margin-left={column.id === 'title' && headingShift ? `-${headingShift}px` : undefined}
                 onclick={() => {
                   if (suppressSort) return
                   library.toggleSort(column.sort!)
@@ -668,7 +728,7 @@
                 {headerLabel(column)}
               </span>
             {/if}
-            {#if column.id !== 'issue'}
+            {#if column.id !== 'issue' && !fixedArt(column)}
               <div
                 class="group/resize absolute top-0 -right-1 z-20 h-full w-2 cursor-col-resize touch-none"
                 role="separator"
@@ -713,13 +773,14 @@
             {@const selected = library.selection.has(track.id)}
             <div
               class={[
-                'grid cursor-default items-center text-[12.5px]',
+                'grid cursor-default items-center',
                 selected ? 'bg-select' : 'hover:bg-surface',
                 track.missing ? 'text-warn' : selected ? 'text-fg' : 'text-muted',
                 library.canReorder && dragged.has(track.id) && 'opacity-40'
               ]}
               style:grid-template-columns={template}
               style:height="{ROW}px"
+              style:font-size="{rowFont}px"
               role="row"
               tabindex="-1"
               aria-selected={selected}
@@ -739,7 +800,7 @@
                     column.align === 'right' && 'justify-end',
                     column.align === 'center' && 'justify-center',
                     column.id === 'wave' && 'h-full px-1.5',
-                    column.id === 'art' && library.browserArtwork === 'fill' && 'relative h-8 px-0'
+                    column.id === 'art' && (stacked ? 'h-full' : 'relative h-full px-0')
                   ]}
                 >
                   {@render cell(column, track, index)}

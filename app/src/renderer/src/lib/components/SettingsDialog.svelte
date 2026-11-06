@@ -24,6 +24,7 @@
   } from '@lucide/svelte'
   import { accent, DEFAULT_ACCENT } from '$lib/accent.svelte'
   import { BPM_RANGES, MAX_CONCURRENCY } from '$lib/analysis.svelte'
+  import { ROW_HEIGHT_MAX, ROW_HEIGHT_MIN, ROW_HEIGHT_STEP } from '$lib/browserColumns'
   import { backupDate, INTERVAL_CHOICES, KEEP_CHOICES } from '$lib/backups.svelte'
   import {
     BIT_DEPTHS,
@@ -42,7 +43,7 @@
   import { PLAYERS } from '$lib/hardware/players'
   import { formatSize } from '$lib/format'
   import { ACTION_IDS, ACTIONS, chordFromEvent, chordLabel, type ActionGroup, type ActionId } from '$lib/keymap'
-  import type { BrowserArtwork } from '$lib/library.svelte'
+  import type { BrowserTrackStyle } from '$lib/library.svelte'
   import type { CuePlacement } from '$lib/player.svelte'
   import type { Backup, BackupProgress, BackupReason, ConvertFormat, ConvertPreset } from '$lib/types'
   import type { GridMode } from '../../../../preload/analysis'
@@ -75,9 +76,9 @@
     { id: 'playhead', label: 'Playhead' },
     { id: 'cuePoint', label: 'Cue point' }
   ]
-  const ARTWORK: (Choice & { id: BrowserArtwork })[] = [
-    { id: 'fill', label: 'Fill' },
-    { id: 'whole', label: 'Whole' }
+  const TRACK_STYLES: (Choice & { id: BrowserTrackStyle })[] = [
+    { id: 'standard', label: 'Standard' },
+    { id: 'alternative', label: 'Alternative' }
   ]
   const GRID_MODES: (Choice & { id: GridMode })[] = [
     { id: 'normal', label: 'Normal' },
@@ -294,12 +295,35 @@
           <section class="mb-5">
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Browser</h3>
             {@render choice(
-              'Artwork',
-              'Fill uses the full width of the column and crops the bottom of the cover. Whole shows the entire image, smaller.',
-              ARTWORK,
-              library.browserArtwork,
-              (id) => library.setBrowserArtwork(id as BrowserArtwork)
+              'Track style',
+              'Standard shows one line per track, with artwork filling the column. Alternative shows the whole cover and puts the artist under the title instead of in its own column.',
+              TRACK_STYLES,
+              library.browserTrackStyle,
+              (id) => library.setBrowserTrackStyle(id as BrowserTrackStyle)
             )}
+            <div class="flex items-center gap-3 rounded-md px-2 py-2">
+              <span class="min-w-0 flex-1">
+                <span class="block text-[12.5px] font-medium">Track height</span>
+                <span class="mt-0.5 block text-[11px] leading-snug text-faint">
+                  Height of each track in the browser. Text, artwork and waveforms scale with it. Lower fits more
+                  tracks, higher is easier to read.
+                </span>
+              </span>
+              <input
+                class="h-4 w-28 shrink-0 cursor-pointer accent-accent"
+                type="range"
+                min={ROW_HEIGHT_MIN}
+                max={ROW_HEIGHT_MAX}
+                step={ROW_HEIGHT_STEP}
+                aria-label="Track height"
+                aria-valuetext="{library.browserRowHeight} pixels"
+                value={library.browserRowHeight}
+                oninput={(e) => library.setBrowserRowHeight(Number(e.currentTarget.value))}
+              />
+              <span class="w-9 shrink-0 text-right font-mono text-[11px] text-muted tabular-nums">
+                {library.browserRowHeight}px
+              </span>
+            </div>
             {@render toggle(
               'Hide streaming tracks',
               'Leave tracks from streaming services out of the collection, playlists, histories and tags. They stay in rekordbox.',
