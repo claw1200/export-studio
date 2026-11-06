@@ -44,14 +44,15 @@
   import { formatSize } from '$lib/format'
   import { ACTION_IDS, ACTIONS, chordFromEvent, chordLabel, type ActionGroup, type ActionId } from '$lib/keymap'
   import type { BrowserTrackStyle } from '$lib/library.svelte'
-  import type { CuePlacement } from '$lib/player.svelte'
+  import type { CuePlacement } from '$lib/deck/prefs.svelte'
   import type { Backup, BackupProgress, BackupReason, ConvertFormat, ConvertPreset } from '$lib/types'
   import type { GridMode } from '../../../../preload/analysis'
   import ConfirmDialog from './ConfirmDialog.svelte'
 
   let { initialSection = 'general', onclose }: { initialSection?: SettingsSection; onclose: () => void } = $props()
 
-  const { library, player, keybinds, analysis, backups } = getApp()
+  const { library, decks, keybinds, analysis, backups } = getApp()
+  const prefs = decks.prefs
 
   type Choice = { id: string; label: string }
   const SECTIONS: { id: SettingsSection; label: string; icon: typeof Keyboard }[] = [
@@ -283,12 +284,12 @@
               max="100"
               step="1"
               aria-label="Fall blocks"
-              aria-valuetext={String(player.display.fallBlocks)}
-              value={player.display.fallBlocks}
-              oninput={(e) => player.display.setFallBlocks(Number(e.currentTarget.value))}
+              aria-valuetext={String(prefs.waveform.fallBlocks)}
+              value={prefs.waveform.fallBlocks}
+              oninput={(e) => prefs.waveform.setFallBlocks(Number(e.currentTarget.value))}
             />
             <span class="w-9 shrink-0 text-right font-mono text-[11px] text-muted tabular-nums">
-              {player.display.fallBlocks}
+              {prefs.waveform.fallBlocks}
             </span>
           </div>
         {:else if section === 'display'}
@@ -364,12 +365,12 @@
                 max="100"
                 step="1"
                 aria-label="High quality waveforms"
-                aria-valuetext={player.display.quality === 0 ? 'Off' : `${player.display.quality}%`}
-                value={player.display.quality}
-                oninput={(e) => player.display.setQuality(Number(e.currentTarget.value))}
+                aria-valuetext={prefs.waveform.quality === 0 ? 'Off' : `${prefs.waveform.quality}%`}
+                value={prefs.waveform.quality}
+                oninput={(e) => prefs.waveform.setQuality(Number(e.currentTarget.value))}
               />
               <span class="w-9 shrink-0 text-right font-mono text-[11px] text-muted tabular-nums">
-                {player.display.quality === 0 ? 'Off' : `${player.display.quality}%`}
+                {prefs.waveform.quality === 0 ? 'Off' : `${prefs.waveform.quality}%`}
               </span>
             </div>
           </section>
@@ -384,8 +385,8 @@
             {@render toggle(
               'Quantise',
               'Scrubbing, the cue point and new cues snap to the nearest beat.',
-              player.quantise,
-              () => player.setQuantise(!player.quantise)
+              prefs.quantise,
+              () => prefs.setQuantise(!prefs.quantise)
             )}
             <div class="flex items-start gap-3 rounded-md px-2 py-2">
               <span class="min-w-0 flex-1">
@@ -403,11 +404,11 @@
                   <button
                     class={[
                       'rounded px-2.5 py-1',
-                      player.cuePlacement === p.id ? 'bg-raised text-fg' : 'text-faint hover:text-muted'
+                      prefs.cuePlacement === p.id ? 'bg-raised text-fg' : 'text-faint hover:text-muted'
                     ]}
                     role="radio"
-                    aria-checked={player.cuePlacement === p.id}
-                    onclick={() => player.setCuePlacement(p.id)}
+                    aria-checked={prefs.cuePlacement === p.id}
+                    onclick={() => prefs.setCuePlacement(p.id)}
                   >
                     {p.label}
                   </button>

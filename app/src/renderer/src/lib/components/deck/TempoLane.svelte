@@ -1,6 +1,6 @@
 <script lang="ts">
   import { nearestBeatIndex } from '$lib/beat'
-  import { getApp } from '$lib/context'
+  import { getPlayer } from '$lib/deck/context'
   import { formatBeatLength, formatBpm, formatClock } from '$lib/format'
   import {
     continuedBeats,
@@ -16,7 +16,7 @@
   import { TEMPO_FLAG_COLOR } from '$lib/waveform/colors'
   import FlagPopover from './FlagPopover.svelte'
 
-  const { player } = getApp()
+  const player = getPlayer()
   const grid = player.grid
 
   const DRAG_THRESHOLD_PX = 3

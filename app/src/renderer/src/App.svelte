@@ -1,23 +1,18 @@
 <script lang="ts">
   import { LoaderCircle, AlertTriangle } from '@lucide/svelte'
-  import { Audition } from '$lib/audition.svelte'
   import { browserPreviews } from '$lib/browserPreview.svelte'
   import { setApp } from '$lib/context'
   import { Analysis, analysable } from '$lib/analysis.svelte'
   import { Backups } from '$lib/backups.svelte'
   import { Library } from '$lib/library.svelte'
-  import { Player } from '$lib/player.svelte'
+  import { Decks } from '$lib/decks.svelte'
+  import { MODES, modeById } from '$lib/modes/registry'
+  import type { TrackActions } from '$lib/modes/types'
   import { Keybinds } from '$lib/keybinds.svelte'
-  import { HOT_CUE_ACTIONS } from '$lib/keymap'
-  import { HOT_CUE_KINDS } from '$lib/format'
   import { isFileDrag } from '$lib/library/drop'
   import { getSetting, setSetting } from '$lib/settings'
   import type { ConvertPreset, Track } from '$lib/types'
   import TitleBar from '$lib/components/TitleBar.svelte'
-  import Sidebar from '$lib/components/Sidebar.svelte'
-  import TrackTable from '$lib/components/TrackTable.svelte'
-  import Deck from '$lib/components/Deck.svelte'
-  import Inspector from '$lib/components/Inspector.svelte'
   import StatusBar from '$lib/components/StatusBar.svelte'
   import TrackEditDialog from '$lib/components/TrackEditDialog.svelte'
   import RelocateDialog from '$lib/components/RelocateDialog.svelte'
@@ -28,25 +23,32 @@
   import type { SettingsSection } from '$lib/components/SettingsDialog.svelte'
 
   const library = new Library()
-  const player = new Player()
-  const audition = new Audition()
-  audition.onBegan = () => player.yieldToPreview()
-  audition.onEnded = () => player.resumeAfterPreview()
-  player.onDeckPlay = () => audition.stop()
+  const decks = new Decks()
   const keybinds = new Keybinds()
   const analysis = new Analysis()
-  const backups = new Backups(library, player, analysis)
-  setApp({ library, player, keybinds, analysis, backups, audition })
+  const backups = new Backups(library, decks, analysis)
+  setApp({ library, decks, keybinds, analysis, backups, audition: decks.audition })
+
+  const initialMode = modeById(getSetting('mode'))
+  let mode = $state.raw(initialMode)
+  /** The players the current mode shows, claimed as it is entered. */
+  let players = $state.raw(decks.enter(initialMode.decks))
+
+  function setMode(id: string): void {
+    const next = modeById(id)
+    if (next === mode) return
+    players = decks.enter(next.decks)
+    mode = next
+    setSetting('mode', next.id)
+  }
 
   library.onImported((tracks) => analysis.afterImport(tracks))
-  library.onRemoved((ids) => {
-    if (player.track && ids.includes(player.track.id)) player.eject()
-  })
+  library.onRemoved((ids) => decks.eject((id) => ids.includes(id)))
   analysis.onFinished((track) => {
     if (!track) return
     browserPreviews.forget([track.id])
     library.updateRows([track])
-    if (player.track?.id === track.id) void player.refreshDetail()
+    for (const player of decks.withTrack(track.id)) void player.refreshDetail()
   })
   analysis.onBatchDone((analysed, failed, error) => {
     if (!failed) return
@@ -54,81 +56,23 @@
     library.notify(`Analysed ${analysed}, but couldn’t analyse ${count}: ${error ?? 'unknown error'}`, 'warning')
   })
 
-  const PANELS = {
-    sidebar: { min: 180, max: 400, fallback: 240 },
-    inspector: { min: 260, max: 480, fallback: 320 }
-  } as const
-
-  type Panel = keyof typeof PANELS
-
-  function clampWidth(panel: Panel, width: number): number {
-    const spec = PANELS[panel]
-    return Math.min(spec.max, Math.max(spec.min, Math.round(width)))
-  }
-
-  function readWidth(panel: Panel): number {
-    const n = Number(getSetting(`${panel}Width`))
-    return Number.isFinite(n) ? clampWidth(panel, n) : PANELS[panel].fallback
-  }
-
   let inspectorOpen = $state(getSetting('inspectorOpen') !== 'false')
-  let sidebarWidth = $state(readWidth('sidebar'))
-  let inspectorWidth = $state(readWidth('inspector'))
-  let panelDrag = $state<{ side: Panel; startX: number; startW: number } | null>(null)
-
-  function widthOf(panel: Panel): number {
-    return panel === 'sidebar' ? sidebarWidth : inspectorWidth
-  }
-
-  function setWidth(panel: Panel, width: number): void {
-    const next = clampWidth(panel, width)
-    if (panel === 'sidebar') sidebarWidth = next
-    else inspectorWidth = next
-  }
-
-  function startPanelResize(e: PointerEvent, side: Panel): void {
-    if (e.button !== 0 || e.detail > 1) return
-    e.preventDefault()
-    e.stopPropagation()
-    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    panelDrag = { side, startX: e.clientX, startW: widthOf(side) }
-  }
-
-  function onPanelMove(e: PointerEvent): void {
-    const drag = panelDrag
-    if (!drag) return
-    const delta = e.clientX - drag.startX
-    const signed = drag.side === 'sidebar' ? delta : -delta
-    setWidth(drag.side, drag.startW + signed)
-  }
-
-  function endPanelResize(): void {
-    const drag = panelDrag
-    if (!drag) return
-    panelDrag = null
-    setSetting(`${drag.side}Width`, String(widthOf(drag.side)))
-  }
-
-  function resetPanel(side: Panel): void {
-    setWidth(side, PANELS[side].fallback)
-    setSetting(`${side}Width`, String(widthOf(side)))
-  }
 
   let searchInput = $state<HTMLInputElement>()
-  let table = $state<ReturnType<typeof TrackTable>>()
-  let previewTimer: ReturnType<typeof setTimeout> | undefined
 
   browserPreviews.onCueChange = (id, cues) => library.noteCueCounts(id, cues)
   library.load()
   library.onTracksUpdated((rows) => {
-    const loaded = player.track
-    const fresh = loaded && rows.find((t) => t.id === loaded.id)
-    if (!fresh) return
-    if (fresh.path !== loaded.path) void player.reopen(fresh)
-    else player.track = fresh
+    for (const player of decks.all) {
+      const loaded = player.track
+      const fresh = loaded && rows.find((t) => t.id === loaded.id)
+      if (!fresh) continue
+      if (fresh.path !== loaded.path) void player.reopen(fresh)
+      else player.track = fresh
+    }
   })
 
-  player.onFileChecked((id, missing) => library.setMissing(id, missing))
+  decks.onFileChecked((id, missing) => library.setMissing(id, missing))
 
   let editing = $state.raw<Track[] | null>(null)
   let relocating = $state.raw<Track[] | null>(null)
@@ -183,18 +127,7 @@
     })
   }
 
-  function select(track: Track): void {
-    library.selectOnly(track.id)
-    if (player.playing || library.doubleClickToLoad) return
-    clearTimeout(previewTimer)
-    previewTimer = setTimeout(() => player.load(track), 80)
-  }
-
-  function activate(track: Track): void {
-    library.selectOnly(track.id)
-    clearTimeout(previewTimer)
-    player.load(track, true)
-  }
+  const actions: TrackActions = { edit, remove, analyse, convert, autoRelocate }
 
   function removeSelectedFromPlaylist(): void {
     const playlist = library.sourcePlaylist
@@ -211,15 +144,6 @@
 
   function reload(): void {
     library.load(true)
-  }
-
-  function moveSelection(step: number): void {
-    const list = library.visible
-    if (!list.length) return
-    const current = library.selectedId ? list.findIndex((t) => t.id === library.selectedId) : -1
-    const next = Math.max(0, Math.min(list.length - 1, current < 0 ? 0 : current + step))
-    select(list[next])
-    table?.ensureVisible(next)
   }
 
   const TEXT_INPUTS = new Set(['text', 'search', 'email', 'password', 'url'])
@@ -239,36 +163,6 @@
 
   $effect(() =>
     keybinds.register({
-      'deck.playPause': () => player.toggle(),
-      'deck.cue': { down: () => player.cueDown(), up: () => player.cueUp() },
-      'deck.loopIn': () => player.setLoopIn(),
-      'deck.loopOut': () => player.setLoopOut(),
-      'deck.reloopExit': () => player.reloopExit(),
-      'deck.beatLoop': () => player.beatLoop(4),
-      'deck.loopHalve': () => player.resizeLoop(0.5),
-      'deck.loopDouble': () => player.resizeLoop(2),
-      'deck.quantise': () => player.setQuantise(!player.quantise),
-      'deck.seekBack': () => player.seek(player.position - 2),
-      'deck.seekForward': () => player.seek(player.position + 2),
-      'deck.seekBackFar': () => player.seek(player.position - 10),
-      'deck.seekForwardFar': () => player.seek(player.position + 10),
-      ...Object.fromEntries(
-        HOT_CUE_ACTIONS.map((id, i) => [
-          id,
-          { down: () => player.hotCueDown(HOT_CUE_KINDS[i]), up: () => player.hotCueUp(HOT_CUE_KINDS[i]) }
-        ])
-      ),
-      'cue.previousMemory': () => player.callMemoryCue(-1),
-      'cue.nextMemory': () => player.callMemoryCue(1),
-      'cue.addMemory': () => void player.addMemoryCue(),
-      'cue.deleteAtPlayhead': () => void player.deleteCueAtPlayhead(),
-      'library.next': () => moveSelection(1),
-      'library.previous': () => moveSelection(-1),
-      'library.nextPage': () => moveSelection(10),
-      'library.previousPage': () => moveSelection(-10),
-      'library.loadSelected': () => {
-        if (library.selected) activate(library.selected)
-      },
       'library.search': () => {
         searchInput?.focus()
         searchInput?.select()
@@ -297,38 +191,13 @@
   onkeyup={keybinds.keyup}
   onblur={keybinds.releaseAll}
   {onmousedown}
-  onpointermove={onPanelMove}
-  onpointerup={endPanelResize}
-  onpointercancel={endPanelResize}
 />
-
-{#snippet panelHandle(side: 'sidebar' | 'inspector', edge: 'left' | 'right')}
-  <div
-    class={[
-      'group/resize absolute inset-y-0 z-20 w-2 cursor-col-resize touch-none',
-      edge === 'right' ? '-right-1' : '-left-1'
-    ]}
-    role="separator"
-    aria-orientation="vertical"
-    aria-valuenow={widthOf(side)}
-    aria-valuemin={PANELS[side].min}
-    aria-valuemax={PANELS[side].max}
-    aria-label={side === 'sidebar' ? 'Resize playlists' : 'Resize info'}
-    title="Drag to resize. Double-click to reset."
-    onpointerdown={(e) => startPanelResize(e, side)}
-    ondblclick={() => resetPanel(side)}
-  >
-    <span
-      class={[
-        'pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2',
-        panelDrag?.side === side ? 'bg-accent' : 'bg-line opacity-0 group-hover/resize:opacity-100'
-      ]}
-    ></span>
-  </div>
-{/snippet}
 
 <div class="flex h-full flex-col">
   <TitleBar
+    modes={MODES}
+    mode={mode.id}
+    onmode={setMode}
     bind:searchInput
     bind:settings
     bind:inspectorOpen={
@@ -367,40 +236,10 @@
       </div>
     </div>
   {:else}
-    <Deck />
-    <div class="flex min-h-0 flex-1">
-      <div class="relative h-full shrink-0" style:width="{sidebarWidth}px">
-        <Sidebar
-          onsource={() => {
-            table?.scrollToTop()
-          }}
-        />
-        {@render panelHandle('sidebar', 'right')}
-      </div>
-      <main class="min-w-0 flex-1 bg-bg">
-        <TrackTable
-          bind:this={table}
-          onselect={select}
-          onactivate={activate}
-          onedit={edit}
-          onautorelocate={autoRelocate}
-          onremove={remove}
-          onanalyse={analyse}
-          onconvert={convert}
-        />
-      </main>
-      {#if inspectorOpen}
-        <div class="relative h-full shrink-0" style:width="{inspectorWidth}px">
-          {@render panelHandle('inspector', 'left')}
-          <Inspector onjump={(s) => player.seek(s)} onedit={edit} />
-        </div>
-      {/if}
-    </div>
+    {#key mode}
+      <mode.component {players} {actions} {inspectorOpen} />
+    {/key}
     <StatusBar />
-  {/if}
-
-  {#if panelDrag}
-    <div class="fixed inset-0 z-50 cursor-col-resize"></div>
   {/if}
 
   {#if editing}

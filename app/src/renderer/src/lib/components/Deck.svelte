@@ -1,6 +1,9 @@
 <script lang="ts">
   import { LoaderCircle } from '@lucide/svelte'
   import { getApp } from '$lib/context'
+  import { setPlayer } from '$lib/deck/context'
+  import { deckKeys } from '$lib/deck/keys'
+  import type { Player } from '$lib/player.svelte'
   import { bpmAt } from '$lib/beat'
   import { chordLabel } from '$lib/keymap'
   import WaveformDetail from './WaveformDetail.svelte'
@@ -14,7 +17,14 @@
   import HotCueBar from './deck/HotCueBar.svelte'
   import LoopControls from './deck/LoopControls.svelte'
 
-  const { library, player, keybinds } = getApp()
+  /** The player this deck shows. Fixed for the component's life: key the deck on it to swap. */
+  let { player }: { player: Player } = $props()
+
+  const { library, decks, keybinds } = getApp()
+  // svelte-ignore state_referenced_locally
+  setPlayer(player)
+  /** Only the focused deck answers the keyboard, so several decks never fight over a key. */
+  const focused = $derived(decks.focused === player)
 
   const track = $derived(player.track)
   const deviceTrack = $derived(player.track?.id.startsWith('usb:') ?? false)
@@ -36,10 +46,13 @@
     else if (gridEditable) player.grid.begin()
   }
 
-  $effect(() => keybinds.register({ 'deck.gridEdit': toggleGridEdit }))
+  $effect(() => {
+    if (!focused) return undefined
+    return keybinds.register({ ...deckKeys(player), 'deck.gridEdit': toggleGridEdit })
+  })
 
   $effect(() => {
-    if (!player.grid.editing) return undefined
+    if (!focused || !player.grid.editing) return undefined
     return keybinds.register({
       'grid.addFlag': () => player.grid.addFlagAtPlayhead(),
       'grid.previousFlag': () => player.grid.jumpToFlag(-1),
@@ -63,7 +76,7 @@
 
 <svelte:window
   onkeydown={(e) => {
-    if (e.key !== 'Escape' || e.defaultPrevented) return
+    if (!focused || e.key !== 'Escape' || e.defaultPrevented) return
     if (player.grid.selectedFlagId != null) player.grid.select(null)
     else if (player.grid.editing && !player.editing) player.grid.cancel()
   }}

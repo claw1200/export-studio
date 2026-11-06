@@ -1,7 +1,7 @@
 import { api } from './api'
 import type { Analysis } from './analysis.svelte'
 import type { Library } from './library.svelte'
-import type { Player } from './player.svelte'
+import type { Decks } from './decks.svelte'
 import type { Backup, BackupProgress, BackupSettings } from './types'
 
 export const KEEP_CHOICES = [5, 10, 20] as const
@@ -31,7 +31,7 @@ export class Backups {
 
   constructor(
     private library: Library,
-    private player: Player,
+    private decks: Decks,
     private analysis: Analysis
   ) {
     api.onEvent((event, data) => {
@@ -89,7 +89,7 @@ export class Backups {
     this.busy = 'restore'
     this.error = null
     this.analysis.cancel()
-    this.player.eject()
+    this.decks.eject()
     try {
       const result = await api.backupRestore(backup.id)
       this.library.notify(`Restored the library from ${backupDate(backup)}: ${result.tracks.toLocaleString()} tracks`)

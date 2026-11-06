@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Pencil, Plus, X } from '@lucide/svelte'
   import { getApp } from '$lib/context'
+  import { getPlayer } from '$lib/deck/context'
   import {
     cueColor,
     formatClock,
@@ -12,7 +13,8 @@
   } from '$lib/format'
   import type { Cue } from '$lib/types'
 
-  const { library, player } = getApp()
+  const { library } = getApp()
+  const player = getPlayer()
 
   const hotCues = $derived.by(() => {
     const bySlot = new Map(

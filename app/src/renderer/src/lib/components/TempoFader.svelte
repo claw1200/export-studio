@@ -1,10 +1,10 @@
 <script lang="ts">
   import { RotateCcw } from '@lucide/svelte'
   import type { Attachment } from 'svelte/attachments'
-  import { getApp } from '$lib/context'
+  import { getPlayer } from '$lib/deck/context'
   import { formatTempo } from '$lib/deck/tempo.svelte'
 
-  const { player } = getApp()
+  const player = getPlayer()
   const tempo = player.tempo
 
   /** Shift moves the fader this much finer, by drag, wheel or key. */

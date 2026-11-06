@@ -4,7 +4,8 @@
   import { getApp } from '$lib/context'
   import { formatSize, formatTotal } from '$lib/format'
 
-  const { library, player, analysis, backups } = getApp()
+  const { library, decks, analysis, backups } = getApp()
+  const player = $derived(decks.focused)
 
   const totals = $derived.by(() => {
     let duration = 0
@@ -17,10 +18,10 @@
   })
 
   const notice = $derived.by((): { message: string; level: NoticeLevel } | null => {
-    if (player.editError) return { message: player.editError, level: 'error' }
+    if (player?.editError) return { message: player.editError, level: 'error' }
     if (library.editError) return { message: library.editError, level: library.editLevel }
     if (library.lockError) return { message: library.lockError, level: library.lockLevel }
-    if (player.audioError) return { message: player.audioError, level: 'error' }
+    if (player?.audioError) return { message: player.audioError, level: 'error' }
     return null
   })
 

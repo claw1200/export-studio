@@ -3,8 +3,11 @@ import type { WaveformMode } from '../waveform/data'
 import { storedPercent } from './stored'
 import { WaveLoader, type WaveSamples } from './waves.svelte'
 
-/** How the deck's waveforms are drawn, kept between sessions, and the samples the detail view uses. */
-export class WaveformDisplay {
+/** What changed in the waveform preferences, so each deck can decide whether to fetch again. */
+type WaveformChange = { kind: 'mode' } | { kind: 'quality'; wasOff: boolean }
+
+/** How every deck's waveforms are drawn, kept between sessions. */
+export class WaveformPrefs {
   mode = $state<WaveformMode>((getSetting('waveformMode') as WaveformMode) || 'rgb')
   /** Detail of the engine's own waveform, 0 to 100; 0 draws rekordbox's analysis instead. */
   quality = $state(storedPercent('waveQuality', 30))
@@ -12,14 +15,81 @@ export class WaveformDisplay {
   fallBlocks = $state(storedPercent('fallBlocks', 40))
   zoom = $state(Number(getSetting('waveformZoom')) || 1)
 
+  private listeners = new Set<(change: WaveformChange) => void>()
+
+  /** Called when the mode or quality changes. Returns the unsubscribe. */
+  subscribe(listener: (change: WaveformChange) => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  setMode(mode: WaveformMode): void {
+    if (this.mode === mode) return
+    this.mode = mode
+    setSetting('waveformMode', mode)
+    this.emit({ kind: 'mode' })
+  }
+
+  setQuality(quality: number): void {
+    const q = Math.min(100, Math.max(0, Math.round(quality)))
+    if (this.quality === q) return
+    const wasOff = this.quality <= 0
+    this.quality = q
+    setSetting('waveQuality', String(q))
+    this.emit({ kind: 'quality', wasOff })
+  }
+
+  setFallBlocks(blocks: number): void {
+    const n = Math.min(100, Math.max(0, Math.round(blocks)))
+    if (this.fallBlocks === n) return
+    this.fallBlocks = n
+    setSetting('fallBlocks', String(n))
+  }
+
+  setZoom(zoom: number): void {
+    this.zoom = Math.max(0.25, Math.min(64, zoom))
+    setSetting('waveformZoom', String(this.zoom))
+  }
+
+  private emit(change: WaveformChange): void {
+    for (const listener of this.listeners) listener(change)
+  }
+}
+
+/** One deck's waveform samples, drawn as the shared preferences say. */
+export class WaveformDisplay {
   private readonly waves = new WaveLoader()
   private readonly trackId: () => string | null
   private readonly isLoose: () => boolean
 
   /** `trackId` is the loaded track. `isLoose` is a file that is not in the collection. */
-  constructor(trackId: () => string | null, isLoose: () => boolean) {
+  constructor(
+    private readonly prefs: WaveformPrefs,
+    trackId: () => string | null,
+    isLoose: () => boolean
+  ) {
     this.trackId = trackId
     this.isLoose = isLoose
+    prefs.subscribe((change) => {
+      if (change.kind === 'mode') this.reload()
+      else if (this.isLoose() || prefs.quality <= 0 || change.wasOff) this.reload()
+    })
+  }
+
+  get mode(): WaveformMode {
+    return this.prefs.mode
+  }
+
+  get quality(): number {
+    return this.prefs.quality
+  }
+
+  get fallBlocks(): number {
+    return this.prefs.fallBlocks
+  }
+
+  get zoom(): number {
+    return this.prefs.zoom
   }
 
   get samples(): WaveSamples | null {
@@ -52,31 +122,19 @@ export class WaveformDisplay {
   }
 
   setMode(mode: WaveformMode): void {
-    if (this.mode === mode) return
-    this.mode = mode
-    setSetting('waveformMode', mode)
-    this.reload()
+    this.prefs.setMode(mode)
   }
 
   setQuality(quality: number): void {
-    const q = Math.min(100, Math.max(0, Math.round(quality)))
-    if (this.quality === q) return
-    const wasOff = this.quality <= 0
-    this.quality = q
-    setSetting('waveQuality', String(q))
-    if (this.isLoose() || q <= 0 || wasOff) this.reload()
+    this.prefs.setQuality(quality)
   }
 
   setFallBlocks(blocks: number): void {
-    const n = Math.min(100, Math.max(0, Math.round(blocks)))
-    if (this.fallBlocks === n) return
-    this.fallBlocks = n
-    setSetting('fallBlocks', String(n))
+    this.prefs.setFallBlocks(blocks)
   }
 
   setZoom(zoom: number): void {
-    this.zoom = Math.max(0.25, Math.min(64, zoom))
-    setSetting('waveformZoom', String(this.zoom))
+    this.prefs.setZoom(zoom)
   }
 
   /** Fetches the samples for the loaded track, or drops them when they are not drawn. */

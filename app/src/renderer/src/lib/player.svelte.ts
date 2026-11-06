@@ -5,10 +5,8 @@ import { Deck, type DeckLoop } from './deck/deck.svelte'
 import { GridEditor } from './deck/grid.svelte'
 import { TrackSession } from './deck/session.svelte'
 import { WaveformDisplay } from './deck/display.svelte'
-import { Output } from './deck/output.svelte'
-import { storedFlag, storeFlag } from './deck/stored'
+import type { CuePlacement, DeckPrefs } from './deck/prefs.svelte'
 import { TempoControl } from './deck/tempo.svelte'
-import { getSetting, setSetting } from './settings'
 import {
   beatLoop,
   CUE_TOLERANCE,
@@ -30,15 +28,16 @@ const LOOSE_WAVE_RATE = 150
 const FILE_MISSING = 'Audio file not found'
 const STREAMING = 'Streaming tracks can’t be played here'
 
-export type CuePlacement = 'playhead' | 'cuePoint'
+export type { CuePlacement } from './deck/prefs.svelte'
 
 /** Which button a hold belongs to: CUE, or a hot cue's slot. */
 type HoldKey = 'cue' | number
 
 /**
  * The deck as the interface sees it: CDJ transport, cue and loop behaviour on top of the engine
- * deck. The loaded track's detail, cue and beatgrid editing, tempo, output level and waveform
- * display are its parts, used directly.
+ * deck. The loaded track's detail, cue and beatgrid editing, tempo and waveform display are its
+ * parts, used directly. Any number can exist, each on its own engine deck; preferences that hold
+ * for every deck (quantise, cue placement, waveform drawing) come from the shared `prefs`.
  */
 export class Player {
   readonly session = new TrackSession()
@@ -46,7 +45,7 @@ export class Player {
   onDeckPlay: (() => void) | null = null
   /** A preview paused playback and should start it again when the preview ends. */
   private returnAfterPreview = false
-  readonly deck = new Deck(0)
+  readonly deck: Deck
   readonly grid = new GridEditor(
     this.session,
     () => this.position,
@@ -54,15 +53,9 @@ export class Player {
     (seconds) => this.seek(seconds)
   )
   readonly cues = new CueEditor(this.session, this.grid)
-  readonly tempo = new TempoControl(this.deck)
-  readonly output = new Output(this.deck)
-  readonly display = new WaveformDisplay(
-    () => this.track?.id ?? null,
-    () => this.track?.collected === false
-  )
+  readonly tempo: TempoControl
+  readonly display: WaveformDisplay
 
-  quantise = $state(storedFlag('quantise', true))
-  cuePlacement = $state<CuePlacement>(getSetting('cuePlacement') === 'playhead' ? 'playhead' : 'cuePoint')
   /** Also the loop in point: LOOP OUT closes a loop from here. */
   cuePoint = $state(0)
   previewAt = $state<number | null>(null)
@@ -70,7 +63,18 @@ export class Player {
   private previewOwner: string | null = null
   private fileListeners = new Set<(id: string, missing: boolean) => void>()
 
-  constructor() {
+  /** `slot` is the engine deck this player plays on. */
+  constructor(
+    readonly slot: number,
+    private readonly prefs: DeckPrefs
+  ) {
+    this.deck = new Deck(slot)
+    this.tempo = new TempoControl(this.deck)
+    this.display = new WaveformDisplay(
+      prefs.waveform,
+      () => this.track?.id ?? null,
+      () => this.track?.collected === false
+    )
     this.deck.onSettled = () => {
       const id = this.track?.id
       const missing = this.fileMissing
@@ -81,6 +85,14 @@ export class Player {
       this.grid.cancel()
       void this.refreshDetail()
     })
+  }
+
+  get quantise(): boolean {
+    return this.prefs.quantise
+  }
+
+  get cuePlacement(): CuePlacement {
+    return this.prefs.cuePlacement
   }
 
   get track(): Track | null {
@@ -439,8 +451,7 @@ export class Player {
   }
 
   setCuePlacement(placement: CuePlacement): void {
-    this.cuePlacement = placement
-    setSetting('cuePlacement', placement)
+    this.prefs.setCuePlacement(placement)
   }
 
   /** Where a new cue goes, in milliseconds, with the loop's out point when it saves a loop. */
@@ -484,8 +495,7 @@ export class Player {
   }
 
   setQuantise(on: boolean): void {
-    this.quantise = on
-    storeFlag('quantise', on)
+    this.prefs.setQuantise(on)
   }
 
   quantised(seconds: number): number {

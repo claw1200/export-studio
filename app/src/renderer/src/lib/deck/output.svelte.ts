@@ -1,17 +1,16 @@
 import { setSetting } from '../settings'
-import type { Deck } from './deck.svelte'
 import { clampUnit, storedFlag, storedVolume, storeFlag } from './stored'
 
-/** The master level and mute, kept between sessions. */
+/** The master level and mute, kept between sessions. One for the whole engine, whatever the decks. */
 export class Output {
   volume = $state(storedVolume())
   muted = $state(storedFlag('muted'))
   /** What unmuting goes back to when the level was dragged to zero. */
   private unmuteVolume = 1
 
-  constructor(private deck: Deck) {
+  constructor() {
     this.unmuteVolume = this.volume > 0 ? this.volume : 1
-    this.deck.setVolume(this.muted ? 0 : this.volume)
+    this.apply(this.muted ? 0 : this.volume)
   }
 
   setVolume(volume: number): void {
@@ -21,7 +20,7 @@ export class Output {
       this.unmuteVolume = v
       this.muted = false
     }
-    this.deck.setVolume(this.muted ? 0 : v)
+    this.apply(this.muted ? 0 : v)
     setSetting('volume', String(v))
     storeFlag('muted', this.muted)
   }
@@ -33,7 +32,11 @@ export class Output {
       return
     }
     this.muted = true
-    this.deck.setVolume(0)
+    this.apply(0)
     storeFlag('muted', true)
+  }
+
+  private apply(gain: number): void {
+    window.audio.send({ op: 'volume', gain })
   }
 }

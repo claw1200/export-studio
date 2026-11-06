@@ -1,12 +1,12 @@
 <script lang="ts">
   import { tick } from 'svelte'
-  import { getApp } from '$lib/context'
+  import { getPlayer } from '$lib/deck/context'
   import type { TempoMap } from '$lib/tempo-map'
   import { formatBpm } from '$lib/format'
 
   let { bpm }: { bpm: number } = $props()
 
-  const { player } = getApp()
+  const player = getPlayer()
 
   const BPM_PER_PIXEL = 0.05
   const FINE_BPM_PER_PIXEL = 0.01

@@ -21,17 +21,25 @@
   import SettingsDialog, { type SettingsSection } from './SettingsDialog.svelte'
 
   let {
+    modes = [],
+    mode,
+    onmode,
     inspectorOpen = $bindable(true),
     searchInput = $bindable(),
     settings = $bindable(null)
   }: {
+    /** The modes to switch between. The switcher only shows when there is more than one. */
+    modes?: readonly { id: string; label: string }[]
+    mode?: string
+    onmode?: (id: string) => void
     inspectorOpen: boolean
     searchInput?: HTMLInputElement
     settings?: SettingsSection | null
   } = $props()
 
-  const { library, player, keybinds } = getApp()
-  const silent = $derived(player.output.muted || player.output.volume === 0)
+  const { library, decks, keybinds } = getApp()
+  const output = decks.output
+  const silent = $derived(output.muted || output.volume === 0)
   const isMac = window.api.platform === 'darwin'
   let importMenu = $state<MenuRequest | null>(null)
 
@@ -87,7 +95,7 @@
   function toggleLock(): void {
     const on = !library.writable
     void library.setWritable(on).then((changed) => {
-      if (changed) void player.refreshDetail()
+      if (changed) void decks.refreshDetail()
     })
   }
 </script>
@@ -106,6 +114,24 @@
     isMac ? 'pl-[84px]' : 'pl-3 pr-[150px]'
   ]}
 >
+  {#if modes.length > 1}
+    <div class="no-drag flex shrink-0 items-center rounded-md bg-surface p-0.5" role="radiogroup" aria-label="Mode">
+      {#each modes as option (option.id)}
+        <button
+          class={[
+            'h-6 rounded px-2.5 text-[12px] font-medium',
+            option.id === mode ? 'bg-raised text-fg' : 'text-faint hover:text-muted'
+          ]}
+          role="radio"
+          aria-checked={option.id === mode}
+          onclick={() => onmode?.(option.id)}
+        >
+          {option.label}
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   <div class="no-drag relative ml-4 w-full max-w-md">
     <Search class="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-faint" />
     <input
@@ -195,14 +221,14 @@
     <div class="no-drag flex h-7 items-center rounded-md pr-1.5">
       <button
         class="grid size-6 place-items-center rounded text-faint hover:bg-hover hover:text-fg"
-        onclick={() => player.output.toggleMute()}
+        onclick={() => output.toggleMute()}
         aria-label={silent ? 'Unmute' : 'Mute'}
         aria-pressed={silent}
         title={silent ? 'Unmute' : 'Mute'}
       >
         {#if silent}
           <VolumeX class="size-3.5" />
-        {:else if player.output.volume < 0.5}
+        {:else if output.volume < 0.5}
           <Volume1 class="size-3.5" />
         {:else}
           <Volume2 class="size-3.5" />
@@ -215,9 +241,9 @@
         max="1"
         step="0.01"
         aria-label="Volume"
-        aria-valuetext="{Math.round(player.output.volume * 100)}%"
-        title="Volume {Math.round(player.output.volume * 100)}%"
-        bind:value={() => player.output.volume, (v) => player.output.setVolume(v)}
+        aria-valuetext="{Math.round(output.volume * 100)}%"
+        title="Volume {Math.round(output.volume * 100)}%"
+        bind:value={() => output.volume, (v) => output.setVolume(v)}
       />
     </div>
 
