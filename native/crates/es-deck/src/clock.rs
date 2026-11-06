@@ -36,6 +36,10 @@ pub struct DeckClock {
     master_tempo: AtomicBool,
     /// Semitones the key is moved by, on top of whatever the tempo does to it.
     key_shift: AtomicI32,
+    /// The generation whose audio is queued deep enough to start without running dry.
+    ready_generation: AtomicU32,
+    /// The pending move keeps time: the deck lands where it would be had the move been instant.
+    keep_time: AtomicBool,
 }
 
 /// One deck at one instant.
@@ -259,6 +263,26 @@ impl DeckClock {
 
     pub fn set_master_tempo(&self, on: bool) {
         self.master_tempo.store(on, Ordering::Release);
+    }
+
+    /// Marks the next move as one that keeps time.
+    pub fn set_keep_time(&self, on: bool) {
+        self.keep_time.store(on, Ordering::Release);
+    }
+
+    /// Whether the move just taken up keeps time, clearing the mark.
+    pub fn take_keep_time(&self) -> bool {
+        self.keep_time.swap(false, Ordering::AcqRel)
+    }
+
+    /// The decode thread has queued enough of `generation` to start playing it.
+    pub fn set_ready(&self, generation: u32) {
+        self.ready_generation.store(generation, Ordering::Release);
+    }
+
+    /// Audio for where the deck is now is queued, or there is no more to queue.
+    pub fn buffered(&self) -> bool {
+        self.ready_generation.load(Ordering::Acquire) == self.generation() || self.end_of_stream()
     }
 
     pub fn key_shift(&self) -> i32 {

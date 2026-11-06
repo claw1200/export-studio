@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use es_decode::Streamer;
 use rtrb::Producer;
 
-use crate::block::{Block, BLOCK_FRAMES, RING_BLOCKS};
+use crate::block::{Block, BLOCK_FRAMES, RING_BLOCKS, RING_CAPACITY};
 use crate::clock::DeckClock;
 use crate::scrub::{PcmWindow, Scrubber, WINDOW_REACH};
 use crate::{DeckEvent, DeckId, EventSink};
@@ -37,6 +37,10 @@ pub(crate) enum Command {
 
 /// How long the thread waits between top-ups while audio is running and the ring is full.
 const TOP_UP_WAIT: Duration = Duration::from_micros(500);
+
+/// Blocks of a new position queued before it counts as ready to start: as deep as playback keeps
+/// the ring, which covers priming the time-stretcher.
+const READY_BLOCKS: usize = RING_BLOCKS;
 
 /// Blocks queued during a scrub: about 32 ms, so the sound follows the hand closely.
 const SCRUB_RING_BLOCKS: usize = 3;
@@ -87,6 +91,8 @@ pub(crate) fn spawn(
                 events,
                 streamer: None,
                 generation: 0,
+                fresh: 0,
+                fresh_generation: 0,
                 scrub: None,
                 started: Instant::now(),
             };
@@ -106,6 +112,9 @@ struct Worker {
     events: EventSink,
     streamer: Option<Streamer>,
     generation: u32,
+    /// Blocks pushed for `fresh_generation`, the position being filled.
+    fresh: usize,
+    fresh_generation: u32,
     scrub: Option<Scrub>,
     started: Instant,
 }
@@ -258,6 +267,11 @@ impl Worker {
         }
     }
 
+    /// Blocks in the ring, of any generation.
+    fn queued(&self) -> usize {
+        RING_CAPACITY - self.producer.slots()
+    }
+
     fn now_ms(&self) -> f64 {
         self.started.elapsed().as_secs_f64() * 1000.0
     }
@@ -326,7 +340,7 @@ impl Worker {
             // Let go: the control side has already sent where to land.
             return false;
         }
-        if self.producer.slots() + SCRUB_RING_BLOCKS <= RING_BLOCKS {
+        if self.queued() >= SCRUB_RING_BLOCKS {
             return false;
         }
         self.feed_window();
@@ -351,6 +365,15 @@ impl Worker {
         if self.producer.is_full() {
             return false;
         }
+        if self.fresh_generation != self.generation {
+            self.fresh_generation = self.generation;
+            self.fresh = 0;
+        }
+        // Up to the usual depth, except that a new position may queue that much behind whatever
+        // of the old one is still waiting to be drained.
+        if self.queued() >= RING_BLOCKS && self.fresh >= RING_BLOCKS {
+            return false;
+        }
         let active = self.clock.active_loop();
         if let Some((from, to)) = active {
             if self.streamer.as_ref().is_some_and(|s| s.position() >= to) {
@@ -363,6 +386,7 @@ impl Worker {
         };
         if streamer.finished() {
             self.clock.set_end_of_stream(true);
+            self.clock.set_ready(generation);
             return false;
         }
         let start = streamer.position();
@@ -390,6 +414,12 @@ impl Worker {
         }
         block.frames = frames as u16;
         let pushed = self.producer.push(block).is_ok();
+        if pushed {
+            self.fresh += 1;
+            if self.fresh == READY_BLOCKS {
+                self.clock.set_ready(generation);
+            }
+        }
         if let Some((from, to)) = active {
             if self.streamer.as_ref().is_some_and(|s| s.position() >= to) {
                 self.loop_jump(from);

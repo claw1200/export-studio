@@ -129,6 +129,9 @@ export class AudioBridge {
       case 'volume':
         engine.setVolume(command.gain)
         break
+      case 'nudge':
+        engine.nudge(command.deck, command.ms)
+        break
       case 'keyShift':
         engine.setKeyShift(command.deck, command.semitones)
         break

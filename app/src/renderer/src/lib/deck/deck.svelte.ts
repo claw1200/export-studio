@@ -130,6 +130,18 @@ export class Deck {
     else if (this.pending) this.pending.seek = true
   }
 
+  /**
+   * Moves by `seconds` from wherever the engine's playhead is when the command lands, which a
+   * position seen here a moment ago no longer is. While playing the engine keeps time through the
+   * move, so this is how one deck is lined up with another.
+   */
+  nudge(seconds: number): void {
+    if (!Number.isFinite(seconds) || seconds === 0) return
+    this.move(Math.max(0, Math.min(this.position + seconds, this.duration || Infinity)))
+    if (this.ready) this.send({ op: 'nudge', deck: this.index, ms: seconds * 1000 })
+    else if (this.pending) this.pending.seek = true
+  }
+
   /** Pause and move in one step, so the old position is never heard after the stop. */
   stopAt(seconds: number): void {
     this.playing = false

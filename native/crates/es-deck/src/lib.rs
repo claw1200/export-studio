@@ -22,8 +22,9 @@ mod tempo;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-pub use block::{BLOCK_FRAMES, RING_BLOCKS};
+pub use block::{BLOCK_FRAMES, RING_BLOCKS, RING_CAPACITY};
 pub use clock::DeckSnapshot;
 pub use fade::FADE_FRAMES;
 pub use sink::{CpalSink, NullSink, Render, Sink};
@@ -67,6 +68,9 @@ pub enum DeckEvent {
 /// Receives deck events. Called from a decode thread, never from the audio callback.
 pub type EventSink = Arc<dyn Fn(DeckEvent) + Send + Sync>;
 
+/// Longest `play_together` waits for the decks' audio to be queued before starting anyway.
+const READY_WAIT: Duration = Duration::from_millis(250);
+
 /// Furthest the key can be moved either way, in semitones.
 pub const MAX_KEY_SHIFT: i32 = 12;
 
@@ -102,7 +106,7 @@ impl Engine {
         let mut stretchers = Vec::with_capacity(decks);
         let mut readers = Vec::with_capacity(decks);
         for clock in &clocks {
-            let (producer, consumer) = rtrb::RingBuffer::<block::Block>::new(RING_BLOCKS);
+            let (producer, consumer) = rtrb::RingBuffer::<block::Block>::new(RING_CAPACITY);
             let (stretcher_in, stretcher_out) = rtrb::RingBuffer::<Box<Stretcher>>::new(1);
             producers.push(producer);
             stretchers.push(stretcher_in);
@@ -244,6 +248,14 @@ impl Engine {
             .filter_map(|&deck| self.deck(deck).map(|handle| (deck, handle)))
             .filter(|(_, handle)| handle.clock().loaded())
             .collect();
+        // Each deck may have just been moved. Wait (briefly) until all have the audio for where
+        // they are now queued, so none starts a buffer late on an empty ring.
+        let deadline = Instant::now() + READY_WAIT;
+        while ready.iter().any(|(_, handle)| !handle.clock().buffered())
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(1));
+        }
         // As with `play`, a deck that played to its end starts over.
         for &(deck, handle) in &ready {
             let clock = handle.clock();
@@ -274,6 +286,24 @@ impl Engine {
     /// and rounding it to a whole millisecond moves it.
     pub fn seek(&self, deck: DeckId, ms: f64) {
         self.seek_frames(deck, self.to_frames(ms));
+    }
+
+    /// Moves the playhead by `delta_ms` from wherever it is when this arrives, not from where a
+    /// caller last saw it. While playing the deck keeps time through the move: the moment spent
+    /// fading out and fetching the new audio is skipped at the deck's tempo, so it lands where it
+    /// would be had the jump been instant. That is what lining one deck up with another needs.
+    pub fn nudge(&self, deck: DeckId, delta_ms: f64) {
+        let Some(handle) = self.deck(deck) else {
+            return;
+        };
+        let clock = handle.clock();
+        if !clock.loaded() || !delta_ms.is_finite() {
+            return;
+        }
+        let delta = (delta_ms * f64::from(self.sample_rate) / 1000.0).round() as i64;
+        let frame = u64::try_from(clock.position() as i64 + delta).unwrap_or(0);
+        let keep_time = clock.playing() && !clock.scrubbing();
+        self.move_to(deck, frame, keep_time);
     }
 
     /// Pauses and moves in one step, which is what releasing CUE does. Two separate commands
@@ -341,6 +371,12 @@ impl Engine {
     }
 
     pub fn seek_frames(&self, deck: DeckId, frame: u64) {
+        self.move_to(deck, frame, false);
+    }
+
+    /// Moves the playhead to `frame`. The time-keeping mark is set with the move, never apart from
+    /// it, so the callback takes it up with this move and no other.
+    fn move_to(&self, deck: DeckId, frame: u64, keep_time: bool) {
         let Some(handle) = self.deck(deck) else {
             return;
         };
@@ -349,6 +385,7 @@ impl Engine {
         let frame = if total > 0 { frame.min(total) } else { frame };
         // A seek ends any scrub: the deck is wherever it was sent.
         clock.set_scrubbing(false);
+        clock.set_keep_time(keep_time);
         // Position and generation move here, not when the deck thread gets to the command, so
         // the callback stops stamping old audio's position over this one immediately.
         clock.set_position(frame);
@@ -410,8 +447,8 @@ impl Engine {
 
     /// Playback speed as a multiple of the file's, heard from the next callback. A deck keeps its
     /// tempo across loads, as a pitch fader stays where it was left. With master tempo, crossing
-    /// the file's own speed requeues: that is where playback swaps between the raw frames and the
-    /// stretcher, and the stretcher has to be primed from the playhead.
+    /// the file's own speed moves the deck onto or off the time-stretcher; the callback does that
+    /// in place, so the deck keeps time through it.
     pub fn set_tempo(&self, deck: DeckId, tempo: f64) {
         let Some(handle) = self.deck(deck) else {
             return;
@@ -421,56 +458,29 @@ impl Engine {
         } else {
             1.0
         };
-        let clock = handle.clock();
-        let was = clock.stretched();
-        clock.set_tempo(tempo);
-        self.restretch(deck, was);
+        handle.clock().set_tempo(tempo);
     }
 
-    /// Master tempo: keep the key when the tempo changes. Switching requeues from the playhead,
-    /// since the stretcher has to be primed with audio the ring has already passed. At the file's
-    /// own speed the frames pass through either way, so the switch leaves playback where it is.
+    /// Master tempo: keep the key when the tempo changes. Away from the file's own speed this moves
+    /// the deck onto or off the time-stretcher, in place in the callback, so it keeps time. At the
+    /// file's own speed the frames pass through either way.
     pub fn set_master_tempo(&self, deck: DeckId, on: bool) {
         let Some(handle) = self.deck(deck) else {
             return;
         };
-        let clock = handle.clock();
-        if clock.master_tempo() == on {
-            return;
-        }
-        let was = clock.stretched();
-        clock.set_master_tempo(on);
-        self.restretch(deck, was);
+        handle.clock().set_master_tempo(on);
     }
 
     /// Moves the deck's key by `semitones`, within an octave either way, keeping its speed. Any
-    /// shift plays through the time-stretcher; back at zero the deck plays as it did before.
+    /// shift plays through the time-stretcher; back at zero the deck plays as it did before. Both
+    /// moves happen in place in the callback, so the deck keeps time through them.
     pub fn set_key_shift(&self, deck: DeckId, semitones: i32) {
         let Some(handle) = self.deck(deck) else {
             return;
         };
-        let clock = handle.clock();
-        let semitones = semitones.clamp(-MAX_KEY_SHIFT, MAX_KEY_SHIFT);
-        if clock.key_shift() == semitones {
-            return;
-        }
-        let was = clock.stretched();
-        clock.set_key_shift(semitones);
-        self.restretch(deck, was);
-    }
-
-    /// Requeues from the playhead when the deck moved onto or off the time-stretcher, which has
-    /// to be primed with audio the ring has already passed. A change within one path is heard at
-    /// once without it.
-    fn restretch(&self, deck: DeckId, was: bool) {
-        let Some(handle) = self.deck(deck) else {
-            return;
-        };
-        let clock = handle.clock();
-        if clock.stretched() != was && clock.loaded() && !clock.scrubbing() {
-            self.seek_frames(deck, clock.position());
-            handle.send(deck::Command::Wake);
-        }
+        handle
+            .clock()
+            .set_key_shift(semitones.clamp(-MAX_KEY_SHIFT, MAX_KEY_SHIFT));
     }
 
     /// The master level, linear, 0 to 1.

@@ -255,6 +255,13 @@ impl AudioEngine {
     }
 
     #[napi]
+    pub fn nudge(&self, deck: u32, delta_ms: f64) {
+        if let Some(engine) = self.engine() {
+            engine.nudge(deck_index(deck), delta_ms);
+        }
+    }
+
+    #[napi]
     pub fn set_key_shift(&self, deck: u32, semitones: i32) {
         if let Some(engine) = self.engine() {
             engine.set_key_shift(deck_index(deck), semitones);

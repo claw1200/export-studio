@@ -254,6 +254,12 @@ export class Player {
     Deck.playTogether(loaded.map((player) => player.deck))
   }
 
+  /** Moves the playhead by `seconds`, keeping time while playing. See `Deck.nudge`. */
+  nudge(seconds: number): void {
+    if (!this.track) return
+    this.deck.nudge(seconds)
+  }
+
   /** Pauses on `seconds`, in one step so the old position is never heard after the stop. */
   stopAt(seconds: number): void {
     if (!this.track) return

@@ -79,12 +79,16 @@ export class Mixer {
     this.follow()
   }
 
-  /** Turning sync on matches the tempo at once, and the beats too while playing. */
+  /**
+   * Turning sync on matches the follower's tempo to the master's and snaps it onto the master's
+   * nearest beat, playing or not: it moves by under half a beat, so it stays where it was in its
+   * track to within a beat.
+   */
   setSynced(on: boolean): void {
     this.synced = on && this.canSync
     if (!this.synced) return
     this.follow()
-    if (this.playing) this.alignBeats()
+    this.alignBeats()
   }
 
   /**
@@ -100,7 +104,11 @@ export class Mixer {
     if (Math.abs(rate - match.rate) > 1e-6) follower.tempo.setRate(match.rate)
   }
 
-  /** Moves the follower by under half a beat so its beats land on the master's. */
+  /**
+   * Moves the follower by under half a beat so its beats land on the master's. It is a nudge from
+   * wherever the engine's playhead is, so the time the command takes to arrive does not count,
+   * and while playing the engine keeps time through it.
+   */
   private alignBeats(): void {
     const master = this.master
     const follower = this.follower
@@ -110,7 +118,7 @@ export class Mixer {
     const bpm = ownBpm(follower)
     if (!match || masterBeat == null || ownBeat == null || !(bpm > 0)) return
     const seconds = (beatOffset(masterBeat, ownBeat, match.beatsPerMasterBeat) * 60) / bpm
-    if (Math.abs(seconds) >= ALIGNED_SECONDS) follower.seek(follower.position - seconds)
+    if (Math.abs(seconds) >= ALIGNED_SECONDS) follower.nudge(-seconds)
   }
 
   /** Moves a deck's tempo by `step` BPM. The follower's is the master's while synced. */

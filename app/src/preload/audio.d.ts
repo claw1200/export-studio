@@ -5,6 +5,11 @@ export type DeckCommand =
   | { op: 'play'; deck: number }
   | { op: 'pause'; deck: number }
   | { op: 'seek'; deck: number; ms: number }
+  /**
+   * Move by `ms` from wherever the engine's playhead is when this arrives. While playing the deck
+   * keeps time through it, landing where an instant jump would have put it.
+   */
+  | { op: 'nudge'; deck: number; ms: number }
   /** Pause and move in one step, as releasing CUE does. */
   | { op: 'stopAt'; deck: number; ms: number }
   | { op: 'scrubBegin'; deck: number }
