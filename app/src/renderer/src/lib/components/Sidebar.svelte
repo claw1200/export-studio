@@ -30,7 +30,7 @@
   import { PLAYLIST_TREE_DRAG_TYPE } from '$lib/library.svelte'
   import { buildTree, type TreeNode } from '$lib/library/tree'
   import { menuAt, tidy, type MenuEntry, type MenuRequest } from '$lib/menu'
-  import { MEMBERSHIP_ICONS, membershipIcon, SEPARATOR, unlockEntry } from '$lib/trackMenu'
+  import { membershipIcon, SEPARATOR, unlockEntry } from '$lib/trackMenu'
   import type { Source, View, Volume } from '$lib/types'
   import ConfirmDialog from './ConfirmDialog.svelte'
   import ContextMenu from './ContextMenu.svelte'
@@ -473,7 +473,7 @@
         : undefined}
     <span class="w-3 shrink-0"></span>
     {#if Mark}
-      <Mark class={['size-3.5 shrink-0', Mark === MEMBERSHIP_ICONS.none ? 'text-faint' : 'text-accent']} />
+      <Mark class="size-3.5 shrink-0 text-faint" />
     {:else if node.kind === 'smart'}
       <Sparkles class="size-3.5 shrink-0 text-accent/80" />
     {:else if type === 'history'}
