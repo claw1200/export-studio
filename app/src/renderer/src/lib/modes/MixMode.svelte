@@ -93,6 +93,19 @@
       onclick={() => mixer.setSynced(!mixer.synced)}>SYNC</button
     >
     <Crossfader {mixer} />
+    <button
+      class={[
+        'h-6 w-full rounded-md text-[10.5px] font-bold tracking-wider transition-colors',
+        mixer.swapBass
+          ? 'bg-accent-soft text-accent hover:brightness-110'
+          : 'border border-line text-faint hover:bg-hover hover:text-muted'
+      ]}
+      aria-pressed={mixer.swapBass}
+      title={mixer.swapBass
+        ? 'Swap bass on: the deck being faded away from gives up its low end by the centre. Click to turn it off.'
+        : 'Swap bass: cut the low end of the deck being faded away from as the other comes in, done by the centre'}
+      onclick={() => mixer.setSwapBass(!mixer.swapBass)}>SWAP BASS</button
+    >
   </div>
   {@render deck(b, 'B')}
 </div>

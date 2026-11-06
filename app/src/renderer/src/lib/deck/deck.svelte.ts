@@ -109,6 +109,11 @@ export class Deck {
     this.send({ op: 'deckGain', deck: this.index, gain })
   }
 
+  /** This deck's isolator low band, linear, 0 to 1. Null plays the deck without the isolator. */
+  setLow(gain: number | null): void {
+    this.send({ op: 'deckLow', deck: this.index, gain })
+  }
+
   /** Marks the deck playing. False when the engine cannot start it now. */
   private beginPlay(): boolean {
     if (this.error) return false

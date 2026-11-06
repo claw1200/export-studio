@@ -138,6 +138,9 @@ export class AudioBridge {
       case 'deckGain':
         engine.setDeckGain(command.deck, command.gain)
         break
+      case 'deckLow':
+        engine.setDeckLow(command.deck, command.gain)
+        break
       case 'playTogether':
         engine.playTogether(command.decks)
         break

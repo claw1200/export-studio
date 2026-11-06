@@ -271,6 +271,11 @@ export class Player {
     this.deck.setGain(gain)
   }
 
+  /** This deck's isolator low band, linear, 0 to 1. Null plays it without the isolator. */
+  setLow(gain: number | null): void {
+    this.deck.setLow(gain)
+  }
+
   /** This deck is about to be heard, so a preview must not start it again afterwards. */
   private takeSpeakers(): void {
     this.returnAfterPreview = false

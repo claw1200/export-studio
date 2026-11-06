@@ -1,6 +1,6 @@
 import { untrack } from 'svelte'
 import { bpmAt, fractionalBeatIndex } from './beat'
-import { crossfade, faderPosition } from './crossfade'
+import { bassLevel, bassSwap, crossfade, faderPosition, startBassSwap, type BassSwap } from './crossfade'
 import { beatOffset, matchTempo, stepTempo } from './mix/sync'
 import { Player } from './player.svelte'
 import { getSetting, setSetting } from './settings'
@@ -49,6 +49,10 @@ export class Mixer {
   /** The deck the other follows when synced. */
   master: Player
   synced = $state(false)
+  /** The fader swaps the bass: the deck faded away from gives its low end to the other. Kept between sessions. */
+  swapBass = $state(getSetting('swapBass') === 'true')
+  /** Where the swap stands. Not reactive: only `apply` reads it, as the fader moves. */
+  private swap: BassSwap = startBassSwap(this.crossfader)
 
   constructor(
     readonly a: Player,
@@ -159,6 +163,13 @@ export class Mixer {
     return [this.a, this.b].some((player) => player.track && !player.audioError)
   }
 
+  setSwapBass(on: boolean): void {
+    this.swapBass = on
+    setSetting('swapBass', String(on))
+    this.swap = startBassSwap(this.crossfader)
+    this.apply()
+  }
+
   setCrossfader(position: number): void {
     this.crossfader = faderPosition(position)
     this.apply()
@@ -199,5 +210,13 @@ export class Mixer {
     const [a, b] = crossfade(this.crossfader)
     this.a.setGain(a)
     this.b.setGain(b)
+    if (this.swapBass) {
+      this.swap = bassSwap(this.swap.anchor, this.crossfader)
+      this.a.setLow(bassLevel(1 - this.swap.share))
+      this.b.setLow(bassLevel(this.swap.share))
+    } else {
+      this.a.setLow(null)
+      this.b.setLow(null)
+    }
   }
 }

@@ -13,6 +13,7 @@ mod block;
 mod clock;
 mod deck;
 mod fade;
+mod isolator;
 mod reader;
 mod scrub;
 mod sink;
@@ -85,7 +86,12 @@ pub struct Engine {
     master: Arc<AtomicU32>,
     /// Each deck's own level, linear, applied before the master: a channel fader or crossfader.
     gains: Vec<Arc<AtomicU32>>,
+    /// Each deck's isolator low level, linear, 0 to 1, as f32 bits. Negative is out of the path.
+    lows: Vec<Arc<AtomicU32>>,
 }
+
+/// A deck's isolator out of its path: its signal goes through untouched.
+const ISOLATOR_OFF: f32 = -1.0;
 
 impl Engine {
     /// `decks` decks on the system's default output.
@@ -119,6 +125,11 @@ impl Engine {
             .map(|_| Arc::new(AtomicU32::new(1.0_f32.to_bits())))
             .collect();
         let deck_levels: Vec<Arc<AtomicU32>> = gains.iter().map(Arc::clone).collect();
+        let lows: Vec<Arc<AtomicU32>> = (0..decks)
+            .map(|_| Arc::new(AtomicU32::new(ISOLATOR_OFF.to_bits())))
+            .collect();
+        let deck_lows: Vec<Arc<AtomicU32>> = lows.iter().map(Arc::clone).collect();
+        let mut isolators: Vec<Option<isolator::Isolator>> = (0..decks).map(|_| None).collect();
         let rate = Arc::new(AtomicU32::new(0));
         let callback_rate = Arc::clone(&rate);
         let mut smoothed: Option<Smoothed> = None;
@@ -131,14 +142,22 @@ impl Engine {
                 scratch.resize(out.len(), 0.0);
             }
             let sample_rate = callback_rate.load(Ordering::Relaxed);
-            for ((reader, level), smooth) in
-                readers.iter_mut().zip(&deck_levels).zip(&mut deck_smoothed)
+            for ((((reader, level), smooth), low), isolator) in readers
+                .iter_mut()
+                .zip(&deck_levels)
+                .zip(&mut deck_smoothed)
+                .zip(&deck_lows)
+                .zip(&mut isolators)
             {
                 let target = f32::from_bits(level.load(Ordering::Relaxed));
                 let smooth = smooth.get_or_insert_with(|| Smoothed::new(target, sample_rate, 10.0));
                 let deck_out = &mut scratch[..out.len()];
                 deck_out.fill(0.0);
                 reader.mix_into(deck_out);
+                let low = f32::from_bits(low.load(Ordering::Relaxed));
+                isolator
+                    .get_or_insert_with(|| isolator::Isolator::new(sample_rate))
+                    .process(deck_out, (low >= 0.0).then_some(low));
                 for (frame, mixed) in out.chunks_exact_mut(2).zip(deck_out.chunks_exact(2)) {
                     let gain = smooth.step(target);
                     frame[0] += mixed[0] * gain;
@@ -182,6 +201,7 @@ impl Engine {
             sample_rate,
             master,
             gains,
+            lows,
         })
     }
 
@@ -502,6 +522,19 @@ impl Engine {
         };
         if let Some(level) = self.gains.get(deck) {
             level.store(safe.to_bits(), Ordering::Relaxed);
+        }
+    }
+
+    /// One deck's isolator low band, linear, 0 (killed) to 1 (full), or `None` to take the
+    /// isolator out of its path so the deck plays untouched. Glided, so a move never clicks.
+    pub fn set_deck_low(&self, deck: DeckId, gain: Option<f32>) {
+        let value = match gain {
+            Some(g) if g.is_finite() => g.clamp(0.0, 1.0),
+            Some(_) => 1.0,
+            None => ISOLATOR_OFF,
+        };
+        if let Some(low) = self.lows.get(deck) {
+            low.store(value.to_bits(), Ordering::Relaxed);
         }
     }
 

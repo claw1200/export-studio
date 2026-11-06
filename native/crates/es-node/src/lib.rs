@@ -275,6 +275,14 @@ impl AudioEngine {
         }
     }
 
+    /// The deck's isolator low band, 0 to 1; null takes the isolator out of its path.
+    #[napi]
+    pub fn set_deck_low(&self, deck: u32, gain: Option<f64>) {
+        if let Some(engine) = self.engine() {
+            engine.set_deck_low(deck_index(deck), gain.map(|g| g as f32));
+        }
+    }
+
     #[napi]
     pub fn set_volume(&self, gain: f64) {
         if let Some(engine) = self.engine() {
