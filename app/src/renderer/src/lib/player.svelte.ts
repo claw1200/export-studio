@@ -406,10 +406,16 @@ export class Player {
 
   callCue(cue: Cue): void {
     const start = this.insideFile(cue.start / 1000)
-    this.cuePoint = start
     if (cue.end != null && cue.end > cue.start) this.deck.setLoop(start, cue.end / 1000)
-    if (this.playing) this.seek(start)
-    else this.deck.stopAt(start)
+    this.cueAt(start)
+  }
+
+  /** Makes `seconds` the cue point and goes there: playing carries on from it, paused waits on it. */
+  cueAt(seconds: number): void {
+    const at = this.insideFile(seconds)
+    this.cuePoint = at
+    if (this.playing) this.seek(at)
+    else this.deck.stopAt(at)
   }
 
   callMemoryCue(direction: -1 | 1): void {

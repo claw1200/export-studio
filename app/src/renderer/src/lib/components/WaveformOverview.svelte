@@ -155,7 +155,7 @@
       onpointerleave={() => player.clearPreview(SECTION_PREVIEW)}
       onclick={() => {
         player.clearPreview(SECTION_PREVIEW)
-        player.seek(band.start)
+        player.cueAt(band.start)
       }}
     >
       {#if bandWidth(band) >= LABEL_MIN_WIDTH}{sectionLabel(band)}{/if}
