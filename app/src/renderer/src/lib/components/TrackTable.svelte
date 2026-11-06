@@ -83,6 +83,8 @@
 
   function headerLabel(column: Column): string {
     if (stacked && column.id === 'title') return 'Title / Artist'
+    // The cover sits beside the title like one merged column, so it needs no heading of its own.
+    if (stacked && column.id === 'art') return ''
     return duplicateView && column.id === 'index' ? 'Group' : column.label
   }
 
