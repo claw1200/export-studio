@@ -75,7 +75,12 @@
 />
 
 <section class="shrink-0 border-b border-line-soft bg-surface">
-  <div class="relative h-[136px] border-b border-line-soft bg-[oklch(0.12_0.005_260)]">
+  <div
+    class={[
+      'relative border-b border-line-soft bg-[oklch(0.12_0.005_260)]',
+      player.grid.editing && player.waveform ? 'h-[114px]' : 'h-[136px]'
+    ]}
+  >
     {#if player.waveform}
       <WaveformDetail />
     {:else}

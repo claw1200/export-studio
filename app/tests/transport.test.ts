@@ -1,6 +1,10 @@
+import { register } from 'node:module'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { cueToStore } from '../src/renderer/src/lib/deck/transport.ts'
+
+register(new URL('./resolve-ts.mjs', import.meta.url).href)
+
+const { cueToStore } = await import('../src/renderer/src/lib/deck/transport.ts')
 
 describe('cueToStore', () => {
   it('stores a plain cue without a loop', () => {

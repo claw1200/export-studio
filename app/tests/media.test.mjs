@@ -24,7 +24,7 @@ function libraryWith(native) {
   runInNewContext(compiled, context)
   return new context.exports.Library(() => ({
     RekordboxLibrary: function () {
-      return { onEvent() {}, ...native }
+      return { onEvent: () => undefined, ...native }
     }
   }))
 }

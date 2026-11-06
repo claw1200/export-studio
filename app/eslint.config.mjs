@@ -27,5 +27,12 @@ export default defineConfig(
       'svelte/no-unused-svelte-ignore': 'off'
     }
   },
+  {
+    // Plain JavaScript scripts and tests can't declare return types.
+    files: ['**/*.mjs'],
+    rules: {
+      '@typescript-eslint/explicit-function-return-type': 'off'
+    }
+  },
   eslintConfigPrettier
 )

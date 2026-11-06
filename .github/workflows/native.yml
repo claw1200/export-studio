@@ -53,3 +53,26 @@ jobs:
       - name: Test exporter and native integration
         working-directory: ${{ env.DEV_DRIVE_WORKSPACE || github.workspace }}
         run: node app/scripts/test-native.mjs
+
+  # The Electron app's unit tests, type checks and lint. Needs no native build.
+  app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      # Skips the Electron download and native module rebuild; tests and checks don't use them.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Unit tests
+        run: npm test
+      - name: Type check
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
