@@ -43,7 +43,7 @@
   import { PLAYERS } from '$lib/hardware/players'
   import { formatSize } from '$lib/format'
   import { ACTION_IDS, ACTIONS, chordFromEvent, chordLabel, type ActionGroup, type ActionId } from '$lib/keymap'
-  import type { BrowserArtwork } from '$lib/library.svelte'
+  import type { BrowserTrackStyle } from '$lib/library.svelte'
   import type { CuePlacement } from '$lib/player.svelte'
   import type { Backup, BackupProgress, BackupReason, ConvertFormat, ConvertPreset } from '$lib/types'
   import type { GridMode } from '../../../../preload/analysis'
@@ -76,9 +76,9 @@
     { id: 'playhead', label: 'Playhead' },
     { id: 'cuePoint', label: 'Cue point' }
   ]
-  const ARTWORK: (Choice & { id: BrowserArtwork })[] = [
-    { id: 'fill', label: 'Fill' },
-    { id: 'whole', label: 'Whole' }
+  const TRACK_STYLES: (Choice & { id: BrowserTrackStyle })[] = [
+    { id: 'standard', label: 'Standard' },
+    { id: 'alternative', label: 'Alternative' }
   ]
   const GRID_MODES: (Choice & { id: GridMode })[] = [
     { id: 'normal', label: 'Normal' },
@@ -295,11 +295,11 @@
           <section class="mb-5">
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Browser</h3>
             {@render choice(
-              'Artwork',
-              'Fill uses the full width of the column and crops the bottom of the cover. Whole shows the entire image, smaller.',
-              ARTWORK,
-              library.browserArtwork,
-              (id) => library.setBrowserArtwork(id as BrowserArtwork)
+              'Track style',
+              'Standard shows one line per track, with artwork filling the column. Alternative shows the whole cover and puts the artist under the title instead of in its own column.',
+              TRACK_STYLES,
+              library.browserTrackStyle,
+              (id) => library.setBrowserTrackStyle(id as BrowserTrackStyle)
             )}
             <div class="flex items-center gap-3 rounded-md px-2 py-2">
               <span class="min-w-0 flex-1">

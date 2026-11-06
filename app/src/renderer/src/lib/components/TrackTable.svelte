@@ -64,14 +64,21 @@
   }
 
   function headerLabel(column: Column): string {
+    if (stacked && column.id === 'title') return 'Title / Artist'
     return duplicateView && column.id === 'index' ? 'Group' : column.label
+  }
+
+  /** The alternative track style stacks the artist under the title, so the Artist column steps aside. */
+  const stacked = $derived(library.browserTrackStyle === 'alternative')
+  function available(column: Column): boolean {
+    return !(stacked && column.id === 'artist')
   }
 
   const orderedColumns = $derived.by(() => {
     const rank = new Map(order.map((id, index) => [id, index]))
     return [...COLUMNS].sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
   })
-  const shownColumns = $derived(orderedColumns.filter((column) => !hidden.includes(column.id)))
+  const shownColumns = $derived(orderedColumns.filter((column) => available(column) && !hidden.includes(column.id)))
   const template = $derived(
     shownColumns
       .map((column) => {
@@ -93,7 +100,7 @@
 
   function toggleColumn(id: string): void {
     if (hidden.includes(id)) hidden = hidden.filter((item) => item !== id)
-    else if (hidden.length < COLUMNS.length - 1) hidden = [...hidden, id]
+    else if (shownColumns.length > 1) hidden = [...hidden, id]
     save()
   }
 
@@ -153,7 +160,7 @@
   function columnItems(): MenuEntry[] {
     return [
       { kind: 'header', label: 'Columns' },
-      ...orderedColumns.map((column) => ({
+      ...orderedColumns.filter(available).map((column) => ({
         label: column.name,
         checked: !hidden.includes(column.id),
         keepOpen: true,
@@ -527,7 +534,7 @@
       <span class="block h-[1.28em] w-[3px] rounded-full" style:background={TRACK_COLORS[track.color].hex}></span>
     {/if}
   {:else if column.id === 'art'}
-    {@const fill = library.browserArtwork === 'fill'}
+    {@const fill = !stacked}
     {#if track.hasArtwork}
       <img
         src={artworkUrl(track.id, fill || ROW > 40 ? 'm' : 's')}
@@ -549,6 +556,16 @@
         <Music class={fill ? 'size-[1.12em]' : 'size-[0.96em]'} />
       </span>
     {/if}
+  {:else if column.id === 'title' && stacked}
+    <span class="flex min-w-0 flex-col leading-[1.2]">
+      <span class="flex min-w-0">
+        <span class={['truncate font-medium', track.missing ? 'text-warn' : 'text-fg']}>{track.title}</span>
+        {#if track.remixer}
+          <span class={['ml-1.5 truncate', track.missing ? 'text-warn/70' : 'text-faint']}>{track.remixer}</span>
+        {/if}
+      </span>
+      <span class={['truncate text-[0.88em]', track.missing ? 'text-warn/70' : 'text-muted']}>{track.artist}</span>
+    </span>
   {:else if column.id === 'title'}
     <span class={['truncate font-medium', track.missing ? 'text-warn' : 'text-fg']}>{track.title}</span>
     {#if track.remixer}
@@ -745,7 +762,7 @@
                     column.align === 'right' && 'justify-end',
                     column.align === 'center' && 'justify-center',
                     column.id === 'wave' && 'h-full px-1.5',
-                    column.id === 'art' && library.browserArtwork === 'fill' && 'relative h-full px-0'
+                    column.id === 'art' && !stacked && 'relative h-full px-0'
                   ]}
                 >
                   {@render cell(column, track, index)}

@@ -32,11 +32,17 @@ import type {
 export const TRACK_DRAG_TYPE = 'application/x-exportstudio-tracks'
 export const PLAYLIST_TREE_DRAG_TYPE = 'application/x-exportstudio-playlist-tree'
 
-/** How cover art is drawn in the browser. Fill uses the column width and crops the bottom. */
-export type BrowserArtwork = 'fill' | 'whole'
+/**
+ * How track rows are drawn in the browser. Standard is one line with artwork filling the column width.
+ * Alternative shows the whole cover and stacks the artist under the title, in place of the Artist column.
+ */
+export type BrowserTrackStyle = 'standard' | 'alternative'
 
-function storedArtwork(): BrowserArtwork {
-  return getSetting('browserArtwork') === 'whole' ? 'whole' : 'fill'
+function storedTrackStyle(): BrowserTrackStyle {
+  const stored = getSetting('browserTrackStyle')
+  if (stored === 'standard' || stored === 'alternative') return stored
+  // Earlier versions only had an artwork setting; whole artwork maps to the alternative style.
+  return getSetting('browserArtwork') === 'whole' ? 'alternative' : 'standard'
 }
 
 function storedHidePresetTracks(): boolean {
@@ -115,7 +121,7 @@ export class Library {
   hideStreaming = $state(getSetting('hideStreaming') !== '0')
   hidePresetTracks = $state(storedHidePresetTracks())
   doubleClickToLoad = $state(getSetting('doubleClickToLoad') === '1')
-  browserArtwork = $state<BrowserArtwork>(storedArtwork())
+  browserTrackStyle = $state<BrowserTrackStyle>(storedTrackStyle())
   browserRowHeight = $state(readRowHeight(getSetting(BROWSER_ROW_HEIGHT_KEY)))
   hardwareGreen = $state(storedPlayer('hardwareGreen', DEFAULT_GREEN))
   importing = $state(false)
@@ -423,9 +429,9 @@ export class Library {
     return true
   }
 
-  setBrowserArtwork(style: BrowserArtwork): void {
-    this.browserArtwork = style
-    setSetting('browserArtwork', style)
+  setBrowserTrackStyle(style: BrowserTrackStyle): void {
+    this.browserTrackStyle = style
+    setSetting('browserTrackStyle', style)
   }
 
   setBrowserRowHeight(height: number): void {
