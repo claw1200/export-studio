@@ -812,6 +812,11 @@ impl RekordboxLibrary {
     }
 
     #[napi(ts_return_type = "Promise<unknown>")]
+    pub fn usb_histories(&self, volume: String) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::Histories(volume)))
+    }
+
+    #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_libraries(&self, volume: String) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::Libraries(volume)))
     }
@@ -824,6 +829,11 @@ impl RekordboxLibrary {
     #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_tracks(&self, volume: String, playlist_id: Option<String>) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::Tracks(volume, playlist_id)))
+    }
+
+    #[napi(ts_return_type = "Promise<unknown>")]
+    pub fn usb_history_tracks(&self, volume: String, history_id: String) -> AsyncTask<Run> {
+        self.run(Op::Usb(UsbOp::HistoryTracks(volume, history_id)))
     }
 
     #[napi(ts_return_type = "Promise<unknown>")]

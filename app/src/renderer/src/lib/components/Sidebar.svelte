@@ -422,19 +422,24 @@
   }
 </script>
 
-{#snippet deviceTree(nodes: TreeNode[], volumeId: string, depth: number)}
+{#snippet deviceTree(nodes: TreeNode[], volumeId: string, depth: number, history: boolean)}
   {#each nodes as node (node.id)}
-    {@const key = `device-playlist:${volumeId}:${node.id}`}
+    {@const key = `device-${history ? 'history' : 'playlist'}:${volumeId}:${node.id}`}
     {@const isFolder = node.kind === 'folder'}
     {@const isOpen = expanded.has(key)}
-    {@const active = !isFolder && library.isSource({ type: 'device', volumeId, playlistId: node.id })}
+    {@const source = (
+      history
+        ? { type: 'device', volumeId, playlistId: null, historyId: node.id }
+        : { type: 'device', volumeId, playlistId: node.id }
+    ) as Source}
+    {@const active = !isFolder && library.isSource(source)}
     <button
       class={[
         'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-left text-[12.5px]',
         active ? 'bg-select text-fg' : 'text-muted hover:bg-hover hover:text-fg'
       ]}
       style:padding-left="{8 + depth * 14}px"
-      onclick={() => (isFolder ? toggle(key) : setSource({ type: 'device', volumeId, playlistId: node.id }))}
+      onclick={() => (isFolder ? toggle(key) : setSource(source))}
     >
       {#if isFolder}
         <ChevronRight class={['size-3 shrink-0 text-faint transition-transform', isOpen && 'rotate-90']} />
@@ -445,7 +450,11 @@
         {/if}
       {:else}
         <span class="w-3 shrink-0"></span>
-        <ListMusic class="size-3.5 shrink-0 text-faint" />
+        {#if history}
+          <History class="size-3.5 shrink-0 text-faint" />
+        {:else}
+          <ListMusic class="size-3.5 shrink-0 text-faint" />
+        {/if}
       {/if}
       <span class="min-w-0 flex-1 truncate">{node.name || 'Untitled'}</span>
       {#if !isFolder && node.count != null}
@@ -453,7 +462,7 @@
       {/if}
     </button>
     {#if isFolder && isOpen}
-      {@render deviceTree(node.children, volumeId, depth + 1)}
+      {@render deviceTree(node.children, volumeId, depth + 1, history)}
     {/if}
   {/each}
 {/snippet}
@@ -684,7 +693,23 @@
           {/if}
         </div>
         {#if open && volume.hasLibrary}
-          {@render deviceTree(buildTree(library.devicePlaylists[volume.id] ?? []), volume.id, 1)}
+          {@const histories = library.deviceHistories[volume.id] ?? []}
+          {@const historiesKey = `device-histories:${volume.id}`}
+          {@const historiesOpen = expanded.has(historiesKey)}
+          {@render deviceTree(buildTree(library.devicePlaylists[volume.id] ?? []), volume.id, 1, false)}
+          {#if histories.length}
+            <button
+              class="flex h-7 w-full items-center gap-1.5 rounded-md pr-2 pl-[22px] text-left text-[12.5px] text-muted hover:bg-hover hover:text-fg"
+              onclick={() => toggle(historiesKey)}
+            >
+              <ChevronRight class={['size-3 shrink-0 text-faint transition-transform', historiesOpen && 'rotate-90']} />
+              <History class="size-3.5 shrink-0 text-faint" />
+              <span class="min-w-0 flex-1 truncate">Histories</span>
+            </button>
+            {#if historiesOpen}
+              {@render deviceTree(buildTree(histories), volume.id, 2, true)}
+            {/if}
+          {/if}
         {/if}
       {:else}
         <p class="px-2 py-1 text-[12px] text-faint">No devices</p>

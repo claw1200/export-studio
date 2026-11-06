@@ -1,4 +1,4 @@
-//! A stick's tracks and playlists in the shapes the interface shows, and its tracks' detail.
+//! A stick's tracks, playlists and histories in the shapes the interface shows, and its tracks' detail.
 
 use std::path::Path;
 
@@ -6,7 +6,7 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
 use rb_anlz::decode::{self, Tags};
 use rb_device::paths::volume_path;
-use rb_device::{Cue as DeviceCue, Device, LibraryKind, Playlist, Track};
+use rb_device::{Cue as DeviceCue, Device, History, LibraryKind, Playlist, Track};
 use serde::Serialize;
 
 use crate::detail::{Bands, Colour, Cue, Detail, Grid, Mono, Preview, Waveform};
@@ -129,6 +129,29 @@ pub fn playlists(device: &Device) -> Vec<Node> {
     device.playlists.iter().map(playlist_node).collect()
 }
 
+/// OneLibrary marks a history folder with attribute 1; a Device Library has no history folders.
+fn history_folder(row: &History) -> bool {
+    row.attribute == 1
+}
+
+fn history_node(row: &History) -> Node {
+    let folder = history_folder(row);
+    Node {
+        id: row.export_id.to_string(),
+        name: row.name.clone(),
+        parent_id: if row.parent_id == 0 { "root".into() } else { row.parent_id.to_string() },
+        seq: row.seq,
+        kind: if folder { "folder" } else { "playlist" },
+        count: Some((!folder).then_some(i64::try_from(row.track_ids.len()).unwrap_or(0))),
+        date: None,
+    }
+}
+
+/// A stick's play histories, shaped like the library's own.
+pub fn histories(device: &Device) -> Vec<Node> {
+    device.histories.iter().map(history_node).collect()
+}
+
 /// A library on a stick, with its own playlist tree.
 #[derive(Debug, Serialize)]
 pub struct LibraryView {
@@ -159,6 +182,16 @@ pub fn tracks(volume: &Path, device: &Device, playlist_id: Option<&str>) -> Resu
         }
     };
     Ok(chosen.into_iter().map(|t| track_row(volume, t)).collect())
+}
+
+/// Tracks of one of a stick's histories, in the order they were played; a track played twice is listed twice.
+pub fn history_tracks(volume: &Path, device: &Device, history_id: &str) -> Result<Vec<TrackRow>, String> {
+    let history = device
+        .histories
+        .iter()
+        .find(|h| !history_folder(h) && h.export_id.to_string() == history_id)
+        .ok_or_else(|| format!("Unknown device history {history_id}"))?;
+    Ok(history.track_ids.iter().filter_map(|t| device.track(*t)).map(|t| track_row(volume, t)).collect())
 }
 
 fn b64(bytes: &[u8]) -> String {
@@ -284,6 +317,38 @@ mod tests {
             assert!(!track_row(dir.path(), &track).has_artwork);
             assert_eq!(artwork_file(dir.path(), &track, "m"), None);
         }
+    }
+
+    fn stick() -> Device {
+        let track = |id: i64, title: &str| Track { export_id: id, title: title.into(), ..Track::default() };
+        let history = |id: i64, name: &str, parent_id: i64, attribute: i64, track_ids: Vec<i64>| History { export_id: id, name: name.into(), parent_id, seq: id, attribute, track_ids };
+        Device {
+            kind: LibraryKind::OneLibrary,
+            root_name: String::new(),
+            device_name: "STICK".into(),
+            tracks: vec![track(1, "One"), track(2, "Two")],
+            playlists: Vec::new(),
+            histories: vec![history(10, "2024", 0, 1, Vec::new()), history(11, "HISTORY 001", 10, 0, vec![2, 1, 2, 99])],
+        }
+    }
+
+    #[test]
+    fn device_histories_are_shown_as_a_tree_like_the_librarys() {
+        let nodes = histories(&stick());
+        let shape: Vec<_> = nodes.iter().map(|n| (n.id.as_str(), n.parent_id.as_str(), n.kind, n.count)).collect();
+        assert_eq!(shape, [("10", "root", "folder", Some(None)), ("11", "10", "playlist", Some(Some(4)))]);
+    }
+
+    #[test]
+    fn a_device_history_lists_its_plays_in_order_with_repeats() {
+        let dir = tempfile::tempdir().unwrap();
+        let device = stick();
+        let rows = history_tracks(dir.path(), &device, "11").unwrap();
+        let titles: Vec<_> = rows.iter().map(|r| r.title.as_str()).collect();
+        assert_eq!(titles, ["Two", "One", "Two"], "a play of a track the stick no longer has is left out");
+        assert_eq!(rows[0].id, track_key(&dir.path().to_string_lossy(), 2));
+        assert!(history_tracks(dir.path(), &device, "10").is_err(), "a folder has no tracks");
+        assert!(history_tracks(dir.path(), &device, "12").is_err());
     }
 
     #[test]

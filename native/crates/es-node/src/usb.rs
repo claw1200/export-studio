@@ -19,9 +19,11 @@ pub(crate) enum UsbOp {
     Settings(String),
     SetSettings(String, Value),
     Playlists(String),
+    Histories(String),
     Libraries(String),
     Selection(String),
     Tracks(String, Option<String>),
+    HistoryTracks(String, String),
     Detail(String),
     Media(String),
     ImportPreview { volume: String, folder: Option<String>, policy: Option<String> },
@@ -182,6 +184,11 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
             let nodes = core.devices.load(&volume)?.map(|d| es_index::device::playlists(&d)).unwrap_or_default();
             json_of(&nodes)
         }
+        UsbOp::Histories(volume) => {
+            let volume = mounted(volume)?;
+            let nodes = core.devices.load(&volume)?.map(|d| es_index::device::histories(&d)).unwrap_or_default();
+            json_of(&nodes)
+        }
         UsbOp::Libraries(volume) => {
             let volume = mounted(volume)?;
             let mut found = Vec::new();
@@ -201,6 +208,13 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
             match core.devices.load(&volume)? {
                 None => Ok(json!([])),
                 Some(device) => json_of(&es_index::device::tracks(&volume, &device, playlist.as_deref()).map_err(failure)?),
+            }
+        }
+        UsbOp::HistoryTracks(volume, history) => {
+            let volume = mounted(volume)?;
+            match core.devices.load(&volume)? {
+                None => Ok(json!([])),
+                Some(device) => json_of(&es_index::device::history_tracks(&volume, &device, history).map_err(failure)?),
             }
         }
         UsbOp::Detail(key) => {
@@ -235,6 +249,9 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
                 "playlists": plan.playlists.iter().map(|p| json!({
                     "name": p.name, "folder": p.folder, "depth": p.depth, "tracks": p.tracks, "exists": p.exists,
                 })).collect::<Vec<_>>(),
+                "histories": plan.histories.iter().map(|h| json!({
+                    "name": h.name, "tracks": h.tracks, "exists": h.exists,
+                })).collect::<Vec<_>>(),
                 "tracks": plan.tracks.iter().map(|t| json!({
                     "title": t.title, "artist": t.artist, "status": status(t.status),
                 })).collect::<Vec<_>>(),
@@ -254,6 +271,7 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
             core.emit("usb.progress", &json!({ "phase": "done" }));
             json_of(&json!({
                 "playlists": outcome.playlists,
+                "histories": outcome.histories,
                 "tracks": outcome.tracks,
                 "copied": outcome.copied,
                 "reused": outcome.reused,

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Folder, FolderOpen, ListMusic, LoaderCircle, X } from '@lucide/svelte'
+  import { Folder, FolderOpen, History, ListMusic, LoaderCircle, X } from '@lucide/svelte'
   import { onMount } from 'svelte'
   import { api } from '$lib/api'
   import { getApp } from '$lib/context'
@@ -84,8 +84,8 @@
     return `Importing ${Math.min((progress.done ?? 0) + 1, total)} of ${total}${name}`
   }
 
-  function plural(n: number, word: string): string {
-    return `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`
+  function plural(n: number, word: string, many = `${word}s`): string {
+    return `${n.toLocaleString()} ${n === 1 ? word : many}`
   }
 
   const STATUS_LABEL = { reuse: 'In library', copy: 'New', missing: 'File missing' } as const
@@ -129,7 +129,9 @@
     <div class="min-h-0 flex-1 overflow-y-auto p-5">
       {#if result}
         <p class="text-[12.5px] text-ok">
-          Imported {plural(result.playlists, 'playlist')} and {plural(result.tracks, 'track')}
+          Imported {plural(result.playlists, 'playlist')}{result.histories
+            ? `, ${plural(result.histories, 'history', 'histories')}`
+            : ''} and {plural(result.tracks, 'track')}
           ({result.copied} copied, {result.reused} already in the library).
         </p>
         {#if result.failed.length}
@@ -211,6 +213,7 @@
         {:else if preview}
           <p class="mt-4 text-[12.5px] text-muted">
             {plural(preview.playlists.filter((p) => !p.folder).length, 'playlist')} ·
+            {#if preview.histories.length}{plural(preview.histories.length, 'history', 'histories')} ·{/if}
             {counts.copy} new to copy · {counts.reuse} already in the library
             {#if counts.missing}· <span class="text-warn">{counts.missing} with missing audio</span>{/if}
           </p>
@@ -241,6 +244,21 @@
                   <p class="px-2 py-1 text-[12px] text-faint">No playlists on this device</p>
                 {/each}
               </div>
+              {#if preview.histories.length}
+                <h3 class="mt-4 text-[11px] font-semibold tracking-wider text-faint uppercase">Histories</h3>
+                <div class="mt-1.5 max-h-48 overflow-y-auto rounded-md border border-line py-1">
+                  {#each preview.histories as item, i (i)}
+                    <div class="flex h-7 items-center gap-1.5 px-2 text-[12.5px] text-muted">
+                      <History class="size-3.5 shrink-0 text-faint" />
+                      <span class="min-w-0 flex-1 truncate">{item.name}</span>
+                      <span class="tabular text-[11px] text-faint">{item.tracks}</span>
+                      <span class={['text-[11px]', item.exists ? 'text-faint' : 'text-ok']}>
+                        {item.exists ? 'Exists' : 'New'}
+                      </span>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
             </section>
             <section class="min-w-0">
               <h3 class="text-[11px] font-semibold tracking-wider text-faint uppercase">Tracks</h3>

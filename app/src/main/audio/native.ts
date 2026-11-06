@@ -123,9 +123,11 @@ export interface NativeLibrary {
   usbEject(volume: string): Promise<unknown>
   usbFormat(volume: string): Promise<unknown>
   usbPlaylists(volume: string): Promise<unknown>
+  usbHistories(volume: string): Promise<unknown>
   usbLibraries(volume: string): Promise<unknown>
   usbSelection(volume: string): Promise<unknown>
   usbTracks(volume: string, playlistId: string | null): Promise<unknown>
+  usbHistoryTracks(volume: string, historyId: string): Promise<unknown>
   usbDetail(key: string): Promise<unknown>
   usbMedia(key: string): Promise<unknown>
   usbImportPreview(volume: string, folder: string | null, policy: string | null): Promise<unknown>
