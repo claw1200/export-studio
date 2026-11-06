@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 
 register(new URL('./resolve-ts.mjs', import.meta.url).href)
 
-const { COLUMNS, defaultHidden, defaultOrder, readColumnPrefs } =
+const { COLUMNS, defaultHidden, defaultOrder, minColumnWidth, readColumnPrefs } =
   await import('../src/renderer/src/lib/browserColumns.ts')
 
 describe('readColumnPrefs', () => {
@@ -51,5 +51,31 @@ describe('readColumnPrefs', () => {
     assert.deepEqual(older.order, defaultOrder())
     assert.deepEqual(older.hidden, defaultHidden())
     assert.equal(older.widths.bpm, 80)
+  })
+})
+
+describe('minColumnWidth', () => {
+  const byId = (id: string): (typeof COLUMNS)[number] => COLUMNS.find((column) => column.id === id)!
+
+  it('lets icon columns shrink below their heading', () => {
+    assert.ok(minColumnWidth(byId('compat'), 12.5) < 40)
+    assert.ok(minColumnWidth(byId('cue'), 12.5) < 52)
+    assert.ok(minColumnWidth(byId('art'), 12.5) < 76)
+    assert.ok(minColumnWidth(byId('color'), 12.5) < 72)
+  })
+
+  it('grows with the row text so content is never clipped', () => {
+    const compat = byId('compat')
+    assert.ok(minColumnWidth(compat, 22) > minColumnWidth(compat, 10))
+    assert.ok(minColumnWidth(compat, 22) >= Math.ceil(0.8 * 22) + 16)
+  })
+
+  it('stays within the column limits', () => {
+    for (const column of COLUMNS) {
+      for (const size of [10, 12.5, 22]) {
+        const min = minColumnWidth(column, size)
+        assert.ok(min >= column.min && min <= column.max, column.id)
+      }
+    }
   })
 })
