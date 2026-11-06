@@ -8,6 +8,7 @@
   import TempoFader from './TempoFader.svelte'
   import WaveformToolbar from './deck/WaveformToolbar.svelte'
   import GridEditorBar from './deck/GridEditorBar.svelte'
+  import TempoLane from './deck/TempoLane.svelte'
   import TrackInfo from './deck/TrackInfo.svelte'
   import Transport from './deck/Transport.svelte'
   import HotCueBar from './deck/HotCueBar.svelte'
@@ -37,22 +38,39 @@
 
   $effect(() => keybinds.register({ 'deck.gridEdit': toggleGridEdit }))
 
+  function jumpToFlag(direction: -1 | 1): void {
+    const at = player.grid.flagNear(direction)
+    if (at != null) player.seek(at)
+  }
+
+  $effect(() => {
+    if (!player.grid.editing) return undefined
+    return keybinds.register({
+      'grid.addFlag': () => player.grid.addFlagHere(),
+      'grid.previousFlag': () => jumpToFlag(-1),
+      'grid.nextFlag': () => jumpToFlag(1),
+      'grid.undo': () => player.grid.undo(),
+      'grid.redo': () => player.grid.redo()
+    })
+  })
+
   const gridShortcut = $derived(keybinds.bindings['deck.gridEdit'][0])
   const gridTitle = $derived(
     (deviceTrack
       ? 'USB tracks are read-only; sync to change them'
       : !library.writable
-      ? 'Unlock editing to change the beatgrid'
-      : player.grid.canEdit
-        ? 'Edit the beatgrid'
-        : 'This track has no beatgrid') + (gridShortcut ? ` (${chordLabel(gridShortcut)})` : '')
+        ? 'Unlock editing to change the beatgrid'
+        : player.grid.canEdit
+          ? 'Edit the beatgrid'
+          : 'This track has no beatgrid') + (gridShortcut ? ` (${chordLabel(gridShortcut)})` : '')
   )
 </script>
 
 <svelte:window
   onkeydown={(e) => {
     if (e.key !== 'Escape' || e.defaultPrevented) return
-    if (player.grid.editing && !player.editing) player.grid.cancel()
+    if (player.grid.selected != null) player.grid.select(null)
+    else if (player.grid.editing && !player.editing) player.grid.cancel()
   }}
 />
 
@@ -73,6 +91,9 @@
     {/if}
     <WaveformToolbar />
   </div>
+  {#if player.grid.editing && player.waveform}
+    <TempoLane />
+  {/if}
 
   <div class="flex">
     <div class="min-w-0 flex-1">

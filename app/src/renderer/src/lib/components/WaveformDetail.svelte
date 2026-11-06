@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getApp } from '$lib/context'
-  import type { GridDraft } from '$lib/beat'
+  import type { TempoMap } from '$lib/tempo-map'
   import { setupCanvas } from '$lib/waveform/canvas'
   import { drawDetail } from '$lib/waveform/detail'
   import { trackBandFall } from '$lib/waveform/fall'
@@ -11,7 +11,8 @@
   let width = $state(0)
   let height = $state(0)
   let drag: { x: number; position: number } | null = null
-  let gridDrag: { x: number; base: GridDraft } | null = null
+  /** A beat handle being dragged: its section moves, or with Alt its tempo stretches to put the beat here. */
+  let gridDrag: { x: number; base: TempoMap; section: number; step: number; at: number; stretch: boolean } | null = null
   let movingGrid = $state(false)
   let scrubbing = $state(false)
   let pointer = $state.raw<{ x: number; y: number } | null>(null)
@@ -62,7 +63,8 @@
         cuePoint: player.track ? player.cuePoint : null,
         loop: player.loop,
         gridEditing: player.grid.editing,
-        hotGridIndex
+        hotGridIndex,
+        tempoFlags: player.grid.flagMarks
       },
       canvas.width,
       canvas.height,
@@ -99,7 +101,12 @@
   bind:clientHeight={height}
   role="slider"
   tabindex="-1"
-  aria-label={player.grid.editing ? 'Waveform. Drag a beat handle to move the grid.' : 'Waveform'}
+  aria-label={player.grid.editing
+    ? 'Waveform. Drag a beat handle to move its section; Alt-drag to stretch its tempo.'
+    : 'Waveform'}
+  title={hotGridIndex >= 0 && !movingGrid
+    ? 'Drag to move this section. Alt-drag to stretch its tempo so this beat lands where you drop it.'
+    : undefined}
   aria-valuenow={Math.round(player.position)}
   {onwheel}
   onpointerdown={(e) => {
@@ -108,8 +115,18 @@
     if (!point) return
     e.currentTarget.setPointerCapture(e.pointerId)
     pointer = point
-    if (player.grid.draft && handleAt(point) >= 0) {
-      gridDrag = { x: e.clientX, base: player.grid.draft }
+    const handle = handleAt(point)
+    const { map, draft } = player.grid
+    if (map && draft && handle >= 0) {
+      const step = draft.steps[handle]
+      gridDrag = {
+        x: e.clientX,
+        base: map,
+        section: draft.sections[handle],
+        step,
+        at: draft.times[handle],
+        stretch: e.altKey && step !== 0
+      }
       movingGrid = true
       return
     }
@@ -121,7 +138,9 @@
     const point = pointOf(e)
     if (point) pointer = point
     if (gridDrag) {
-      player.grid.nudge((e.clientX - gridDrag.x) * secondsPerPixel() * 1000, gridDrag.base)
+      const ms = (e.clientX - gridDrag.x) * secondsPerPixel() * 1000
+      if (gridDrag.stretch) player.grid.stretch(gridDrag.section, gridDrag.step, gridDrag.at + ms, gridDrag.base)
+      else player.grid.shiftSection(gridDrag.section, ms, gridDrag.base)
       return
     }
     if (!drag) return
