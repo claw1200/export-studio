@@ -29,6 +29,21 @@
   )
 
   $effect(() => keybinds.register({ 'deck.playPause': () => mixer.toggle() }))
+  // Keeps the follower on the master's tempo as either deck plays through tempo changes.
+  $effect(() => mixer.follow())
+  // A deck losing its track cannot be synced to.
+  $effect(() => {
+    if (mixer.synced && !mixer.canSync) mixer.setSynced(false)
+  })
+
+  const masterLabel = $derived(mixer.master === a ? 'A' : 'B')
+  const syncTitle = $derived(
+    !mixer.canSync
+      ? 'Load a track with a tempo on both decks to sync them'
+      : mixer.synced
+        ? `Deck ${mixer.master === a ? 'B' : 'A'} follows deck ${masterLabel}. Click to stop syncing.`
+        : `Sync deck ${mixer.master === a ? 'B' : 'A'} to deck ${masterLabel}: match its tempo and line up the beats`
+  )
 
   /** Loads onto the focused deck, then moves the focus to the other deck if it is still empty. */
   function load(track: Track): void {
@@ -40,7 +55,7 @@
 </script>
 
 {#snippet deck(player: Player, label: string)}
-  <MixDeck {player} {label} focused={decks.focused === player} onfocus={() => decks.focus(player)} />
+  <MixDeck {player} {mixer} {label} focused={decks.focused === player} onfocus={() => decks.focus(player)} />
 {/snippet}
 
 <div class="flex shrink-0 gap-2 border-b border-line-soft bg-bg p-2">
@@ -65,6 +80,18 @@
       {/if}
     </button>
     <div class="text-[11px] font-medium text-faint">{mixer.playing ? 'Stop' : 'Play both'}</div>
+    <button
+      class={[
+        'h-7 w-full rounded-md text-[11px] font-bold tracking-wider transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+        mixer.synced
+          ? 'bg-accent text-bg hover:brightness-110'
+          : 'border border-line text-muted hover:bg-hover hover:text-fg'
+      ]}
+      disabled={!mixer.canSync}
+      aria-pressed={mixer.synced}
+      title={syncTitle}
+      onclick={() => mixer.setSynced(!mixer.synced)}>SYNC</button
+    >
     <Crossfader {mixer} />
   </div>
   {@render deck(b, 'B')}

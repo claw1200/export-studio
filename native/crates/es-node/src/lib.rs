@@ -255,6 +255,13 @@ impl AudioEngine {
     }
 
     #[napi]
+    pub fn set_key_shift(&self, deck: u32, semitones: i32) {
+        if let Some(engine) = self.engine() {
+            engine.set_key_shift(deck_index(deck), semitones);
+        }
+    }
+
+    #[napi]
     pub fn set_deck_gain(&self, deck: u32, gain: f64) {
         if let Some(engine) = self.engine() {
             engine.set_deck_gain(deck_index(deck), gain as f32);

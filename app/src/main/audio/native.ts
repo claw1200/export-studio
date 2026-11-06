@@ -52,6 +52,7 @@ export interface NativeEngine {
   setMasterTempo(deck: number, on: boolean): void
   setVolume(gain: number): void
   setDeckGain(deck: number, gain: number): void
+  setKeyShift(deck: number, semitones: number): void
   playTogether(decks: number[]): void
   snapshot(deck: number): NativeSnapshot | null
   anySounding(): boolean

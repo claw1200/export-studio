@@ -1,3 +1,4 @@
+import { MAX_TEMPO, MIN_TEMPO } from '../../../../shared/engine'
 import { getSetting, setSetting } from '../settings'
 import type { Deck } from './deck.svelte'
 import { storedFlag, storeFlag } from './stored'
@@ -45,9 +46,25 @@ export class TempoControl {
     this.deck.setTempo(1)
   }
 
-  setMasterTempo(on: boolean): void {
+  /** `remember` keeps it as the default for decks made later; a mix deck's own switch does not. */
+  setMasterTempo(on: boolean, remember = true): void {
     this.deck.setMasterTempo(on)
-    storeFlag('masterTempo', on)
+    if (remember) storeFlag('masterTempo', on)
+  }
+
+  /** Plays at `rate` times the file's speed, outside the fader's range: what sync and BPM steps set. */
+  setRate(rate: number): void {
+    if (!(rate > 0)) return
+    this.deck.setTempo(Math.max(MIN_TEMPO, Math.min(MAX_TEMPO, rate)))
+  }
+
+  /** Semitones the key is moved by, on top of what the tempo does to it. */
+  get keyShift(): number {
+    return this.deck.keyShift
+  }
+
+  setKeyShift(semitones: number): void {
+    this.deck.setKeyShift(semitones)
   }
 
   /** A narrower range pulls the tempo in to fit it, as moving the range switch does. */

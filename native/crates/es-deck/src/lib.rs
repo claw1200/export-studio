@@ -67,6 +67,9 @@ pub enum DeckEvent {
 /// Receives deck events. Called from a decode thread, never from the audio callback.
 pub type EventSink = Arc<dyn Fn(DeckEvent) + Send + Sync>;
 
+/// Furthest the key can be moved either way, in semitones.
+pub const MAX_KEY_SHIFT: i32 = 12;
+
 /// Frames of a loop end closer than this to the playhead mean the ring already holds audio past
 /// it, so setting the loop has to resync rather than wait for the decoder to reach the out point.
 const RING_REACH: u64 = (RING_BLOCKS * BLOCK_FRAMES) as u64;
@@ -419,16 +422,9 @@ impl Engine {
             1.0
         };
         let clock = handle.clock();
-        let previous = clock.tempo();
+        let was = clock.stretched();
         clock.set_tempo(tempo);
-        if clock.master_tempo()
-            && (previous == 1.0) != (tempo == 1.0)
-            && clock.loaded()
-            && !clock.scrubbing()
-        {
-            self.seek_frames(deck, clock.position());
-            handle.send(deck::Command::Wake);
-        }
+        self.restretch(deck, was);
     }
 
     /// Master tempo: keep the key when the tempo changes. Switching requeues from the playhead,
@@ -442,8 +438,36 @@ impl Engine {
         if clock.master_tempo() == on {
             return;
         }
+        let was = clock.stretched();
         clock.set_master_tempo(on);
-        if clock.tempo() != 1.0 && clock.loaded() && !clock.scrubbing() {
+        self.restretch(deck, was);
+    }
+
+    /// Moves the deck's key by `semitones`, within an octave either way, keeping its speed. Any
+    /// shift plays through the time-stretcher; back at zero the deck plays as it did before.
+    pub fn set_key_shift(&self, deck: DeckId, semitones: i32) {
+        let Some(handle) = self.deck(deck) else {
+            return;
+        };
+        let clock = handle.clock();
+        let semitones = semitones.clamp(-MAX_KEY_SHIFT, MAX_KEY_SHIFT);
+        if clock.key_shift() == semitones {
+            return;
+        }
+        let was = clock.stretched();
+        clock.set_key_shift(semitones);
+        self.restretch(deck, was);
+    }
+
+    /// Requeues from the playhead when the deck moved onto or off the time-stretcher, which has
+    /// to be primed with audio the ring has already passed. A change within one path is heard at
+    /// once without it.
+    fn restretch(&self, deck: DeckId, was: bool) {
+        let Some(handle) = self.deck(deck) else {
+            return;
+        };
+        let clock = handle.clock();
+        if clock.stretched() != was && clock.loaded() && !clock.scrubbing() {
             self.seek_frames(deck, clock.position());
             handle.send(deck::Command::Wake);
         }

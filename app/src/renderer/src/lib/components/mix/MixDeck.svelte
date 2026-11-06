@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { LoaderCircle, Music } from '@lucide/svelte'
+  import { LoaderCircle, Minus, Music, Plus } from '@lucide/svelte'
   import { artworkUrl } from '$lib/api'
-  import { bpmAt } from '$lib/beat'
   import { setPlayer } from '$lib/deck/context'
-  import { formatBpm, formatClock, keyColor } from '$lib/format'
+  import { formatBpm, formatClock, keyColor, pitchSemitones, shiftKey } from '$lib/format'
+  import { ownBpm, playingBpm, type Mixer } from '$lib/mixer.svelte'
   import type { Player } from '$lib/player.svelte'
   import WaveformDetail from '../WaveformDetail.svelte'
   import WaveformOverview from '../WaveformOverview.svelte'
@@ -11,16 +11,19 @@
   /**
    * One side of the mixer: the track, where its playhead is, the scrolling waveform and an overview
    * split into the sections between cues. Set the playhead by clicking the overview or dragging the
-   * scrolling waveform; the mixer's play starts it.
+   * scrolling waveform; the mixer's play starts it. Below the track sit its tempo and key, each
+   * moved a step at a time, and the switches that make it the master and hold its key.
    */
   let {
     player,
+    mixer,
     label,
     focused,
     onfocus
   }: {
     /** Fixed for the component's life: key the deck on it to swap. */
     player: Player
+    mixer: Mixer
     label: string
     /** Double-clicked rows load here. */
     focused: boolean
@@ -31,8 +34,74 @@
   setPlayer(player)
 
   const track = $derived(player.track)
-  const bpm = $derived(bpmAt(player.position, player.displayGrid, track?.bpm ?? 0))
+  const rate = $derived(player.tempo.rate)
+  const bpm = $derived(playingBpm(player))
+  const isMaster = $derived(mixer.master === player)
+  const following = $derived(mixer.following(player))
+  const masterTempo = $derived(player.tempo.masterTempo)
+  const keyShift = $derived(player.tempo.keyShift)
+  /** The key heard: the shift, and the tempo's pitch change too unless master tempo holds it. */
+  const semitones = $derived(keyShift + (masterTempo ? 0 : pitchSemitones(rate)))
+  const key = $derived(track?.key ? shiftKey(track.key, semitones) : '')
+  const bpmTitle = $derived(
+    following
+      ? `Following deck ${mixer.master === mixer.a ? 'A' : 'B'}`
+      : rate === 1
+        ? 'At the track’s own tempo'
+        : `${formatBpm(ownBpm(player))} BPM at the track’s own tempo. Click to go back to it.`
+  )
+  const keyTitle = $derived(
+    !track?.key
+      ? 'No key detected'
+      : semitones === 0
+        ? 'At the track’s own key'
+        : `${track.key} at the track’s own pitch. Click to clear the key shift.`
+  )
+  const signed = (n: number): string => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '')
 </script>
+
+{#snippet stepper(
+  name: string,
+  value: string,
+  valueClass: string | null,
+  color: string | null,
+  title: string,
+  disabled: boolean,
+  onstep: (step: number) => void,
+  onreset: () => void,
+  badge: string = ''
+)}
+  <div class={['flex h-6 items-center rounded border border-line-soft', disabled && 'opacity-40']}>
+    <button
+      class="grid h-full w-5 place-items-center text-faint hover:bg-hover hover:text-fg disabled:pointer-events-none"
+      {disabled}
+      aria-label="{name} down"
+      title="{name} down 1"
+      onclick={() => onstep(-1)}><Minus class="size-3" /></button
+    >
+    <button
+      class={[
+        'tabular flex h-full min-w-[60px] items-center justify-center gap-1 px-1 font-mono text-[11.5px] font-semibold hover:bg-hover disabled:pointer-events-none',
+        valueClass
+      ]}
+      style:color={color ?? undefined}
+      {disabled}
+      {title}
+      onclick={onreset}
+    >
+      <span class="text-[9px] font-sans font-semibold tracking-wide text-faint uppercase">{name}</span>
+      {value}
+      {#if badge}<span class="text-[9.5px] text-faint">{badge}</span>{/if}
+    </button>
+    <button
+      class="grid h-full w-5 place-items-center text-faint hover:bg-hover hover:text-fg disabled:pointer-events-none"
+      {disabled}
+      aria-label="{name} up"
+      title="{name} up 1"
+      onclick={() => onstep(1)}><Plus class="size-3" /></button
+    >
+  </div>
+{/snippet}
 
 {#snippet placeholder()}
   <div class="grid h-full place-items-center px-4 text-center text-[12px] text-faint">
@@ -81,13 +150,6 @@
         <div class="truncate text-[13.5px] font-semibold text-fg" title={track.title}>{track.title}</div>
         <div class="tabular mt-0.5 flex items-center gap-1.5 text-[11px]">
           <span class="truncate text-muted">{track.artist || 'Unknown artist'}</span>
-          <span class="shrink-0 rounded bg-raised px-1.5 py-px font-semibold text-fg">{formatBpm(bpm)} BPM</span>
-          {#if track.key}
-            <span
-              class="shrink-0 rounded bg-raised px-1.5 py-px font-semibold"
-              style:color={keyColor(track.key) ?? 'inherit'}>{track.key}</span
-            >
-          {/if}
         </div>
       {:else}
         <div class="text-[13px] text-faint">No track loaded</div>
@@ -96,6 +158,55 @@
     <div class="tabular shrink-0 text-right font-mono">
       <div class="text-[14px] font-medium text-fg">{formatClock(player.position * 1000)}</div>
       <div class="text-[11px] text-faint">−{formatClock(Math.max(0, player.duration - player.position) * 1000)}</div>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-2 px-3 pt-2.5">
+    <button
+      class={[
+        'h-6 rounded px-2 text-[10.5px] font-bold tracking-wide transition-colors disabled:opacity-40',
+        isMaster ? 'bg-accent text-bg' : 'border border-line text-faint hover:bg-hover hover:text-muted'
+      ]}
+      disabled={!track}
+      aria-pressed={isMaster}
+      title={isMaster ? `Deck ${label} is the master` : `Make deck ${label} the master the other deck syncs to`}
+      onclick={() => mixer.setMaster(player)}>MASTER</button
+    >
+
+    <div class="ml-auto flex items-center gap-2">
+      {@render stepper(
+        'BPM',
+        track ? formatBpm(bpm) : '—',
+        rate !== 1 ? 'text-accent' : 'text-fg',
+        null,
+        bpmTitle,
+        !track || following || !(ownBpm(player) > 0),
+        (step) => mixer.stepBpm(player, step),
+        () => mixer.resetTempo(player)
+      )}
+      {@render stepper(
+        'Key',
+        key || '—',
+        null,
+        key ? keyColor(key) : null,
+        keyTitle,
+        !track,
+        (step) => mixer.stepKey(player, step),
+        () => mixer.resetKey(player),
+        signed(keyShift)
+      )}
+      <button
+        class={[
+          'h-6 rounded px-1.5 text-[10.5px] font-bold transition-colors disabled:opacity-40',
+          masterTempo ? 'bg-accent-soft text-accent' : 'border border-line text-faint hover:bg-hover hover:text-muted'
+        ]}
+        disabled={!track}
+        aria-pressed={masterTempo}
+        title={masterTempo
+          ? 'Master tempo on: the key holds when the tempo moves'
+          : 'Master tempo off: the key moves with the tempo'}
+        onclick={() => mixer.toggleMasterTempo(player)}>MT</button
+      >
     </div>
   </div>
 

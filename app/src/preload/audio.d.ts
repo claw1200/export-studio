@@ -19,6 +19,8 @@ export type DeckCommand =
   | { op: 'tempo'; deck: number; tempo: number }
   /** Keep the key when the tempo changes. */
   | { op: 'masterTempo'; deck: number; on: boolean }
+  /** Move the key by whole semitones, keeping the speed. Within an octave either way. */
+  | { op: 'keyShift'; deck: number; semitones: number }
   | { op: 'volume'; gain: number }
   /** One deck's own level, linear, 0 to 1, under the master: what a crossfader sets. */
   | { op: 'deckGain'; deck: number; gain: number }

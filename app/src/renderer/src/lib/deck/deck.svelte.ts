@@ -1,4 +1,5 @@
 import type { DeckEvent, DeckTick, Tick } from '../../../../preload/audio'
+import { MAX_KEY_SHIFT } from '../../../../shared/engine'
 import { type Anchor, extrapolate, follow, NO_ANCHOR, pinned } from './clock'
 
 /** Longer than this without an animation frame and ticks set the position directly. */
@@ -33,6 +34,8 @@ export class Deck {
   tempo = $state(1)
   /** Keep the key when the tempo changes. */
   masterTempo = $state(false)
+  /** Semitones the key is moved by, on top of what the tempo does to it. Kept across loads. */
+  keyShift = $state(0)
   /** Called when a load finishes, with the engine's error if it failed. */
   onSettled: ((error: string | null) => void) | null = null
 
@@ -201,6 +204,14 @@ export class Deck {
   setMasterTempo(on: boolean): void {
     this.masterTempo = on
     this.send({ op: 'masterTempo', deck: this.index, on })
+  }
+
+  /** Moves the key by whole semitones, keeping the speed. The engine holds it within an octave. */
+  setKeyShift(semitones: number): void {
+    const shift = Math.max(-MAX_KEY_SHIFT, Math.min(MAX_KEY_SHIFT, Math.round(semitones)))
+    if (shift === this.keyShift) return
+    this.keyShift = shift
+    this.send({ op: 'keyShift', deck: this.index, semitones: shift })
   }
 
   private hold(seconds: number): void {

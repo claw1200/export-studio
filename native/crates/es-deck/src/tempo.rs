@@ -110,6 +110,8 @@ pub struct Stretcher {
     input_latency: usize,
     output_latency: usize,
     primed: bool,
+    /// The pitch the stretcher was last set to, as a multiple of the file's.
+    pitch: f32,
 }
 
 impl Stretcher {
@@ -136,6 +138,7 @@ impl Stretcher {
             input_latency,
             output_latency,
             primed: false,
+            pitch: 1.0,
         };
         stretcher.warm();
         stretcher
@@ -234,14 +237,31 @@ impl Stretcher {
         self.out_len = CHUNK;
     }
 
+    /// Moves the pitch, as a multiple of the file's. Takes effect from the next chunk.
+    fn set_pitch(&mut self, pitch: f32) {
+        let pitch = if pitch.is_finite() && pitch > 0.0 {
+            pitch
+        } else {
+            1.0
+        };
+        if pitch != self.pitch {
+            self.pitch = pitch;
+            self.stretch.set_transpose_factor(pitch, None);
+        }
+    }
+
+    /// The next output frame at `rate` (file frames per output frame) and `pitch` (a multiple of
+    /// the file's), with the file position it carries.
     pub fn next(
         &mut self,
         feed: &mut Feed,
         pop: bool,
         rate: f64,
+        pitch: f32,
         end_of_stream: bool,
     ) -> Option<(f32, f32, u64)> {
         let rate = rate.max(MIN_TEMPO);
+        self.set_pitch(pitch);
         if !(self.primed || pop && self.prime(feed, rate, end_of_stream)) {
             return None;
         }

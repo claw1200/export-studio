@@ -199,9 +199,9 @@ impl DeckReader {
     /// own speed the frames pass through, master tempo or not: running the stretcher there would
     /// only change the sound.
     fn playback_mode(&self) -> Mode {
-        if self.clock.scrubbing() || self.clock.tempo() == 1.0 {
+        if self.clock.scrubbing() || (self.clock.tempo() == 1.0 && self.clock.key_shift() == 0) {
             Mode::Direct
-        } else if self.clock.master_tempo() && self.stretcher.is_some() {
+        } else if self.clock.stretched() && self.stretcher.is_some() {
             Mode::Stretch
         } else {
             Mode::Varispeed
@@ -212,7 +212,8 @@ impl DeckReader {
         match (self.mode, self.stretcher.as_mut()) {
             (Mode::Varispeed, _) => self.varispeed.next(&mut self.feed, pop, rate),
             (Mode::Stretch, Some(stretcher)) => {
-                stretcher.next(&mut self.feed, pop, rate, self.clock.end_of_stream())
+                let pitch = self.clock.pitch();
+                stretcher.next(&mut self.feed, pop, rate, pitch, self.clock.end_of_stream())
             }
             _ => self.feed.next_frame(pop),
         }
