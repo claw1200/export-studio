@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import { getApp } from '$lib/context'
-  import type { GridDraft } from '$lib/beat'
+  import type { TempoMap } from '$lib/tempo-map'
   import { formatBpm } from '$lib/format'
 
   let { bpm }: { bpm: number } = $props()
@@ -15,7 +15,7 @@
   let input: HTMLInputElement | undefined = $state()
   let typing = $state(false)
   let text = $state('')
-  let drag: { y: number; bpm: number; base: GridDraft; moved: boolean } | null = null
+  let drag: { y: number; bpm: number; base: TempoMap; moved: boolean } | null = null
 
   async function startTyping(): Promise<void> {
     typing = true
@@ -55,10 +55,10 @@
   value={typing ? text : formatBpm(bpm) || '–'}
   oninput={(e) => (text = e.currentTarget.value)}
   onpointerdown={(e) => {
-    if (typing || e.button !== 0 || !player.grid.draft) return
+    if (typing || e.button !== 0 || !player.grid.map) return
     e.preventDefault()
     e.currentTarget.setPointerCapture(e.pointerId)
-    drag = { y: e.clientY, bpm, base: player.grid.draft, moved: false }
+    drag = { y: e.clientY, bpm, base: player.grid.map, moved: false }
   }}
   onpointermove={(e) => {
     if (!drag) return

@@ -71,7 +71,7 @@
   }
   const KEEP: Choice[] = KEEP_CHOICES.map((n) => ({ id: String(n), label: String(n) }))
   const INTERVAL: Choice[] = INTERVAL_CHOICES.map((c) => ({ id: String(c.hours), label: c.label }))
-  const GROUPS: ActionGroup[] = ['Playback', 'Cues', 'Library', 'App']
+  const GROUPS: ActionGroup[] = ['Playback', 'Cues', 'Beatgrid', 'Library', 'App']
   const PLACEMENTS: { id: CuePlacement; label: string }[] = [
     { id: 'playhead', label: 'Playhead' },
     { id: 'cuePoint', label: 'Cue point' }

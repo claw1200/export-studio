@@ -1,6 +1,6 @@
 import { HOT_CUE_LETTERS } from './format'
 
-export type ActionGroup = 'Playback' | 'Cues' | 'Library' | 'App'
+export type ActionGroup = 'Playback' | 'Cues' | 'Beatgrid' | 'Library' | 'App'
 
 export interface ActionSpec {
   label: string
@@ -55,6 +55,11 @@ export const ACTIONS = {
   'cue.nextMemory': { label: 'Next memory cue', group: 'Cues', repeat: true },
   'cue.addMemory': { label: 'Add memory cue', group: 'Cues', fields: 'controls' },
   'cue.deleteAtPlayhead': { label: 'Delete cue at playhead', group: 'Cues', fields: 'controls' },
+  'grid.addFlag': { label: 'Add tempo flag', group: 'Beatgrid', fields: 'controls' },
+  'grid.previousFlag': { label: 'Previous tempo flag', group: 'Beatgrid', repeat: true, fields: 'controls' },
+  'grid.nextFlag': { label: 'Next tempo flag', group: 'Beatgrid', repeat: true, fields: 'controls' },
+  'grid.undo': { label: 'Undo grid edit', group: 'Beatgrid', repeat: true },
+  'grid.redo': { label: 'Redo grid edit', group: 'Beatgrid', repeat: true },
   'library.next': { label: 'Next track', group: 'Library', repeat: true, fields: 'always' },
   'library.previous': { label: 'Previous track', group: 'Library', repeat: true, fields: 'always' },
   'library.nextPage': { label: 'Down 10 tracks', group: 'Library', repeat: true, fields: 'always' },
@@ -102,6 +107,11 @@ export const DEFAULT_BINDINGS: Record<ActionId, readonly string[]> = {
   'cue.nextMemory': ['ArrowRight'],
   'cue.addMemory': ['KeyM'],
   'cue.deleteAtPlayhead': ['Backspace'],
+  'grid.addFlag': ['KeyT'],
+  'grid.previousFlag': ['Comma'],
+  'grid.nextFlag': ['Period'],
+  'grid.undo': ['Mod+KeyZ'],
+  'grid.redo': ['Mod+Shift+KeyZ'],
   'library.next': ['ArrowDown'],
   'library.previous': ['ArrowUp'],
   'library.nextPage': ['Shift+ArrowDown'],

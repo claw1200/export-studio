@@ -1,12 +1,35 @@
 <script lang="ts">
-  import { Link, LoaderCircle, Unlink } from '@lucide/svelte'
+  import {
+    ChevronLeft,
+    ChevronRight,
+    FlagTriangleRight,
+    Link,
+    LoaderCircle,
+    Redo2,
+    Undo2,
+    Unlink
+  } from '@lucide/svelte'
+  import type { Component } from 'svelte'
   import { getApp } from '$lib/context'
+  import { varies } from '$lib/tempo-map'
   import BpmField from '../BpmField.svelte'
 
-  const { bpm, onsave }: { bpm: number; onsave: () => void } = $props()
+  const { bpm: playheadBpm, onsave }: { bpm: number; onsave: () => void } = $props()
 
   const { player } = getApp()
   const grid = player.grid
+
+  const flag = $derived(grid.map?.flags[grid.sectionAtPlayhead])
+  const sectionVaries = $derived(!!flag && varies(flag))
+  const sectionRamps = $derived(!!flag && grid.sectionAtPlayhead > 0 && flag.rampBeats > 0)
+  const sectionBpm = $derived(flag && !sectionVaries ? flag.bpm : playheadBpm)
+  const sectionChip = $derived(
+    sectionRamps
+      ? { label: 'RAMP', title: 'This section ramps to this tempo' }
+      : sectionVaries
+        ? { label: 'VARIES', title: 'The tempo here varies beat by beat, as rekordbox analysed it' }
+        : null
+  )
 </script>
 
 {#snippet gridButton(label: string, title: string, onclick: (e: MouseEvent) => void)}
@@ -21,18 +44,45 @@
   </button>
 {/snippet}
 
-<div class="flex h-14 w-[328px] shrink-0 flex-col justify-between" role="toolbar" aria-label="Beatgrid editor">
+{#snippet iconButton(
+  Icon: Component<{ class?: string }>,
+  title: string,
+  onclick: () => void,
+  disabled = false,
+  flagged = false
+)}
+  <button
+    class={[
+      'grid size-6 place-items-center rounded border disabled:opacity-35',
+      flagged ? 'border-flag/35 text-flag hover:bg-flag/15' : 'border-line-soft text-muted hover:bg-hover hover:text-fg'
+    ]}
+    disabled={player.editing || disabled}
+    aria-label={title}
+    {title}
+    {onclick}
+  >
+    <Icon class="size-3.5" />
+  </button>
+{/snippet}
+
+<div class="flex h-14 w-[344px] shrink-0 flex-col justify-between" role="toolbar" aria-label="Beatgrid editor">
   <div class="flex items-center gap-1">
     <span class="mr-auto flex items-baseline gap-1">
-      <BpmField {bpm} />
+      <BpmField bpm={sectionBpm} />
       <span class="text-[11px] font-medium text-faint">BPM</span>
+      {#if sectionChip}
+        <span
+          class="rounded-[3px] bg-flag/18 px-1 text-[9.5px] font-bold tracking-wider text-flag"
+          title={sectionChip.title}>{sectionChip.label}</span
+        >
+      {/if}
     </span>
-    {@render gridButton('←', 'Shift the beatgrid left by 1 ms (Shift: 10 ms)', (e) =>
+    {@render gridButton('←', 'Shift this section left by 1 ms (Shift: 10 ms)', (e) =>
       grid.nudge(e.shiftKey ? -10 : -1)
     )}
-    {@render gridButton('→', 'Shift the beatgrid right by 1 ms (Shift: 10 ms)', (e) => grid.nudge(e.shiftKey ? 10 : 1))}
-    {@render gridButton('/2', 'Halve the BPM', () => grid.halve())}
-    {@render gridButton('×2', 'Double the BPM', () => grid.double())}
+    {@render gridButton('→', 'Shift this section right by 1 ms (Shift: 10 ms)', (e) => grid.nudge(e.shiftKey ? 10 : 1))}
+    {@render gridButton('/2', "Halve this section's BPM", () => grid.halve())}
+    {@render gridButton('×2', "Double this section's BPM", () => grid.double())}
   </div>
   <div class="flex items-center gap-1">
     {@render gridButton('Set', 'Move the nearest beat to the playhead and make it the downbeat', () =>
@@ -56,6 +106,18 @@
         <Unlink class="size-3.5" />
       {/if}
     </button>
+    {@render iconButton(
+      FlagTriangleRight,
+      'Add a tempo flag on the beat nearest the playhead (T)',
+      () => grid.addFlagAtPlayhead(),
+      false,
+      true
+    )}
+    {@render iconButton(ChevronLeft, 'Previous tempo flag (,)', () => grid.jumpToFlag(-1))}
+    {@render iconButton(ChevronRight, 'Next tempo flag (.)', () => grid.jumpToFlag(1))}
+    <span class="mx-0.5 h-4 w-px bg-line-soft"></span>
+    {@render iconButton(Undo2, 'Undo (⌘Z)', () => grid.undo(), !grid.canUndo)}
+    {@render iconButton(Redo2, 'Redo (⇧⌘Z)', () => grid.redo(), !grid.canRedo)}
     <button
       class="ml-auto h-6 rounded px-2 text-[11px] font-semibold text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
       disabled={player.editing}

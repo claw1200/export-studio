@@ -27,5 +27,11 @@ export default defineConfig(
       'svelte/no-unused-svelte-ignore': 'off'
     }
   },
+  {
+    files: ['**/*.mjs'],
+    rules: {
+      '@typescript-eslint/explicit-function-return-type': 'off'
+    }
+  },
   eslintConfigPrettier
 )

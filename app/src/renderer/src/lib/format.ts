@@ -27,6 +27,11 @@ export function formatBpm(bpm: number): string {
   return bpm ? bpm.toFixed(bpm % 1 ? 2 : 0) : ''
 }
 
+export function formatBeatLength(beats: number): string {
+  if (beats % 4) return `${beats} beats`
+  return beats === 4 ? '1 bar' : `${beats / 4} bars`
+}
+
 export function formatSize(bytes: number): string {
   if (!bytes) return ''
   const mb = bytes / 1024 / 1024

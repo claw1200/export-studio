@@ -50,7 +50,8 @@ export class Player {
   readonly grid = new GridEditor(
     this.session,
     () => this.position,
-    () => this.trackMs()
+    () => this.trackMs(),
+    (seconds) => this.seek(seconds)
   )
   readonly cues = new CueEditor(this.session, this.grid)
   readonly tempo = new TempoControl(this.deck)
