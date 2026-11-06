@@ -247,6 +247,21 @@ impl AudioEngine {
     }
 
     #[napi]
+    pub fn play_together(&self, decks: Vec<u32>) {
+        if let Some(engine) = self.engine() {
+            let decks: Vec<_> = decks.into_iter().map(deck_index).collect();
+            engine.play_together(&decks);
+        }
+    }
+
+    #[napi]
+    pub fn set_deck_gain(&self, deck: u32, gain: f64) {
+        if let Some(engine) = self.engine() {
+            engine.set_deck_gain(deck_index(deck), gain as f32);
+        }
+    }
+
+    #[napi]
     pub fn set_volume(&self, gain: f64) {
         if let Some(engine) = self.engine() {
             engine.set_volume(gain as f32);

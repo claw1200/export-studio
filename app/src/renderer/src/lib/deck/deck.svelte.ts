@@ -82,12 +82,37 @@ export class Deck {
   }
 
   play(): void {
-    if (this.error) return
-    this.playing = true
-    if (!this.ready) return
-    this.anchor = { ...pinned(this.anchor, this.position, performance.now()), playing: !this.scrubbing }
+    if (!this.beginPlay()) return
     this.send({ op: 'play', deck: this.index })
     this.startFrames()
+  }
+
+  /**
+   * Starts every deck in `decks` in the same instant, so the gap between their playheads holds.
+   * A deck still loading starts on its own once it is ready, as `play` would.
+   */
+  static playTogether(decks: Deck[]): void {
+    const ready = decks.filter((deck) => deck.beginPlay())
+    if (!ready.length) return
+    const seq = window.audio.send({ op: 'playTogether', decks: ready.map((deck) => deck.index) })
+    for (const deck of ready) {
+      deck.sent = seq
+      deck.startFrames()
+    }
+  }
+
+  /** This deck's own level, linear, 0 to 1, under the master. */
+  setGain(gain: number): void {
+    this.send({ op: 'deckGain', deck: this.index, gain })
+  }
+
+  /** Marks the deck playing. False when the engine cannot start it now. */
+  private beginPlay(): boolean {
+    if (this.error) return false
+    this.playing = true
+    if (!this.ready) return false
+    this.anchor = { ...pinned(this.anchor, this.position, performance.now()), playing: !this.scrubbing }
+    return true
   }
 
   pause(): void {

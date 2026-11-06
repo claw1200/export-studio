@@ -29,9 +29,7 @@ export class Decks {
     this.audition.onBegan = () => {
       for (const player of this.players) player.yieldToPreview()
     }
-    this.audition.onEnded = () => {
-      for (const player of this.players) player.resumeAfterPreview()
-    }
+    this.audition.onEnded = () => Player.resumeAfterPreview(this.players)
   }
 
   /** Every player made so far, in the order they were. */

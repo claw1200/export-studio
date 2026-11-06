@@ -1,7 +1,7 @@
 /**
  * "Falling blocks" for the 3-band waveform: each band's level slopes down over the next few
  * blocks instead of dropping at once. Worked out in the worker pool for the whole track and
- * cached for the one track and setting being drawn.
+ * cached per track, so every deck on screen keeps its own.
  */
 import { createSubscriber } from 'svelte/reactivity'
 import { logicalCount, stridePeak } from './columns'
@@ -112,51 +112,65 @@ function fallSync(src: Uint8Array, blocks: number): Uint8Array {
   return out
 }
 
-class BandFallCache {
+/** Tracks whose falling blocks are kept: every deck on screen, with room to switch back. */
+const SLOTS = 4
+
+const listeners = new Set<() => void>()
+const subscribe = createSubscriber((update) => {
+  listeners.add(update)
+  return () => listeners.delete(update)
+})
+
+/**
+ * One track's falling blocks: the latest result, and the job working out a new one. Each track
+ * has its own, so two decks drawing different tracks never cancel each other's work.
+ */
+class FallSlot {
   private ready: FallReady | null = null
   private job: FallKey | null = null
   private want: FallKey | null = null
   private timer: ReturnType<typeof setTimeout> | null = null
   private generation = 0
-  private listeners = new Set<() => void>()
-  private subscribe = createSubscriber((update) => {
-    this.listeners.add(update)
-    return () => this.listeners.delete(update)
-  })
 
-  /** Makes the calling effect redraw when a result arrives. */
-  track(): void {
-    this.subscribe()
-  }
+  constructor(private readonly source: Uint8Array) {}
 
   /**
-   * The fallen bands for `source`, or null while they are worked out. A retune of the track
-   * already shown keeps returning the previous result until the new one is ready.
+   * The fallen bands, or null while they are worked out. A retune keeps returning the previous
+   * result until the new one is ready.
    */
-  get(source: Uint8Array, stride: number, blocks: number): Uint8Array | null {
+  get(stride: number, blocks: number): Uint8Array | null {
+    const source = this.source
     if (blocks < 1 || source.length < 3) {
-      this.want = null
-      if (this.timer) clearTimeout(this.timer)
-      this.timer = null
-      this.generation++
-      this.job = null
+      this.cancel()
       return null
     }
     const { ready, job, want } = this
     if (ready && sameKey(ready, source, stride, blocks)) return ready.data
     if (!sameKey(job, source, stride, blocks) && !sameKey(want, source, stride, blocks)) {
-      const retune = ready?.source === source || job?.source === source || want?.source === source
+      const retune = !!(ready || job || want)
       this.want = { source, stride, blocks }
       if (retune) {
         if (!this.timer) this.timer = setTimeout(() => this.launch(), RETUNE_MS)
       } else {
-        if (this.timer) clearTimeout(this.timer)
-        this.timer = null
+        this.clearTimer()
         this.launch()
       }
     }
-    if (ready && ready.source === source && ready.stride === stride) return ready.data
+    if (ready && ready.stride === stride) return ready.data
     return null
+  }
+
+  /** Drops any queued or running job. A result already worked out is kept. */
+  cancel(): void {
+    this.want = null
+    this.clearTimer()
+    this.generation++
+    this.job = null
+  }
+
+  private clearTimer(): void {
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = null
   }
 
   private launch(): void {
@@ -180,18 +194,36 @@ class BandFallCache {
       if (!data || token !== this.generation) return
       this.ready = { ...job, data }
       this.job = null
-      for (const listener of this.listeners) listener()
+      for (const listener of listeners) listener()
     })()
   }
 }
 
-const cache = new BandFallCache()
+/** Most recently drawn last. */
+const slots = new Map<Uint8Array, FallSlot>()
+
+function slotFor(source: Uint8Array): FallSlot {
+  const found = slots.get(source)
+  if (found) {
+    slots.delete(source)
+    slots.set(source, found)
+    return found
+  }
+  const slot = new FallSlot(source)
+  slots.set(source, slot)
+  for (const [oldest, stale] of slots) {
+    if (slots.size <= SLOTS) break
+    stale.cancel()
+    slots.delete(oldest)
+  }
+  return slot
+}
 
 /** Call inside the effect that draws, so it redraws when falling blocks finish. */
 export function trackBandFall(): void {
-  cache.track()
+  subscribe()
 }
 
 export function bandFall(source: Uint8Array, stride: number, blocks: number): Uint8Array | null {
-  return cache.get(source, stride, blocks)
+  return slotFor(source).get(stride, blocks)
 }

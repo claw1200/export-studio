@@ -129,6 +129,12 @@ export class AudioBridge {
       case 'volume':
         engine.setVolume(command.gain)
         break
+      case 'deckGain':
+        engine.setDeckGain(command.deck, command.gain)
+        break
+      case 'playTogether':
+        engine.playTogether(command.decks)
+        break
     }
     this.startTicker()
   }

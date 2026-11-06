@@ -20,6 +20,10 @@ export type DeckCommand =
   /** Keep the key when the tempo changes. */
   | { op: 'masterTempo'; deck: number; on: boolean }
   | { op: 'volume'; gain: number }
+  /** One deck's own level, linear, 0 to 1, under the master: what a crossfader sets. */
+  | { op: 'deckGain'; deck: number; gain: number }
+  /** Start several decks in the same instant, so the gap between their playheads holds. */
+  | { op: 'playTogether'; decks: number[] }
 
 /** One deck as the engine last reported it. Frames are at `sampleRate`. */
 export interface DeckTick {

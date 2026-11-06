@@ -76,6 +76,8 @@ pub struct Engine {
     sink: Arc<dyn Sink>,
     sample_rate: u32,
     master: Arc<AtomicU32>,
+    /// Each deck's own level, linear, applied before the master: a channel fader or crossfader.
+    gains: Vec<Arc<AtomicU32>>,
 }
 
 impl Engine {
@@ -106,12 +108,35 @@ impl Engine {
 
         let master = Arc::new(AtomicU32::new(1.0_f32.to_bits()));
         let level = Arc::clone(&master);
+        let gains: Vec<Arc<AtomicU32>> = (0..decks)
+            .map(|_| Arc::new(AtomicU32::new(1.0_f32.to_bits())))
+            .collect();
+        let deck_levels: Vec<Arc<AtomicU32>> = gains.iter().map(Arc::clone).collect();
         let rate = Arc::new(AtomicU32::new(0));
         let callback_rate = Arc::clone(&rate);
         let mut smoothed: Option<Smoothed> = None;
+        let mut deck_smoothed: Vec<Option<Smoothed>> = (0..decks).map(|_| None).collect();
+        // Each deck mixes here first so its own level can be applied. Sized for a large device
+        // buffer up front so the callback does not allocate.
+        let mut scratch: Vec<f32> = vec![0.0; 16_384];
         let render: Render = Box::new(move |out: &mut [f32]| {
-            for reader in &mut readers {
-                reader.mix_into(out);
+            if scratch.len() < out.len() {
+                scratch.resize(out.len(), 0.0);
+            }
+            let sample_rate = callback_rate.load(Ordering::Relaxed);
+            for ((reader, level), smooth) in
+                readers.iter_mut().zip(&deck_levels).zip(&mut deck_smoothed)
+            {
+                let target = f32::from_bits(level.load(Ordering::Relaxed));
+                let smooth = smooth.get_or_insert_with(|| Smoothed::new(target, sample_rate, 10.0));
+                let deck_out = &mut scratch[..out.len()];
+                deck_out.fill(0.0);
+                reader.mix_into(deck_out);
+                for (frame, mixed) in out.chunks_exact_mut(2).zip(deck_out.chunks_exact(2)) {
+                    let gain = smooth.step(target);
+                    frame[0] += mixed[0] * gain;
+                    frame[1] += mixed[1] * gain;
+                }
             }
             let target = f32::from_bits(level.load(Ordering::Relaxed));
             let smoothed = smoothed.get_or_insert_with(|| {
@@ -149,6 +174,7 @@ impl Engine {
             sink,
             sample_rate,
             master,
+            gains,
         })
     }
 
@@ -204,6 +230,31 @@ impl Engine {
         }
         clock.set_playing(true);
         handle.send(deck::Command::Wake);
+        self.settle();
+    }
+
+    /// Starts several decks in one step, so they begin in the same device callback and stay
+    /// as far apart as their playheads say. Decks that are not loaded are left alone.
+    pub fn play_together(&self, decks: &[DeckId]) {
+        let ready: Vec<(DeckId, &deck::DeckHandle)> = decks
+            .iter()
+            .filter_map(|&deck| self.deck(deck).map(|handle| (deck, handle)))
+            .filter(|(_, handle)| handle.clock().loaded())
+            .collect();
+        // As with `play`, a deck that played to its end starts over.
+        for &(deck, handle) in &ready {
+            let clock = handle.clock();
+            if clock.end_of_stream() && clock.total() > 0 && clock.position() >= clock.total() {
+                self.seek_frames(deck, 0);
+            }
+        }
+        // Flip every deck to playing before waking any, so no callback sees only some started.
+        for (_, handle) in &ready {
+            handle.clock().set_playing(true);
+        }
+        for (_, handle) in &ready {
+            handle.send(deck::Command::Wake);
+        }
         self.settle();
     }
 
@@ -406,6 +457,18 @@ impl Engine {
             1.0
         };
         self.master.store(safe.to_bits(), Ordering::Relaxed);
+    }
+
+    /// One deck's own level, linear, 0 to 1, glided like the master so a fader move never clicks.
+    pub fn set_deck_gain(&self, deck: DeckId, gain: f32) {
+        let safe = if gain.is_finite() {
+            gain.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        if let Some(level) = self.gains.get(deck) {
+            level.store(safe.to_bits(), Ordering::Relaxed);
+        }
     }
 
     pub fn snapshot(&self, deck: DeckId) -> Option<DeckSnapshot> {

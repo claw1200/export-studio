@@ -240,10 +240,29 @@ export class Player {
     this.pause()
   }
 
-  resumeAfterPreview(): void {
-    if (!this.returnAfterPreview) return
-    this.returnAfterPreview = false
-    if (this.track) this.deck.play()
+  /** Starts again every player a preview paused, in the same instant so decks stay in step. */
+  static resumeAfterPreview(players: readonly Player[]): void {
+    const back = players.filter((player) => player.returnAfterPreview && player.track)
+    for (const player of players) player.returnAfterPreview = false
+    Deck.playTogether(back.map((player) => player.deck))
+  }
+
+  /** Starts every loaded player in the same instant, keeping the gap between their playheads. */
+  static playTogether(players: readonly Player[]): void {
+    const loaded = players.filter((player) => player.track && !player.audioError)
+    for (const player of loaded) player.takeSpeakers()
+    Deck.playTogether(loaded.map((player) => player.deck))
+  }
+
+  /** Pauses on `seconds`, in one step so the old position is never heard after the stop. */
+  stopAt(seconds: number): void {
+    if (!this.track) return
+    this.deck.stopAt(this.insideFile(seconds))
+  }
+
+  /** This deck's own level under the master, linear, 0 to 1: a channel fader or crossfader. */
+  setGain(gain: number): void {
+    this.deck.setGain(gain)
   }
 
   /** This deck is about to be heard, so a preview must not start it again afterwards. */
