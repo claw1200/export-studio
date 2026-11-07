@@ -5,10 +5,6 @@
   import { getPlayer } from '$lib/deck/context'
   import { formatClock } from '$lib/format'
 
-  /**
-   * Artwork, title and artist, with the file type, and the clock at the far end.
-   * The title takes what width is left, so the deck sets the whole block's width with `class`.
-   */
   let { class: className }: { class?: ClassValue } = $props()
 
   const player = getPlayer()

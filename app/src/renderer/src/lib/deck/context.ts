@@ -7,12 +7,15 @@ import type { Player } from '../player.svelte'
  */
 export const [getPlayer, setPlayer] = createContext<Player>()
 
-/** How a deck is named and reached from the keyboard, for the controls inside it to say so. */
 export interface DeckInfo {
-  /** "A" or "B" in mix mode; null for the one deck of edit mode. */
+  /** Mix mode's "A" or "B"; edit mode's single deck has none. */
   label: string | null
-  /** Its shortcuts are the usual ones with Shift added, as deck B's in mix mode. */
+  /** Deck B in mix mode takes deck A's shortcuts with Shift added. */
   shifted: boolean
 }
 
 export const [getDeckInfo, setDeckInfo] = createContext<DeckInfo>()
+
+export function deckName({ label }: DeckInfo): string {
+  return label ? `deck ${label}` : 'the deck'
+}

@@ -12,60 +12,42 @@
   import type { Component } from 'svelte'
   import { getPlayer } from '$lib/deck/context'
   import { useShortcut } from '$lib/deck/shortcut'
+  import { ownBpm } from '$lib/mixer.svelte'
   import { varies } from '$lib/tempo-map'
   import BpmField from '../BpmField.svelte'
   import { segment, segmentButton } from './segment'
 
-  /**
-   * The beatgrid editor, in place of the hot cues while it is open: the BPM of the section at the
-   * playhead, to drag or type, then its tools, ending in cancel and save so they sit with the
-   * tools rather than across the deck.
-   */
-  const {
-    bpm,
-    onsave
-  }: {
-    /** At the playhead, at the track's own tempo: shown where the section's tempo varies. */
-    bpm: number
-    onsave: () => void
-  } = $props()
+  let { onsave }: { onsave: () => void } = $props()
 
   const player = getPlayer()
   const grid = player.grid
-
-  const flag = $derived(grid.map?.flags[grid.sectionAtPlayhead])
-  const sectionChip = $derived(
-    flag && grid.sectionAtPlayhead > 0 && flag.rampBeats > 0
-      ? { label: 'RAMP', title: 'This section ramps to its tempo' }
-      : flag && varies(flag)
-        ? { label: 'VARIES', title: 'The tempo here varies beat by beat, as rekordbox analysed it' }
-        : null
-  )
-  const sectionBpm = $derived(flag && !varies(flag) ? flag.bpm : bpm)
   const shortcut = useShortcut()
+
+  const section = $derived(grid.map?.flags[grid.sectionAtPlayhead])
+  const sectionVaries = $derived(!!section && varies(section))
+  const sectionRamps = $derived(!!section && grid.sectionAtPlayhead > 0 && section.rampBeats > 0)
+  const sectionBpm = $derived(section && !sectionVaries ? section.bpm : ownBpm(player))
 </script>
 
-{#snippet tool(label: string, title: string, onclick: (e: MouseEvent) => void, disabled = false)}
-  <button class={segmentButton()} disabled={player.editing || disabled} aria-label={title} {title} {onclick}
-    >{label}</button
-  >
-{/snippet}
-
-{#snippet iconTool(
-  Icon: Component<{ class?: string }>,
+{#snippet tool(
+  content: string | Component<{ class?: string }>,
   title: string,
-  onclick: () => void,
-  disabled = false,
-  flagged = false
+  onclick: (e: MouseEvent) => void,
+  { disabled = false, flag = false } = {}
 )}
   <button
-    class={segmentButton(false, flagged ? 'flag' : 'cue')}
+    class={segmentButton(false, flag ? 'flag' : 'cue')}
     disabled={player.editing || disabled}
     aria-label={title}
     {title}
     {onclick}
   >
-    <Icon class="size-3.5" />
+    {#if typeof content === 'string'}
+      {content}
+    {:else}
+      {@const Icon = content}
+      <Icon class="size-3.5" />
+    {/if}
   </button>
 {/snippet}
 
@@ -78,12 +60,15 @@
     <span class="font-sans text-[9px] font-semibold tracking-wide text-faint uppercase">BPM</span>
     <BpmField bpm={sectionBpm} compact />
   </div>
-  {#if sectionChip}
+  {#if sectionRamps || sectionVaries}
     <span
       class="rounded-[3px] bg-flag/18 px-1 text-[9.5px] font-bold tracking-wider text-flag"
-      title={sectionChip.title}>{sectionChip.label}</span
+      title={sectionRamps
+        ? 'This section ramps to its tempo'
+        : 'The tempo here varies beat by beat, as rekordbox analysed it'}>{sectionRamps ? 'RAMP' : 'VARIES'}</span
     >
   {/if}
+
   <div class={segment} role="group" aria-label="Move this section">
     {@render tool('←', 'Shift this section left by 1 ms (Shift: 10 ms)', (e) => grid.nudge(e.shiftKey ? -10 : -1))}
     {@render tool('→', 'Shift this section right by 1 ms (Shift: 10 ms)', (e) => grid.nudge(e.shiftKey ? 10 : 1))}
@@ -96,15 +81,14 @@
     {@render tool('×2', "Double this section's BPM", () => grid.double())}
   </div>
   <div class={segment} role="group" aria-label="Tempo flags">
-    {@render iconTool(
+    {@render tool(
       FlagTriangleRight,
-      'Add a tempo flag on the beat nearest the playhead (T)',
+      'Add a tempo flag on the beat nearest the playhead' + shortcut('grid.addFlag'),
       () => grid.addFlagAtPlayhead(),
-      false,
-      true
+      { flag: true }
     )}
-    {@render iconTool(ChevronLeft, 'Previous tempo flag (,)', () => grid.jumpToFlag(-1))}
-    {@render iconTool(ChevronRight, 'Next tempo flag (.)', () => grid.jumpToFlag(1))}
+    {@render tool(ChevronLeft, 'Previous tempo flag' + shortcut('grid.previousFlag'), () => grid.jumpToFlag(-1))}
+    {@render tool(ChevronRight, 'Next tempo flag' + shortcut('grid.nextFlag'), () => grid.jumpToFlag(1))}
   </div>
   <div class={segment}>
     <button
@@ -122,9 +106,10 @@
     </button>
   </div>
   <div class={segment} role="group" aria-label="History">
-    {@render iconTool(Undo2, 'Undo (⌘Z)', () => grid.undo(), !grid.canUndo)}
-    {@render iconTool(Redo2, 'Redo (⇧⌘Z)', () => grid.redo(), !grid.canRedo)}
+    {@render tool(Undo2, 'Undo' + shortcut('grid.undo'), () => grid.undo(), { disabled: !grid.canUndo })}
+    {@render tool(Redo2, 'Redo' + shortcut('grid.redo'), () => grid.redo(), { disabled: !grid.canRedo })}
   </div>
+
   <div class="flex items-center gap-1">
     <button
       class="h-6 rounded border border-line px-2 text-[10.5px] font-bold tracking-wide text-muted transition hover:bg-hover hover:text-fg disabled:opacity-40"

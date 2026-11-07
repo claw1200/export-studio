@@ -4,7 +4,6 @@
   import type { TempoMap } from '$lib/tempo-map'
   import { formatBpm } from '$lib/format'
 
-  /** `compact` sits inside a deck readout box, at the size of the text around it. */
   let { bpm, compact = false }: { bpm: number; compact?: boolean } = $props()
 
   const player = getPlayer()

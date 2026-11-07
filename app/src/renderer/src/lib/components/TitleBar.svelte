@@ -16,7 +16,7 @@
     Magnet
   } from '@lucide/svelte'
   import { getApp } from '$lib/context'
-  import { chordLabel } from '$lib/keymap'
+  import { chordLabel, shortcutHint } from '$lib/keymap'
   import type { MenuRequest } from '$lib/menu'
   import ContextMenu from './ContextMenu.svelte'
   import SettingsDialog, { type SettingsSection } from './SettingsDialog.svelte'
@@ -43,9 +43,7 @@
 
   const { library, decks, keybinds } = getApp()
   const output = decks.output
-  /** Quantise is every deck's, so it lives here rather than on a deck. */
   const prefs = decks.prefs
-  const quantiseShortcut = $derived(keybinds.bindings['deck.quantise'][0])
   const silent = $derived(output.muted || output.volume === 0)
   const isMac = window.api.platform === 'darwin'
   let importMenu = $state<MenuRequest | null>(null)
@@ -235,7 +233,7 @@
       title={(prefs.quantise
         ? 'Quantise on: cues, loops and scrubbing snap to the beat on every deck'
         : 'Quantise off: cues, loops and scrubbing land exactly where you put them') +
-        (quantiseShortcut ? ` (${chordLabel(quantiseShortcut)})` : '')}
+        shortcutHint(keybinds.bindings['deck.quantise'])}
     >
       <Magnet class="size-3" />
       Quantise

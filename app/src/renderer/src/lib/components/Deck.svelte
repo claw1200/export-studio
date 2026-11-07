@@ -4,7 +4,6 @@
   import { deckKeys } from '$lib/deck/keys'
   import { useShortcut } from '$lib/deck/shortcut'
   import type { Player } from '$lib/player.svelte'
-  import { bpmAt } from '$lib/beat'
   import WaveformOverview from './WaveformOverview.svelte'
   import TempoFader from './TempoFader.svelte'
   import WaveformToolbar from './deck/WaveformToolbar.svelte'
@@ -14,7 +13,7 @@
   import Transport from './deck/Transport.svelte'
   import HotCueBar from './deck/HotCueBar.svelte'
   import LoopControls from './deck/LoopControls.svelte'
-  import TempoReadout from './deck/TempoReadout.svelte'
+  import TempoSteppers from './deck/TempoSteppers.svelte'
   import DeckShell from './deck/DeckShell.svelte'
   import { segment, segmentButton } from './deck/segment'
 
@@ -29,13 +28,12 @@
   /** Only the focused deck answers the keyboard, so several decks never fight over a key. */
   const focused = $derived(decks.focused === player)
 
-  const track = $derived(player.track)
+  const editingGrid = $derived(player.grid.editing)
   const deviceTrack = $derived(player.track?.id.startsWith('usb:') ?? false)
   const gridEditable = $derived(library.writable && player.grid.canEdit && !deviceTrack)
-  const currentBpm = $derived(bpmAt(player.position, player.displayGrid, track?.bpm ?? 0))
 
   $effect(() => {
-    if (player.grid.editing && !gridEditable) player.grid.cancel()
+    if (editingGrid && !gridEditable) player.grid.cancel()
   })
 
   async function saveGrid(): Promise<void> {
@@ -45,7 +43,7 @@
   }
 
   function toggleGridEdit(): void {
-    if (player.grid.editing) void saveGrid()
+    if (editingGrid) void saveGrid()
     else if (gridEditable) player.grid.begin()
   }
 
@@ -55,7 +53,7 @@
   })
 
   $effect(() => {
-    if (!focused || !player.grid.editing) return undefined
+    if (!focused || !editingGrid) return undefined
     return keybinds.register({
       'grid.addFlag': () => player.grid.addFlagAtPlayhead(),
       'grid.previousFlag': () => player.grid.jumpToFlag(-1),
@@ -80,38 +78,33 @@
   onkeydown={(e) => {
     if (!focused || e.key !== 'Escape' || e.defaultPrevented) return
     if (player.grid.selectedFlagId != null) player.grid.select(null)
-    else if (player.grid.editing && !player.editing) player.grid.cancel()
+    else if (editingGrid && !player.editing) player.grid.cancel()
   }}
 />
 
 <DeckShell
   class="shrink-0 border-b border-line-soft bg-surface"
-  waveClass={player.grid.editing && player.waveform ? 'h-[114px]' : 'h-[136px]'}
-  empty="Select a track, or drag one here, to view its waveform"
+  waveformClass={editingGrid && player.waveform ? 'h-[114px]' : 'h-[136px]'}
+  emptyMessage="Select a track, or drag one here, to view its waveform"
   onload={(track) => {
     decks.focus(player)
     void player.load(track)
   }}
 >
-  {#snippet overlay()}
+  {#snippet waveformOverlay()}
     <WaveformToolbar />
   {/snippet}
-  {#if player.grid.editing && player.waveform}
+  {#if editingGrid && player.waveform}
     <TempoLane />
   {/if}
 
-  <!--
-    The pieces it shares with the mix deck, packed into two columns so nothing is left empty. On the left, the
-    playing BPM and key, then the track and its clock, with play, cue and loops under them; on the
-    right, the overview with the hot cues centred under it. A switch pinned at the head of the hot
-    cue row swaps them for the beatgrid editor, centred in the same space so the switch never moves.
-    The tempo fader leads, left of both.
-  -->
   <div class="flex">
     <TempoFader />
     <div class="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2.5 px-4 py-3">
       <div class="flex items-center gap-3">
-        <TempoReadout bpm={currentBpm} />
+        <div class="flex shrink-0 flex-col gap-1">
+          <TempoSteppers stepperClass="w-[124px]" />
+        </div>
         <TrackInfo class="w-[360px] shrink-0" />
       </div>
       <div class="relative h-[52px] overflow-hidden rounded bg-wave">
@@ -120,37 +113,31 @@
 
       <div class="flex items-center gap-3">
         <Transport />
-        <div class="flex items-center gap-1.5">
-          <LoopControls />
-        </div>
+        <LoopControls />
       </div>
       <div class="flex items-center gap-3">
-        <div class={segment} role="group" aria-label="Show under the overview">
+        <div class={segment} role="group" aria-label="Hot cues or beatgrid">
           <button
-            class={segmentButton(!player.grid.editing, 'accent')}
-            aria-pressed={!player.grid.editing}
-            title={player.grid.editing ? 'Save the beatgrid and go back to the hot cues' : 'Hot cues'}
-            onclick={() => player.grid.editing && void saveGrid()}>CUES</button
+            class={segmentButton(!editingGrid, 'accent')}
+            aria-pressed={!editingGrid}
+            title={editingGrid ? 'Save the beatgrid and go back to the hot cues' : 'Hot cues'}
+            onclick={() => editingGrid && void saveGrid()}>CUES</button
           >
           <button
-            class={segmentButton(player.grid.editing, 'accent')}
-            disabled={!player.grid.editing && !gridEditable}
-            aria-pressed={player.grid.editing}
-            title={player.grid.editing ? 'Editing the beatgrid' : gridTitle}
-            onclick={() => !player.grid.editing && toggleGridEdit()}>GRID</button
+            class={segmentButton(editingGrid, 'accent')}
+            disabled={!editingGrid && !gridEditable}
+            aria-pressed={editingGrid}
+            title={editingGrid ? 'Editing the beatgrid' : gridTitle}
+            onclick={() => !editingGrid && toggleGridEdit()}>GRID</button
           >
         </div>
-        {#if player.grid.editing}
-          <div class="flex min-w-0 flex-1 justify-center">
-            <GridEditorBar bpm={currentBpm} onsave={saveGrid} />
-          </div>
-        {:else}
-          <div class="flex min-w-0 flex-1 justify-center">
-            <div class="grid w-full max-w-[618px] grid-cols-8 gap-1.5">
-              <HotCueBar />
-            </div>
-          </div>
-        {/if}
+        <div class="flex min-w-0 flex-1 justify-center">
+          {#if editingGrid}
+            <GridEditorBar onsave={saveGrid} />
+          {:else}
+            <HotCueBar class="w-full max-w-[618px]" />
+          {/if}
+        </div>
       </div>
     </div>
   </div>
