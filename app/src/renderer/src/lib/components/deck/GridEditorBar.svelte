@@ -10,9 +10,8 @@
     Unlink
   } from '@lucide/svelte'
   import type { Component } from 'svelte'
-  import { getApp } from '$lib/context'
   import { getPlayer } from '$lib/deck/context'
-  import { chordLabel } from '$lib/keymap'
+  import { useShortcut } from '$lib/deck/shortcut'
   import { varies } from '$lib/tempo-map'
   import BpmField from '../BpmField.svelte'
   import { segment, segmentButton } from './segment'
@@ -31,7 +30,6 @@
     onsave: () => void
   } = $props()
 
-  const { keybinds } = getApp()
   const player = getPlayer()
   const grid = player.grid
 
@@ -44,7 +42,7 @@
         : null
   )
   const sectionBpm = $derived(flag && !varies(flag) ? flag.bpm : bpm)
-  const gridShortcut = $derived(keybinds.bindings['deck.gridEdit'][0])
+  const shortcut = useShortcut()
 </script>
 
 {#snippet tool(label: string, title: string, onclick: (e: MouseEvent) => void, disabled = false)}
@@ -139,7 +137,7 @@
       disabled={player.editing}
       onclick={onsave}
       title={(grid.dirty ? 'Save the beatgrid to rekordbox' : 'No changes to save; close the editor') +
-        (gridShortcut ? ` (${chordLabel(gridShortcut)})` : '')}
+        shortcut('deck.gridEdit')}
     >
       {#if player.editing}<LoaderCircle class="size-3 animate-spin" />{/if}
       SAVE

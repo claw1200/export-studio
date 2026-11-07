@@ -13,6 +13,9 @@
   } from '$lib/format'
   import type { Cue } from '$lib/types'
 
+  /** Mix mode only plays the pads: no setting, recolouring or deleting, whatever the library allows. */
+  let { playOnly = false }: { playOnly?: boolean } = $props()
+
   const { library } = getApp()
   const player = getPlayer()
 
@@ -27,7 +30,7 @@
     }))
   })
   const editable = $derived(
-    library.writable && !!player.detail && !player.grid.editing && !player.track?.id.startsWith('usb:')
+    !playOnly && library.writable && !!player.detail && !player.grid.editing && !player.track?.id.startsWith('usb:')
   )
   const placementLabel = $derived(player.cuePlacement === 'cuePoint' ? 'cue point' : 'playhead')
   /** Closes whenever editing turns on or off. */
@@ -60,7 +63,7 @@
         onpointerdown={(e) => {
           if (e.button !== 0) return
           e.currentTarget.setPointerCapture(e.pointerId)
-          player.hotCueDown(kind)
+          player.hotCueDown(kind, !playOnly)
         }}
         onpointerup={() => player.hotCueUp(kind)}
         onpointercancel={() => player.hotCueUp(kind)}

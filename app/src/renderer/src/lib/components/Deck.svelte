@@ -1,13 +1,10 @@
 <script lang="ts">
-  import { LoaderCircle } from '@lucide/svelte'
   import { getApp } from '$lib/context'
-  import { setPlayer } from '$lib/deck/context'
-  import { TrackDrop } from '$lib/deck/drop.svelte'
+  import { setDeckInfo, setPlayer } from '$lib/deck/context'
   import { deckKeys } from '$lib/deck/keys'
+  import { useShortcut } from '$lib/deck/shortcut'
   import type { Player } from '$lib/player.svelte'
   import { bpmAt } from '$lib/beat'
-  import { chordLabel } from '$lib/keymap'
-  import WaveformDetail from './WaveformDetail.svelte'
   import WaveformOverview from './WaveformOverview.svelte'
   import TempoFader from './TempoFader.svelte'
   import WaveformToolbar from './deck/WaveformToolbar.svelte'
@@ -18,6 +15,7 @@
   import HotCueBar from './deck/HotCueBar.svelte'
   import LoopControls from './deck/LoopControls.svelte'
   import TempoReadout from './deck/TempoReadout.svelte'
+  import DeckShell from './deck/DeckShell.svelte'
   import { segment, segmentButton } from './deck/segment'
 
   /** The player this deck shows. Fixed for the component's life: key the deck on it to swap. */
@@ -25,12 +23,9 @@
 
   const { library, decks, keybinds } = getApp()
   // svelte-ignore state_referenced_locally
-  const drop = new TrackDrop(library, (track) => {
-    decks.focus(player)
-    void player.load(track)
-  })
-  // svelte-ignore state_referenced_locally
   setPlayer(player)
+  setDeckInfo({ label: null, shifted: false })
+  const shortcut = useShortcut()
   /** Only the focused deck answers the keyboard, so several decks never fight over a key. */
   const focused = $derived(decks.focused === player)
 
@@ -70,7 +65,6 @@
     })
   })
 
-  const gridShortcut = $derived(keybinds.bindings['deck.gridEdit'][0])
   const gridTitle = $derived(
     (deviceTrack
       ? 'USB tracks are read-only; sync to change them'
@@ -78,7 +72,7 @@
         ? 'Unlock editing to change the beatgrid'
         : player.grid.canEdit
           ? 'Edit the beatgrid'
-          : 'This track has no beatgrid') + (gridShortcut ? ` (${chordLabel(gridShortcut)})` : '')
+          : 'This track has no beatgrid') + shortcut('deck.gridEdit')
   )
 </script>
 
@@ -90,48 +84,24 @@
   }}
 />
 
-<section
-  class="relative shrink-0 border-b border-line-soft bg-surface"
-  aria-label="Deck"
-  ondragenter={drop.ondragenter}
-  ondragover={drop.ondragover}
-  ondragleave={drop.ondragleave}
-  ondrop={drop.ondrop}
+<DeckShell
+  class="shrink-0 border-b border-line-soft bg-surface"
+  waveClass={player.grid.editing && player.waveform ? 'h-[114px]' : 'h-[136px]'}
+  empty="Select a track, or drag one here, to view its waveform"
+  onload={(track) => {
+    decks.focus(player)
+    void player.load(track)
+  }}
 >
-  {#if drop.over}
-    <div
-      class="pointer-events-none absolute inset-0 z-30 grid place-items-center rounded-[inherit] border-2 border-accent bg-accent-soft"
-    >
-      <span class="rounded bg-bg/80 px-2 py-1 text-[12px] font-semibold text-accent">Load on the deck</span>
-    </div>
-  {/if}
-  <div
-    class={[
-      'relative border-b border-line-soft bg-[oklch(0.12_0.005_260)]',
-      player.grid.editing && player.waveform ? 'h-[114px]' : 'h-[136px]'
-    ]}
-  >
-    {#if player.waveform}
-      <WaveformDetail />
-    {:else}
-      <div class="grid h-full place-items-center text-[12px] text-faint">
-        {#if player.loading}
-          <LoaderCircle class="size-4 animate-spin" />
-        {:else if track}
-          No analysis data for this track
-        {:else}
-          Select a track, or drag one here, to view its waveform
-        {/if}
-      </div>
-    {/if}
+  {#snippet overlay()}
     <WaveformToolbar />
-  </div>
+  {/snippet}
   {#if player.grid.editing && player.waveform}
     <TempoLane />
   {/if}
 
   <!--
-    The mix deck's pieces, packed into two columns so nothing is left empty. On the left, the
+    The pieces it shares with the mix deck, packed into two columns so nothing is left empty. On the left, the
     playing BPM and key, then the track and its clock, with play, cue and loops under them; on the
     right, the overview with the hot cues centred under it. A switch pinned at the head of the hot
     cue row swaps them for the beatgrid editor, centred in the same space so the switch never moves.
@@ -142,16 +112,14 @@
     <div class="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2.5 px-4 py-3">
       <div class="flex items-center gap-3">
         <TempoReadout bpm={currentBpm} />
-        <TrackInfo />
+        <TrackInfo class="w-[360px] shrink-0" />
       </div>
-      <div class="relative h-[52px] overflow-hidden rounded bg-[oklch(0.12_0.005_260)]">
+      <div class="relative h-[52px] overflow-hidden rounded bg-wave">
         <WaveformOverview />
       </div>
 
       <div class="flex items-center gap-3">
-        <div class="flex items-center gap-1.5">
-          <Transport />
-        </div>
+        <Transport />
         <div class="flex items-center gap-1.5">
           <LoopControls />
         </div>
@@ -186,4 +154,4 @@
       </div>
     </div>
   </div>
-</section>
+</DeckShell>
