@@ -30,7 +30,7 @@
       (playShortcut ? ` (${chordLabel(playShortcut)})` : '')
   )
 
-  // Every deck shortcut works here as in prepare mode, bar track prep: on deck A as it is, on deck
+  // Every deck shortcut works here as in edit mode, bar track prep: on deck A as it is, on deck
   // B with Shift added. A deck's own play lines a synced follower up with the master.
   const mixKeys = (player: Player): ReturnType<typeof playKeys> => playKeys(player, () => mixer.toggleDeck(player))
   $effect(() => keybinds.register(mixKeys(a)))

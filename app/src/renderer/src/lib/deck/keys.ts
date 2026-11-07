@@ -31,7 +31,7 @@ export function playKeys(player: Player, playPause: () => void = () => player.to
   }
 }
 
-/** Everything a deck does in prepare mode: playing it, and setting and deleting its cues. */
+/** Everything a deck does in edit mode: playing it, and setting and deleting its cues. */
 export function deckKeys(player: Player): DeckHandlers {
   return {
     ...playKeys(player),
