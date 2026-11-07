@@ -15,8 +15,9 @@
    * One side of the mixer: the track, where its playhead is, the scrolling waveform and an overview
    * split into the sections between cues. Set the playhead by clicking the overview or dragging the
    * scrolling waveform; the mixer's play starts both, or the deck's own play and cue start it alone.
-   * Loop in, out and reloop/exit work as on a CDJ. Below the track sit its tempo and key, each
-   * moved a step at a time, and the switches that make it the master and hold its key.
+   * Loop in, out and reloop/exit work as on a CDJ. They share a row under the track with its tempo
+   * and key, each moved a step at a time, and the switches that make it the master and hold its key;
+   * a narrow deck wraps the tempo side onto a second line.
    */
   let {
     player,
@@ -210,8 +211,8 @@
     >
   </div>
 
-  <div class="flex items-center gap-3 px-3 pt-3">
-    <div class="size-11 shrink-0 overflow-hidden rounded-md bg-raised">
+  <div class="flex items-center gap-2.5 px-3 pt-2.5">
+    <div class="size-10 shrink-0 overflow-hidden rounded-md bg-raised">
       {#if track?.hasArtwork}
         <img src={artworkUrl(track.id, 'm')} alt="" class="size-full object-cover" draggable="false" />
       {:else}
@@ -234,56 +235,7 @@
     </div>
   </div>
 
-  <div class="flex items-center gap-2 px-3 pt-2.5">
-    <button
-      class={[
-        'h-6 rounded px-2 text-[10.5px] font-bold tracking-wide transition-colors disabled:opacity-40',
-        isMaster ? 'bg-accent text-bg' : 'border border-line text-faint hover:bg-hover hover:text-muted'
-      ]}
-      disabled={!track}
-      aria-pressed={isMaster}
-      title={isMaster ? `Deck ${label} is the master` : `Make deck ${label} the master the other deck syncs to`}
-      onclick={() => mixer.setMaster(player)}>MASTER</button
-    >
-
-    <div class="ml-auto flex items-center gap-2">
-      {@render stepper(
-        'BPM',
-        track ? formatBpm(bpm) : '—',
-        rate !== 1 ? 'text-accent' : 'text-fg',
-        null,
-        bpmTitle,
-        !track || following || !(ownBpm(player) > 0),
-        (step) => mixer.stepBpm(player, step),
-        () => mixer.resetTempo(player)
-      )}
-      {@render stepper(
-        'Key',
-        key || '—',
-        null,
-        key ? keyColor(key) : null,
-        keyTitle,
-        !track,
-        (step) => mixer.stepKey(player, step),
-        () => mixer.resetKey(player),
-        signed(keyShift)
-      )}
-      <button
-        class={[
-          'h-6 rounded px-1.5 text-[10.5px] font-bold transition-colors disabled:opacity-40',
-          masterTempo ? 'bg-accent-soft text-accent' : 'border border-line text-faint hover:bg-hover hover:text-muted'
-        ]}
-        disabled={!track}
-        aria-pressed={masterTempo}
-        title={masterTempo
-          ? 'Master tempo on: the key holds when the tempo moves'
-          : 'Master tempo off: the key moves with the tempo'}
-        onclick={() => mixer.toggleMasterTempo(player)}>MT</button
-      >
-    </div>
-  </div>
-
-  <div class="flex items-center gap-2 px-3 pt-2.5">
+  <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-3 pt-2">
     <button
       class={[
         'grid size-7 place-items-center rounded-full transition disabled:opacity-30',
@@ -322,7 +274,7 @@
       title={cueTitle}>CUE</button
     >
 
-    <div class="ml-auto flex items-center gap-1" role="group" aria-label="Deck {label} loop">
+    <div class="flex items-center gap-1" role="group" aria-label="Deck {label} loop">
       <button
         class={loopButton(false)}
         disabled={noAudio}
@@ -336,17 +288,66 @@
         title="Loop out{shortcut('deck.loopOut')}">OUT</button
       >
       <button
-        class={['w-[52px]', ...loopButton(!!player.loop?.active)]}
+        class={['inline-grid place-items-center', ...loopButton(!!player.loop?.active)]}
         disabled={!player.loop}
         onclick={() => player.reloopExit()}
         aria-pressed={!!player.loop?.active}
         title="{player.loop?.active ? 'Exit the loop' : 'Back into the loop'}{shortcut('deck.reloopExit')}"
-        >{player.loop?.active ? 'EXIT' : 'RELOOP'}</button
+      >
+        <!-- Both labels share one cell, so the button is as wide as the longer and keeps its width. -->
+        <span class={['col-start-1 row-start-1', !player.loop?.active && 'invisible']}>EXIT</span>
+        <span class={['col-start-1 row-start-1', player.loop?.active && 'invisible']}>RELOOP</span>
+      </button>
+    </div>
+
+    <div class="ml-auto flex items-center gap-2">
+      <button
+        class={[
+          'h-6 rounded px-2 text-[10.5px] font-bold tracking-wide transition-colors disabled:opacity-40',
+          isMaster ? 'bg-accent text-bg' : 'border border-line text-faint hover:bg-hover hover:text-muted'
+        ]}
+        disabled={!track}
+        aria-pressed={isMaster}
+        title={isMaster ? `Deck ${label} is the master` : `Make deck ${label} the master the other deck syncs to`}
+        onclick={() => mixer.setMaster(player)}>MASTER</button
+      >
+      {@render stepper(
+        'BPM',
+        track ? formatBpm(bpm) : '—',
+        rate !== 1 ? 'text-accent' : 'text-fg',
+        null,
+        bpmTitle,
+        !track || following || !(ownBpm(player) > 0),
+        (step) => mixer.stepBpm(player, step),
+        () => mixer.resetTempo(player)
+      )}
+      {@render stepper(
+        'Key',
+        key || '—',
+        null,
+        key ? keyColor(key) : null,
+        keyTitle,
+        !track,
+        (step) => mixer.stepKey(player, step),
+        () => mixer.resetKey(player),
+        signed(keyShift)
+      )}
+      <button
+        class={[
+          'h-6 rounded px-1.5 text-[10.5px] font-bold transition-colors disabled:opacity-40',
+          masterTempo ? 'bg-accent-soft text-accent' : 'border border-line text-faint hover:bg-hover hover:text-muted'
+        ]}
+        disabled={!track}
+        aria-pressed={masterTempo}
+        title={masterTempo
+          ? 'Master tempo on: the key holds when the tempo moves'
+          : 'Master tempo off: the key moves with the tempo'}
+        onclick={() => mixer.toggleMasterTempo(player)}>MT</button
       >
     </div>
   </div>
 
-  <div class="px-3 pt-2 pb-3">
+  <div class="px-3 pt-2 pb-2.5">
     <div class="relative h-16 overflow-hidden rounded bg-[oklch(0.12_0.005_260)]">
       <WaveformOverview sections />
     </div>
