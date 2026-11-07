@@ -9,6 +9,8 @@ export interface TrackActions {
   analyse: (tracks: Track[]) => void
   convert: (tracks: Track[], preset: ConvertPreset) => void
   autoRelocate: (tracks: Track[]) => void
+  /** Loads the track on edit mode's deck and switches to edit mode. */
+  openInEdit: (track: Track) => void
 }
 
 /** What the shell hands the mode it shows. */

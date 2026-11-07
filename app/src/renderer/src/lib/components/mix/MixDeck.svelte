@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { LoaderCircle, Minus, Music, Pause, Play, Plus } from '@lucide/svelte'
+  import { LoaderCircle, Minus, Music, Pause, Play, Plus, SquarePen } from '@lucide/svelte'
   import { artworkUrl } from '$lib/api'
   import { setPlayer } from '$lib/deck/context'
   import { TrackDrop } from '$lib/deck/drop.svelte'
@@ -9,6 +9,7 @@
   import { heardKey } from '$lib/mix/harmonic'
   import { ownBpm, playingBpm, type Mixer } from '$lib/mixer.svelte'
   import type { Player } from '$lib/player.svelte'
+  import type { Track } from '$lib/types'
   import WaveformDetail from '../WaveformDetail.svelte'
   import WaveformOverview from '../WaveformOverview.svelte'
 
@@ -25,7 +26,8 @@
     mixer,
     label,
     focused,
-    onfocus
+    onfocus,
+    onedit
   }: {
     /** Fixed for the component's life: key the deck on it to swap. */
     player: Player
@@ -34,6 +36,8 @@
     /** Double-clicked rows load here. */
     focused: boolean
     onfocus: () => void
+    /** Opens the deck's track in edit mode. */
+    onedit: (track: Track) => void
   } = $props()
 
   // svelte-ignore state_referenced_locally
@@ -210,6 +214,14 @@
         focused ? 'bg-accent text-bg' : 'bg-raised text-muted'
       ]}>{label}</span
     >
+    {#if track}
+      <button
+        class="absolute top-2 right-2 z-10 grid size-6 place-items-center rounded bg-raised/80 text-muted transition-colors hover:bg-hover hover:text-fg"
+        aria-label="Open deck {label}’s track in edit mode"
+        title="Open in edit mode"
+        onclick={() => onedit(track)}><SquarePen class="size-3.5" /></button
+      >
+    {/if}
   </div>
 
   <div class="flex items-center gap-2.5 px-3 pt-2.5">

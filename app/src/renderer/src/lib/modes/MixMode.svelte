@@ -73,7 +73,14 @@
 </script>
 
 {#snippet deck(player: Player, label: string)}
-  <MixDeck {player} {mixer} {label} focused={decks.focused === player} onfocus={() => decks.focus(player)} />
+  <MixDeck
+    {player}
+    {mixer}
+    {label}
+    focused={decks.focused === player}
+    onfocus={() => decks.focus(player)}
+    onedit={actions.openInEdit}
+  />
 {/snippet}
 
 <div class="flex shrink-0 gap-2 border-b border-line-soft bg-bg p-2">

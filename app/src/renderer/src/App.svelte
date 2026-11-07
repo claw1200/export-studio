@@ -127,7 +127,13 @@
     })
   }
 
-  const actions: TrackActions = { edit, remove, analyse, convert, autoRelocate }
+  function openInEdit(track: Track): void {
+    const edit = modeById('edit')
+    void decks.claim(edit.decks[0]).load(track)
+    setMode(edit.id)
+  }
+
+  const actions: TrackActions = { edit, remove, analyse, convert, autoRelocate, openInEdit }
 
   function removeSelectedFromPlaylist(): void {
     const playlist = library.sourcePlaylist
