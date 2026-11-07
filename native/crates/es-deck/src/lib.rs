@@ -13,6 +13,7 @@ mod block;
 mod clock;
 mod deck;
 mod fade;
+mod isolator;
 mod reader;
 mod scrub;
 mod sink;
@@ -22,8 +23,9 @@ mod tempo;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-pub use block::{BLOCK_FRAMES, RING_BLOCKS};
+pub use block::{BLOCK_FRAMES, RING_BLOCKS, RING_CAPACITY};
 pub use clock::DeckSnapshot;
 pub use fade::FADE_FRAMES;
 pub use sink::{CpalSink, NullSink, Render, Sink};
@@ -67,6 +69,12 @@ pub enum DeckEvent {
 /// Receives deck events. Called from a decode thread, never from the audio callback.
 pub type EventSink = Arc<dyn Fn(DeckEvent) + Send + Sync>;
 
+/// Longest `play_together` waits for the decks' audio to be queued before starting anyway.
+const READY_WAIT: Duration = Duration::from_millis(250);
+
+/// Furthest the key can be moved either way, in semitones.
+pub const MAX_KEY_SHIFT: i32 = 12;
+
 /// Frames of a loop end closer than this to the playhead mean the ring already holds audio past
 /// it, so setting the loop has to resync rather than wait for the decoder to reach the out point.
 const RING_REACH: u64 = (RING_BLOCKS * BLOCK_FRAMES) as u64;
@@ -76,7 +84,14 @@ pub struct Engine {
     sink: Arc<dyn Sink>,
     sample_rate: u32,
     master: Arc<AtomicU32>,
+    /// Each deck's own level, linear, applied before the master: a channel fader or crossfader.
+    gains: Vec<Arc<AtomicU32>>,
+    /// Each deck's isolator low level, linear, 0 to 1, as f32 bits. Negative is out of the path.
+    lows: Vec<Arc<AtomicU32>>,
 }
+
+/// A deck's isolator out of its path: its signal goes through untouched.
+const ISOLATOR_OFF: f32 = -1.0;
 
 impl Engine {
     /// `decks` decks on the system's default output.
@@ -97,7 +112,7 @@ impl Engine {
         let mut stretchers = Vec::with_capacity(decks);
         let mut readers = Vec::with_capacity(decks);
         for clock in &clocks {
-            let (producer, consumer) = rtrb::RingBuffer::<block::Block>::new(RING_BLOCKS);
+            let (producer, consumer) = rtrb::RingBuffer::<block::Block>::new(RING_CAPACITY);
             let (stretcher_in, stretcher_out) = rtrb::RingBuffer::<Box<Stretcher>>::new(1);
             producers.push(producer);
             stretchers.push(stretcher_in);
@@ -106,12 +121,48 @@ impl Engine {
 
         let master = Arc::new(AtomicU32::new(1.0_f32.to_bits()));
         let level = Arc::clone(&master);
+        let gains: Vec<Arc<AtomicU32>> = (0..decks)
+            .map(|_| Arc::new(AtomicU32::new(1.0_f32.to_bits())))
+            .collect();
+        let deck_levels: Vec<Arc<AtomicU32>> = gains.iter().map(Arc::clone).collect();
+        let lows: Vec<Arc<AtomicU32>> = (0..decks)
+            .map(|_| Arc::new(AtomicU32::new(ISOLATOR_OFF.to_bits())))
+            .collect();
+        let deck_lows: Vec<Arc<AtomicU32>> = lows.iter().map(Arc::clone).collect();
+        let mut isolators: Vec<Option<isolator::Isolator>> = (0..decks).map(|_| None).collect();
         let rate = Arc::new(AtomicU32::new(0));
         let callback_rate = Arc::clone(&rate);
         let mut smoothed: Option<Smoothed> = None;
+        let mut deck_smoothed: Vec<Option<Smoothed>> = (0..decks).map(|_| None).collect();
+        // Each deck mixes here first so its own level can be applied. Sized for a large device
+        // buffer up front so the callback does not allocate.
+        let mut scratch: Vec<f32> = vec![0.0; 16_384];
         let render: Render = Box::new(move |out: &mut [f32]| {
-            for reader in &mut readers {
-                reader.mix_into(out);
+            if scratch.len() < out.len() {
+                scratch.resize(out.len(), 0.0);
+            }
+            let sample_rate = callback_rate.load(Ordering::Relaxed);
+            for ((((reader, level), smooth), low), isolator) in readers
+                .iter_mut()
+                .zip(&deck_levels)
+                .zip(&mut deck_smoothed)
+                .zip(&deck_lows)
+                .zip(&mut isolators)
+            {
+                let target = f32::from_bits(level.load(Ordering::Relaxed));
+                let smooth = smooth.get_or_insert_with(|| Smoothed::new(target, sample_rate, 10.0));
+                let deck_out = &mut scratch[..out.len()];
+                deck_out.fill(0.0);
+                reader.mix_into(deck_out);
+                let low = f32::from_bits(low.load(Ordering::Relaxed));
+                isolator
+                    .get_or_insert_with(|| isolator::Isolator::new(sample_rate))
+                    .process(deck_out, (low >= 0.0).then_some(low));
+                for (frame, mixed) in out.chunks_exact_mut(2).zip(deck_out.chunks_exact(2)) {
+                    let gain = smooth.step(target);
+                    frame[0] += mixed[0] * gain;
+                    frame[1] += mixed[1] * gain;
+                }
             }
             let target = f32::from_bits(level.load(Ordering::Relaxed));
             let smoothed = smoothed.get_or_insert_with(|| {
@@ -149,6 +200,8 @@ impl Engine {
             sink,
             sample_rate,
             master,
+            gains,
+            lows,
         })
     }
 
@@ -207,6 +260,39 @@ impl Engine {
         self.settle();
     }
 
+    /// Starts several decks in one step, so they begin in the same device callback and stay
+    /// as far apart as their playheads say. Decks that are not loaded are left alone.
+    pub fn play_together(&self, decks: &[DeckId]) {
+        let ready: Vec<(DeckId, &deck::DeckHandle)> = decks
+            .iter()
+            .filter_map(|&deck| self.deck(deck).map(|handle| (deck, handle)))
+            .filter(|(_, handle)| handle.clock().loaded())
+            .collect();
+        // Each deck may have just been moved. Wait (briefly) until all have the audio for where
+        // they are now queued, so none starts a buffer late on an empty ring.
+        let deadline = Instant::now() + READY_WAIT;
+        while ready.iter().any(|(_, handle)| !handle.clock().buffered())
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        // As with `play`, a deck that played to its end starts over.
+        for &(deck, handle) in &ready {
+            let clock = handle.clock();
+            if clock.end_of_stream() && clock.total() > 0 && clock.position() >= clock.total() {
+                self.seek_frames(deck, 0);
+            }
+        }
+        // Flip every deck to playing before waking any, so no callback sees only some started.
+        for (_, handle) in &ready {
+            handle.clock().set_playing(true);
+        }
+        for (_, handle) in &ready {
+            handle.send(deck::Command::Wake);
+        }
+        self.settle();
+    }
+
     pub fn pause(&self, deck: DeckId) {
         let Some(handle) = self.deck(deck) else {
             return;
@@ -220,6 +306,24 @@ impl Engine {
     /// and rounding it to a whole millisecond moves it.
     pub fn seek(&self, deck: DeckId, ms: f64) {
         self.seek_frames(deck, self.to_frames(ms));
+    }
+
+    /// Moves the playhead by `delta_ms` from wherever it is when this arrives, not from where a
+    /// caller last saw it. While playing the deck keeps time through the move: the moment spent
+    /// fading out and fetching the new audio is skipped at the deck's tempo, so it lands where it
+    /// would be had the jump been instant. That is what lining one deck up with another needs.
+    pub fn nudge(&self, deck: DeckId, delta_ms: f64) {
+        let Some(handle) = self.deck(deck) else {
+            return;
+        };
+        let clock = handle.clock();
+        if !clock.loaded() || !delta_ms.is_finite() {
+            return;
+        }
+        let delta = (delta_ms * f64::from(self.sample_rate) / 1000.0).round() as i64;
+        let frame = u64::try_from(clock.position() as i64 + delta).unwrap_or(0);
+        let keep_time = clock.playing() && !clock.scrubbing();
+        self.move_to(deck, frame, keep_time);
     }
 
     /// Pauses and moves in one step, which is what releasing CUE does. Two separate commands
@@ -287,6 +391,12 @@ impl Engine {
     }
 
     pub fn seek_frames(&self, deck: DeckId, frame: u64) {
+        self.move_to(deck, frame, false);
+    }
+
+    /// Moves the playhead to `frame`. The time-keeping mark is set with the move, never apart from
+    /// it, so the callback takes it up with this move and no other.
+    fn move_to(&self, deck: DeckId, frame: u64, keep_time: bool) {
         let Some(handle) = self.deck(deck) else {
             return;
         };
@@ -295,6 +405,7 @@ impl Engine {
         let frame = if total > 0 { frame.min(total) } else { frame };
         // A seek ends any scrub: the deck is wherever it was sent.
         clock.set_scrubbing(false);
+        clock.set_keep_time(keep_time);
         // Position and generation move here, not when the deck thread gets to the command, so
         // the callback stops stamping old audio's position over this one immediately.
         clock.set_position(frame);
@@ -356,8 +467,8 @@ impl Engine {
 
     /// Playback speed as a multiple of the file's, heard from the next callback. A deck keeps its
     /// tempo across loads, as a pitch fader stays where it was left. With master tempo, crossing
-    /// the file's own speed requeues: that is where playback swaps between the raw frames and the
-    /// stretcher, and the stretcher has to be primed from the playhead.
+    /// the file's own speed moves the deck onto or off the time-stretcher; the callback does that
+    /// in place, so the deck keeps time through it.
     pub fn set_tempo(&self, deck: DeckId, tempo: f64) {
         let Some(handle) = self.deck(deck) else {
             return;
@@ -367,35 +478,29 @@ impl Engine {
         } else {
             1.0
         };
-        let clock = handle.clock();
-        let previous = clock.tempo();
-        clock.set_tempo(tempo);
-        if clock.master_tempo()
-            && (previous == 1.0) != (tempo == 1.0)
-            && clock.loaded()
-            && !clock.scrubbing()
-        {
-            self.seek_frames(deck, clock.position());
-            handle.send(deck::Command::Wake);
-        }
+        handle.clock().set_tempo(tempo);
     }
 
-    /// Master tempo: keep the key when the tempo changes. Switching requeues from the playhead,
-    /// since the stretcher has to be primed with audio the ring has already passed. At the file's
-    /// own speed the frames pass through either way, so the switch leaves playback where it is.
+    /// Master tempo: keep the key when the tempo changes. Away from the file's own speed this moves
+    /// the deck onto or off the time-stretcher, in place in the callback, so it keeps time. At the
+    /// file's own speed the frames pass through either way.
     pub fn set_master_tempo(&self, deck: DeckId, on: bool) {
         let Some(handle) = self.deck(deck) else {
             return;
         };
-        let clock = handle.clock();
-        if clock.master_tempo() == on {
+        handle.clock().set_master_tempo(on);
+    }
+
+    /// Moves the deck's key by `semitones`, within an octave either way, keeping its speed. Any
+    /// shift plays through the time-stretcher; back at zero the deck plays as it did before. Both
+    /// moves happen in place in the callback, so the deck keeps time through them.
+    pub fn set_key_shift(&self, deck: DeckId, semitones: i32) {
+        let Some(handle) = self.deck(deck) else {
             return;
-        }
-        clock.set_master_tempo(on);
-        if clock.tempo() != 1.0 && clock.loaded() && !clock.scrubbing() {
-            self.seek_frames(deck, clock.position());
-            handle.send(deck::Command::Wake);
-        }
+        };
+        handle
+            .clock()
+            .set_key_shift(semitones.clamp(-MAX_KEY_SHIFT, MAX_KEY_SHIFT));
     }
 
     /// The master level, linear, 0 to 1.
@@ -406,6 +511,31 @@ impl Engine {
             1.0
         };
         self.master.store(safe.to_bits(), Ordering::Relaxed);
+    }
+
+    /// One deck's own level, linear, 0 to 1, glided like the master so a fader move never clicks.
+    pub fn set_deck_gain(&self, deck: DeckId, gain: f32) {
+        let safe = if gain.is_finite() {
+            gain.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        if let Some(level) = self.gains.get(deck) {
+            level.store(safe.to_bits(), Ordering::Relaxed);
+        }
+    }
+
+    /// One deck's isolator low band, linear, 0 (killed) to 1 (full), or `None` to take the
+    /// isolator out of its path so the deck plays untouched. Glided, so a move never clicks.
+    pub fn set_deck_low(&self, deck: DeckId, gain: Option<f32>) {
+        let value = match gain {
+            Some(g) if g.is_finite() => g.clamp(0.0, 1.0),
+            Some(_) => 1.0,
+            None => ISOLATOR_OFF,
+        };
+        if let Some(low) = self.lows.get(deck) {
+            low.store(value.to_bits(), Ordering::Relaxed);
+        }
     }
 
     pub fn snapshot(&self, deck: DeckId) -> Option<DeckSnapshot> {

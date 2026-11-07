@@ -1,4 +1,5 @@
 import type { DeckEvent, DeckTick, Tick } from '../../../../preload/audio'
+import { MAX_KEY_SHIFT } from '../../../../shared/engine'
 import { type Anchor, extrapolate, follow, NO_ANCHOR, pinned } from './clock'
 
 /** Longer than this without an animation frame and ticks set the position directly. */
@@ -33,6 +34,8 @@ export class Deck {
   tempo = $state(1)
   /** Keep the key when the tempo changes. */
   masterTempo = $state(false)
+  /** Semitones the key is moved by, on top of what the tempo does to it. Kept across loads. */
+  keyShift = $state(0)
   /** Called when a load finishes, with the engine's error if it failed. */
   onSettled: ((error: string | null) => void) | null = null
 
@@ -82,12 +85,42 @@ export class Deck {
   }
 
   play(): void {
-    if (this.error) return
-    this.playing = true
-    if (!this.ready) return
-    this.anchor = { ...pinned(this.anchor, this.position, performance.now()), playing: !this.scrubbing }
+    if (!this.beginPlay()) return
     this.send({ op: 'play', deck: this.index })
     this.startFrames()
+  }
+
+  /**
+   * Starts every deck in `decks` in the same instant, so the gap between their playheads holds.
+   * A deck still loading starts on its own once it is ready, as `play` would.
+   */
+  static playTogether(decks: Deck[]): void {
+    const ready = decks.filter((deck) => deck.beginPlay())
+    if (!ready.length) return
+    const seq = window.audio.send({ op: 'playTogether', decks: ready.map((deck) => deck.index) })
+    for (const deck of ready) {
+      deck.sent = seq
+      deck.startFrames()
+    }
+  }
+
+  /** This deck's own level, linear, 0 to 1, under the master. */
+  setGain(gain: number): void {
+    this.send({ op: 'deckGain', deck: this.index, gain })
+  }
+
+  /** This deck's isolator low band, linear, 0 to 1. Null plays the deck without the isolator. */
+  setLow(gain: number | null): void {
+    this.send({ op: 'deckLow', deck: this.index, gain })
+  }
+
+  /** Marks the deck playing. False when the engine cannot start it now. */
+  private beginPlay(): boolean {
+    if (this.error) return false
+    this.playing = true
+    if (!this.ready) return false
+    this.anchor = { ...pinned(this.anchor, this.position, performance.now()), playing: !this.scrubbing }
+    return true
   }
 
   pause(): void {
@@ -99,6 +132,18 @@ export class Deck {
   seek(seconds: number): void {
     this.move(seconds)
     if (this.ready) this.send({ op: 'seek', deck: this.index, ms: seconds * 1000 })
+    else if (this.pending) this.pending.seek = true
+  }
+
+  /**
+   * Moves by `seconds` from wherever the engine's playhead is when the command lands, which a
+   * position seen here a moment ago no longer is. While playing the engine keeps time through the
+   * move, so this is how one deck is lined up with another.
+   */
+  nudge(seconds: number): void {
+    if (!Number.isFinite(seconds) || seconds === 0) return
+    this.move(Math.max(0, Math.min(this.position + seconds, this.duration || Infinity)))
+    if (this.ready) this.send({ op: 'nudge', deck: this.index, ms: seconds * 1000 })
     else if (this.pending) this.pending.seek = true
   }
 
@@ -176,6 +221,14 @@ export class Deck {
   setMasterTempo(on: boolean): void {
     this.masterTempo = on
     this.send({ op: 'masterTempo', deck: this.index, on })
+  }
+
+  /** Moves the key by whole semitones, keeping the speed. The engine holds it within an octave. */
+  setKeyShift(semitones: number): void {
+    const shift = Math.max(-MAX_KEY_SHIFT, Math.min(MAX_KEY_SHIFT, Math.round(semitones)))
+    if (shift === this.keyShift) return
+    this.keyShift = shift
+    this.send({ op: 'keyShift', deck: this.index, semitones: shift })
   }
 
   private hold(seconds: number): void {

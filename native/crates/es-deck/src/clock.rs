@@ -1,7 +1,7 @@
 //! A deck's shared state: written by the control side and the decode thread, read by the
 //! callback and the interface. Atomics only, so the callback never waits on a reader.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 #[derive(Debug, Default)]
@@ -34,6 +34,12 @@ pub struct DeckClock {
     tempo: AtomicU64,
     /// Time-stretch at a changed tempo rather than resample, so the key stays the same.
     master_tempo: AtomicBool,
+    /// Semitones the key is moved by, on top of whatever the tempo does to it.
+    key_shift: AtomicI32,
+    /// The generation whose audio is queued deep enough to start without running dry.
+    ready_generation: AtomicU32,
+    /// The pending move keeps time: the deck lands where it would be had the move been instant.
+    keep_time: AtomicBool,
 }
 
 /// One deck at one instant.
@@ -52,6 +58,7 @@ pub struct DeckSnapshot {
     pub looping: bool,
     pub tempo: f64,
     pub master_tempo: bool,
+    pub key_shift: i32,
 }
 
 impl DeckClock {
@@ -71,6 +78,7 @@ impl DeckClock {
             looping: self.looping(),
             tempo: self.tempo(),
             master_tempo: self.master_tempo(),
+            key_shift: self.key_shift(),
         }
     }
 
@@ -255,5 +263,50 @@ impl DeckClock {
 
     pub fn set_master_tempo(&self, on: bool) {
         self.master_tempo.store(on, Ordering::Release);
+    }
+
+    /// Marks the next move as one that keeps time.
+    pub fn set_keep_time(&self, on: bool) {
+        self.keep_time.store(on, Ordering::Release);
+    }
+
+    /// Whether the move just taken up keeps time, clearing the mark.
+    pub fn take_keep_time(&self) -> bool {
+        self.keep_time.swap(false, Ordering::AcqRel)
+    }
+
+    /// The decode thread has queued enough of `generation` to start playing it.
+    pub fn set_ready(&self, generation: u32) {
+        self.ready_generation.store(generation, Ordering::Release);
+    }
+
+    /// Audio for where the deck is now is queued, or there is no more to queue.
+    pub fn buffered(&self) -> bool {
+        self.ready_generation.load(Ordering::Acquire) == self.generation() || self.end_of_stream()
+    }
+
+    pub fn key_shift(&self) -> i32 {
+        self.key_shift.load(Ordering::Acquire)
+    }
+
+    pub fn set_key_shift(&self, semitones: i32) {
+        self.key_shift.store(semitones, Ordering::Release);
+    }
+
+    /// The deck plays through the time-stretcher: master tempo away from the file's speed, or any
+    /// key shift. Otherwise it plays the file directly or resamples it.
+    pub fn stretched(&self) -> bool {
+        self.key_shift() != 0 || self.master_tempo() && self.tempo() != 1.0
+    }
+
+    /// The pitch heard, as a multiple of the file's: the key shift, and the tempo too when master
+    /// tempo is off, as a record's pitch follows its speed.
+    pub fn pitch(&self) -> f32 {
+        let key = 2_f32.powf(self.key_shift() as f32 / 12.0);
+        if self.master_tempo() {
+            key
+        } else {
+            key * self.tempo() as f32
+        }
     }
 }

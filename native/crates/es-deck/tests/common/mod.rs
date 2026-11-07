@@ -59,12 +59,16 @@ pub struct Rig {
 
 impl Rig {
     pub fn new() -> Self {
+        Self::with_decks(1)
+    }
+
+    pub fn with_decks(decks: usize) -> Self {
         let events: Arc<Mutex<Vec<DeckEvent>>> = Arc::default();
         let log = Arc::clone(&events);
         let sink_events: EventSink = Arc::new(move |e| log.lock().unwrap().push(e));
         let slot: Arc<Mutex<Option<Arc<NullSink>>>> = Arc::default();
         let keep = Arc::clone(&slot);
-        let engine = Engine::with_sink(1, &sink_events, move |render| {
+        let engine = Engine::with_sink(decks, &sink_events, move |render| {
             let sink = Arc::new(NullSink::new(render, RATE));
             *keep.lock().unwrap() = Some(Arc::clone(&sink));
             Ok(sink as Arc<dyn Sink>)
@@ -79,8 +83,12 @@ impl Rig {
     }
 
     pub fn load(&self, path: &Path) {
-        self.engine.load(0, path, 1);
-        wait_for(|| self.engine.snapshot(0).unwrap().loaded);
+        self.load_on(0, path);
+    }
+
+    pub fn load_on(&self, deck: usize, path: &Path) {
+        self.engine.load(deck, path, 1);
+        wait_for(|| self.engine.snapshot(deck).unwrap().loaded);
         // Let the ring fill so playback starts without an underrun.
         self.settle_ring();
     }

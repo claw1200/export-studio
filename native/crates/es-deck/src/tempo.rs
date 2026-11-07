@@ -87,9 +87,10 @@ impl Varispeed {
 
 /// Output frames stretched per call into the stretcher.
 const CHUNK: usize = 128;
-/// File positions remembered for the frames fed in: more than the stretcher's latency at the
-/// fastest tempo, so the frame being heard can always be looked up.
-const POSITIONS: usize = 1 << 15;
+/// File positions (and samples) remembered for the frames fed in: more than the stretcher's
+/// latency at the fastest tempo, so the frame being heard can always be looked up, and every
+/// frame fed in but not yet heard can be handed back.
+pub(crate) const POSITIONS: usize = 1 << 15;
 
 /// Signalsmith Stretch, with buffers sized up front so the callback never allocates.
 pub struct Stretcher {
@@ -101,6 +102,10 @@ pub struct Stretcher {
     out_len: usize,
     out_read: usize,
     positions: Vec<u64>,
+    /// The samples of the frames in `positions`, interleaved stereo.
+    history: Vec<f32>,
+    /// The input frame (counted like `fed`) behind the last output frame, once there is one.
+    last_heard: Option<u64>,
     /// Frames fed in since the last prime, and how many there were before the current chunk.
     fed: u64,
     chunk_start: u64,
@@ -110,6 +115,8 @@ pub struct Stretcher {
     input_latency: usize,
     output_latency: usize,
     primed: bool,
+    /// The pitch the stretcher was last set to, as a multiple of the file's.
+    pitch: f32,
 }
 
 impl Stretcher {
@@ -129,6 +136,8 @@ impl Stretcher {
             out_len: 0,
             out_read: 0,
             positions: vec![0; POSITIONS],
+            history: vec![0.0; POSITIONS * 2],
+            last_heard: None,
             fed: 0,
             chunk_start: 0,
             chunk_in: 0,
@@ -136,6 +145,7 @@ impl Stretcher {
             input_latency,
             output_latency,
             primed: false,
+            pitch: 1.0,
         };
         stretcher.warm();
         stretcher
@@ -170,6 +180,23 @@ impl Stretcher {
         self.chunk_in = 0;
         self.carry = 0.0;
         self.primed = false;
+        self.last_heard = None;
+    }
+
+    /// Hands every frame fed in but not yet heard back to the front of `feed`, so whatever plays
+    /// next picks up on the frame after the last one heard: leaving the stretcher neither skips
+    /// its latency's worth of audio nor repeats any. The stretcher is spent afterwards.
+    pub fn give_back(&mut self, feed: &mut Feed) {
+        let from = self.last_heard.map_or(0, |heard| heard + 1);
+        for index in (from..self.fed).rev() {
+            let i = (index as usize) % POSITIONS;
+            feed.unread((
+                self.history[i * 2],
+                self.history[i * 2 + 1],
+                self.positions[i],
+            ));
+        }
+        self.reset();
     }
 
     fn latency_frames(&self, rate: f64) -> usize {
@@ -184,7 +211,10 @@ impl Stretcher {
             };
             self.input[got * 2] = left;
             self.input[got * 2 + 1] = right;
-            self.positions[((self.fed + got as u64) as usize) % POSITIONS] = at;
+            let i = ((self.fed + got as u64) as usize) % POSITIONS;
+            self.positions[i] = at;
+            self.history[i * 2] = left;
+            self.history[i * 2 + 1] = right;
             got += 1;
         }
         got
@@ -234,14 +264,31 @@ impl Stretcher {
         self.out_len = CHUNK;
     }
 
+    /// Moves the pitch, as a multiple of the file's. Takes effect from the next chunk.
+    fn set_pitch(&mut self, pitch: f32) {
+        let pitch = if pitch.is_finite() && pitch > 0.0 {
+            pitch
+        } else {
+            1.0
+        };
+        if pitch != self.pitch {
+            self.pitch = pitch;
+            self.stretch.set_transpose_factor(pitch, None);
+        }
+    }
+
+    /// The next output frame at `rate` (file frames per output frame) and `pitch` (a multiple of
+    /// the file's), with the file position it carries.
     pub fn next(
         &mut self,
         feed: &mut Feed,
         pop: bool,
         rate: f64,
+        pitch: f32,
         end_of_stream: bool,
     ) -> Option<(f32, f32, u64)> {
         let rate = rate.max(MIN_TEMPO);
+        self.set_pitch(pitch);
         if !(self.primed || pop && self.prime(feed, rate, end_of_stream)) {
             return None;
         }
@@ -258,6 +305,7 @@ impl Stretcher {
             self.chunk_start as f64 + (i + 1) as f64 * self.chunk_in as f64 / CHUNK as f64;
         let heard = (fed_by_now - self.latency_frames(rate) as f64)
             .clamp(0.0, self.fed.saturating_sub(1) as f64) as u64;
+        self.last_heard = Some(heard);
         let at = self.positions[(heard as usize) % POSITIONS];
         Some((self.output[i * 2], self.output[i * 2 + 1], at))
     }

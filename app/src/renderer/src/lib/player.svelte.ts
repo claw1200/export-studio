@@ -240,10 +240,40 @@ export class Player {
     this.pause()
   }
 
-  resumeAfterPreview(): void {
-    if (!this.returnAfterPreview) return
-    this.returnAfterPreview = false
-    if (this.track) this.deck.play()
+  /** Starts again every player a preview paused, in the same instant so decks stay in step. */
+  static resumeAfterPreview(players: readonly Player[]): void {
+    const back = players.filter((player) => player.returnAfterPreview && player.track)
+    for (const player of players) player.returnAfterPreview = false
+    Deck.playTogether(back.map((player) => player.deck))
+  }
+
+  /** Starts every loaded player in the same instant, keeping the gap between their playheads. */
+  static playTogether(players: readonly Player[]): void {
+    const loaded = players.filter((player) => player.track && !player.audioError)
+    for (const player of loaded) player.takeSpeakers()
+    Deck.playTogether(loaded.map((player) => player.deck))
+  }
+
+  /** Moves the playhead by `seconds`, keeping time while playing. See `Deck.nudge`. */
+  nudge(seconds: number): void {
+    if (!this.track) return
+    this.deck.nudge(seconds)
+  }
+
+  /** Pauses on `seconds`, in one step so the old position is never heard after the stop. */
+  stopAt(seconds: number): void {
+    if (!this.track) return
+    this.deck.stopAt(this.insideFile(seconds))
+  }
+
+  /** This deck's own level under the master, linear, 0 to 1: a channel fader or crossfader. */
+  setGain(gain: number): void {
+    this.deck.setGain(gain)
+  }
+
+  /** This deck's isolator low band, linear, 0 to 1. Null plays it without the isolator. */
+  setLow(gain: number | null): void {
+    this.deck.setLow(gain)
   }
 
   /** This deck is about to be heard, so a preview must not start it again afterwards. */
@@ -354,11 +384,14 @@ export class Player {
     return this.displayCues.find((c) => c.kind === 'hot' && c.slot === kind)
   }
 
-  /** A set hot cue jumps while playing and plays while held when paused. An empty slot stores one. */
-  hotCueDown(kind: number): void {
+  /**
+   * A set hot cue jumps while playing and plays while held when paused. An empty slot stores one,
+   * unless `create` is off (mix mode, where the track's cues are not edited).
+   */
+  hotCueDown(kind: number, create = true): void {
     const cue = this.hotCue(kind)
     if (!cue) {
-      void this.setHotCue(kind)
+      if (create) void this.setHotCue(kind)
       return
     }
     if (!this.track || this.holding || this.audioError) return
@@ -381,10 +414,16 @@ export class Player {
 
   callCue(cue: Cue): void {
     const start = this.insideFile(cue.start / 1000)
-    this.cuePoint = start
     if (cue.end != null && cue.end > cue.start) this.deck.setLoop(start, cue.end / 1000)
-    if (this.playing) this.seek(start)
-    else this.deck.stopAt(start)
+    this.cueAt(start)
+  }
+
+  /** Makes `seconds` the cue point and goes there: playing carries on from it, paused waits on it. */
+  cueAt(seconds: number): void {
+    const at = this.insideFile(seconds)
+    this.cuePoint = at
+    if (this.playing) this.seek(at)
+    else this.deck.stopAt(at)
   }
 
   callMemoryCue(direction: -1 | 1): void {

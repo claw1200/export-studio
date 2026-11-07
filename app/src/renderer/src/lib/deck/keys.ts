@@ -3,10 +3,16 @@ import type { ActionHandler } from '../keybinds.svelte'
 import { HOT_CUE_ACTIONS, type ActionId } from '../keymap'
 import type { Player } from '../player.svelte'
 
-/** The playback and cue shortcuts, acting on `player`. Register them for the focused deck. */
-export function deckKeys(player: Player): Partial<Record<ActionId, ActionHandler>> {
+type DeckHandlers = Partial<Record<ActionId, ActionHandler>>
+
+/**
+ * What a deck does while it is being played: transport, cue, loops, seeking, quantise and calling
+ * cues the track already has. Nothing here changes the track's stored cues or beatgrid, so it is
+ * all mix mode allows. `playPause` replaces the deck's own play/pause.
+ */
+export function playKeys(player: Player, playPause: () => void = () => player.toggle()): DeckHandlers {
   return {
-    'deck.playPause': () => player.toggle(),
+    'deck.playPause': playPause,
     'deck.cue': { down: () => player.cueDown(), up: () => player.cueUp() },
     'deck.loopIn': () => player.setLoopIn(),
     'deck.loopOut': () => player.setLoopOut(),
@@ -19,15 +25,28 @@ export function deckKeys(player: Player): Partial<Record<ActionId, ActionHandler
     'deck.seekForward': () => player.seek(player.position + 2),
     'deck.seekBackFar': () => player.seek(player.position - 10),
     'deck.seekForwardFar': () => player.seek(player.position + 10),
-    ...Object.fromEntries(
-      HOT_CUE_ACTIONS.map((id, i) => [
-        id,
-        { down: () => player.hotCueDown(HOT_CUE_KINDS[i]), up: () => player.hotCueUp(HOT_CUE_KINDS[i]) }
-      ])
-    ),
+    ...hotCueKeys(player, false),
     'cue.previousMemory': () => player.callMemoryCue(-1),
-    'cue.nextMemory': () => player.callMemoryCue(1),
+    'cue.nextMemory': () => player.callMemoryCue(1)
+  }
+}
+
+/** Everything a deck does in edit mode: playing it, and setting and deleting its cues. */
+export function deckKeys(player: Player): DeckHandlers {
+  return {
+    ...playKeys(player),
+    ...hotCueKeys(player, true),
     'cue.addMemory': () => void player.addMemoryCue(),
     'cue.deleteAtPlayhead': () => void player.deleteCueAtPlayhead()
   }
+}
+
+/** With `create`, an empty slot stores a hot cue; without, it does nothing. */
+function hotCueKeys(player: Player, create: boolean): DeckHandlers {
+  return Object.fromEntries(
+    HOT_CUE_ACTIONS.map((id, i) => [
+      id,
+      { down: () => player.hotCueDown(HOT_CUE_KINDS[i], create), up: () => player.hotCueUp(HOT_CUE_KINDS[i]) }
+    ])
+  )
 }

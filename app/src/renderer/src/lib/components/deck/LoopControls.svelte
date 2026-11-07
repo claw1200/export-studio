@@ -27,7 +27,11 @@
       aria-pressed={!!player.loop?.active}
       title={player.loop?.active ? 'Exit loop' : 'Reloop'}
     >
-      {player.loop?.active ? 'EXIT' : 'RELOOP'}
+      <!-- Both labels share one cell, so the button is as wide as the longer and keeps its width. -->
+      <span class="grid place-items-center">
+        <span class={['col-start-1 row-start-1', !player.loop?.active && 'invisible']}>EXIT</span>
+        <span class={['col-start-1 row-start-1', player.loop?.active && 'invisible']}>RELOOP</span>
+      </span>
     </button>
     <button class={loopButton(false)} disabled={noTrack} onclick={() => player.beatLoop(4)} title="4-beat loop">
       4 BEAT

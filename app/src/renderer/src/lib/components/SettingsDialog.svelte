@@ -1,11 +1,12 @@
 <script module lang="ts">
   export type SettingsSection =
-    'general' | 'display' | 'analysis' | 'convert' | 'database' | 'keyboard' | 'developer'
+    'general' | 'display' | 'mix' | 'analysis' | 'convert' | 'database' | 'keyboard' | 'developer'
 </script>
 
 <script lang="ts">
   import {
     ArchiveRestore,
+    Blend,
     AudioWaveform,
     Database,
     DatabaseBackup,
@@ -48,16 +49,27 @@
   import type { Backup, BackupProgress, BackupReason, ConvertFormat, ConvertPreset } from '$lib/types'
   import type { GridMode } from '../../../../preload/analysis'
   import ConfirmDialog from './ConfirmDialog.svelte'
+  import MixCurvePreview from './mix/MixCurvePreview.svelte'
+  import {
+    CURVES,
+    KEY_HIGHLIGHTS,
+    SWAP_TIMINGS,
+    type CurveId,
+    type KeyHighlightId,
+    type SwapTimingId
+  } from '$lib/mix/prefs.svelte'
 
   let { initialSection = 'general', onclose }: { initialSection?: SettingsSection; onclose: () => void } = $props()
 
   const { library, decks, keybinds, analysis, backups } = getApp()
   const prefs = decks.prefs
+  const mixPrefs = decks.mixPrefs
 
   type Choice = { id: string; label: string }
   const SECTIONS: { id: SettingsSection; label: string; icon: typeof Keyboard }[] = [
     { id: 'general', label: 'General', icon: SlidersHorizontal },
     { id: 'display', label: 'Display', icon: Monitor },
+    { id: 'mix', label: 'Mix', icon: Blend },
     { id: 'analysis', label: 'Import & analysis', icon: AudioWaveform },
     { id: 'convert', label: 'Convert formats', icon: FileAudio },
     { id: 'database', label: 'Database & files', icon: Database },
@@ -374,6 +386,37 @@
               </span>
             </div>
           </section>
+        {:else if section === 'mix'}
+          <MixCurvePreview curve={mixPrefs.curve} range={mixPrefs.swapRange} />
+          <div class="flex flex-col gap-1">
+            {@render choice(
+              'Crossfader curve',
+              'How quickly a deck fades out as the fader moves away from it.',
+              CURVES,
+              mixPrefs.curveId,
+              (id) => mixPrefs.setCurve(id as CurveId)
+            )}
+            {@render choice(
+              'Bass swap',
+              'When Swap bass is on, how soon the incoming deck takes the bass during a fade.',
+              SWAP_TIMINGS,
+              mixPrefs.swapTimingId,
+              (id) => mixPrefs.setSwapTiming(id as SwapTimingId)
+            )}
+            {@render toggle(
+              'Auto master',
+              'The deck that alone has sound, playing and not faded out, becomes the master.',
+              mixPrefs.autoMaster,
+              () => mixPrefs.setAutoMaster(!mixPrefs.autoMaster)
+            )}
+            {@render choice(
+              'Highlight matching keys',
+              'Colours browser keys that mix with the master deck. Pick the loosest match to show.',
+              KEY_HIGHLIGHTS,
+              mixPrefs.keyHighlightId,
+              (id) => mixPrefs.setKeyHighlight(id as KeyHighlightId)
+            )}
+          </div>
         {:else if section === 'general'}
           <div class="flex flex-col gap-1">
             {@render toggle(
@@ -682,6 +725,9 @@
             <RotateCcw class="size-3.5" /> Restore defaults
           </button>
         {:else}
+          <p class="mb-4 px-2 text-[11.5px] leading-snug text-faint">
+            In mix mode the deck shortcuts control deck A. Hold Shift with them to control deck B.
+          </p>
           {#each groups as { group, ids } (group)}
             <section class="mb-5 last:mb-0">
               <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">{group}</h3>

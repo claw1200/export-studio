@@ -32,5 +32,7 @@ export interface ModeDefinition {
    * the session, so a mode finds its decks as it left them; two modes naming the same key share one.
    */
   decks: readonly string[]
+  /** Shows the info panel beside the library. Without it the title bar's toggle is hidden too. */
+  inspector: boolean
   component: Component<ModeProps>
 }

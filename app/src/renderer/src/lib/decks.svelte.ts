@@ -2,6 +2,7 @@ import { ENGINE_DECKS } from '../../../shared/engine'
 import { Audition } from './audition.svelte'
 import { Output } from './deck/output.svelte'
 import { DeckPrefs } from './deck/prefs.svelte'
+import { MixPrefs } from './mix/prefs.svelte'
 import { Player } from './player.svelte'
 
 /** The browser preview keeps the last engine deck, so adding decks never moves it. */
@@ -17,9 +18,13 @@ const AUDITION_SLOT = ENGINE_DECKS - 1
  */
 export class Decks {
   readonly prefs = new DeckPrefs()
+  /** How mix mode's crossfader, bass swap and key highlighting behave. */
+  readonly mixPrefs = new MixPrefs()
   readonly output = new Output()
   readonly audition = new Audition(AUDITION_SLOT)
   focused = $state.raw<Player | null>(null)
+  /** Mix mode's master deck while mix mode is shown; the browser highlights keys that mix with it. */
+  mixMaster = $state.raw<Player | null>(null)
 
   private players = $state.raw<Player[]>([])
   private byKey = new Map<string, Player>()
@@ -29,9 +34,7 @@ export class Decks {
     this.audition.onBegan = () => {
       for (const player of this.players) player.yieldToPreview()
     }
-    this.audition.onEnded = () => {
-      for (const player of this.players) player.resumeAfterPreview()
-    }
+    this.audition.onEnded = () => Player.resumeAfterPreview(this.players)
   }
 
   /** Every player made so far, in the order they were. */

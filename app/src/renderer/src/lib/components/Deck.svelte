@@ -2,6 +2,7 @@
   import { LoaderCircle } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import { setPlayer } from '$lib/deck/context'
+  import { TrackDrop } from '$lib/deck/drop.svelte'
   import { deckKeys } from '$lib/deck/keys'
   import type { Player } from '$lib/player.svelte'
   import { bpmAt } from '$lib/beat'
@@ -21,6 +22,11 @@
   let { player }: { player: Player } = $props()
 
   const { library, decks, keybinds } = getApp()
+  // svelte-ignore state_referenced_locally
+  const drop = new TrackDrop(library, (track) => {
+    decks.focus(player)
+    void player.load(track)
+  })
   // svelte-ignore state_referenced_locally
   setPlayer(player)
   /** Only the focused deck answers the keyboard, so several decks never fight over a key. */
@@ -82,7 +88,21 @@
   }}
 />
 
-<section class="shrink-0 border-b border-line-soft bg-surface">
+<section
+  class="relative shrink-0 border-b border-line-soft bg-surface"
+  aria-label="Deck"
+  ondragenter={drop.ondragenter}
+  ondragover={drop.ondragover}
+  ondragleave={drop.ondragleave}
+  ondrop={drop.ondrop}
+>
+  {#if drop.over}
+    <div
+      class="pointer-events-none absolute inset-0 z-30 grid place-items-center rounded-[inherit] border-2 border-accent bg-accent-soft"
+    >
+      <span class="rounded bg-bg/80 px-2 py-1 text-[12px] font-semibold text-accent">Load on the deck</span>
+    </div>
+  {/if}
   <div
     class={[
       'relative border-b border-line-soft bg-[oklch(0.12_0.005_260)]',
@@ -98,7 +118,7 @@
         {:else if track}
           No analysis data for this track
         {:else}
-          Select a track to view its waveform
+          Select a track, or drag one here, to view its waveform
         {/if}
       </div>
     {/if}

@@ -247,6 +247,43 @@ impl AudioEngine {
     }
 
     #[napi]
+    pub fn play_together(&self, decks: Vec<u32>) {
+        if let Some(engine) = self.engine() {
+            let decks: Vec<_> = decks.into_iter().map(deck_index).collect();
+            engine.play_together(&decks);
+        }
+    }
+
+    #[napi]
+    pub fn nudge(&self, deck: u32, delta_ms: f64) {
+        if let Some(engine) = self.engine() {
+            engine.nudge(deck_index(deck), delta_ms);
+        }
+    }
+
+    #[napi]
+    pub fn set_key_shift(&self, deck: u32, semitones: i32) {
+        if let Some(engine) = self.engine() {
+            engine.set_key_shift(deck_index(deck), semitones);
+        }
+    }
+
+    #[napi]
+    pub fn set_deck_gain(&self, deck: u32, gain: f64) {
+        if let Some(engine) = self.engine() {
+            engine.set_deck_gain(deck_index(deck), gain as f32);
+        }
+    }
+
+    /// The deck's isolator low band, 0 to 1; null takes the isolator out of its path.
+    #[napi]
+    pub fn set_deck_low(&self, deck: u32, gain: Option<f64>) {
+        if let Some(engine) = self.engine() {
+            engine.set_deck_low(deck_index(deck), gain.map(|g| g as f32));
+        }
+    }
+
+    #[napi]
     pub fn set_volume(&self, gain: f64) {
         if let Some(engine) = self.engine() {
             engine.set_volume(gain as f32);

@@ -3,8 +3,14 @@
 /// Frames per block: about 11.6 ms at 44.1 kHz.
 pub const BLOCK_FRAMES: usize = 512;
 
-/// Blocks a deck keeps queued during playback: about 186 ms, enough to ride out a slow read.
-pub const RING_BLOCKS: usize = 16;
+/// Blocks a deck keeps queued during playback: about a quarter of a second, enough to ride out a
+/// slow read and to prime the time-stretcher at the fastest tempo without waiting.
+pub const RING_BLOCKS: usize = 24;
+
+/// Room in the ring: twice what is kept queued. After a seek the old position's blocks are still
+/// in it until the callback drains them, and the new position's audio has to fit in behind them
+/// rather than wait, or the first callback after the seek would have nothing to play.
+pub const RING_CAPACITY: usize = RING_BLOCKS * 2;
 
 /// A block of interleaved stereo at the device rate.
 ///

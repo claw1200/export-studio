@@ -129,6 +129,21 @@ export class AudioBridge {
       case 'volume':
         engine.setVolume(command.gain)
         break
+      case 'nudge':
+        engine.nudge(command.deck, command.ms)
+        break
+      case 'keyShift':
+        engine.setKeyShift(command.deck, command.semitones)
+        break
+      case 'deckGain':
+        engine.setDeckGain(command.deck, command.gain)
+        break
+      case 'deckLow':
+        engine.setDeckLow(command.deck, command.gain)
+        break
+      case 'playTogether':
+        engine.playTogether(command.decks)
+        break
     }
     this.startTicker()
   }

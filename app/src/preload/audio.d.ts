@@ -5,6 +5,11 @@ export type DeckCommand =
   | { op: 'play'; deck: number }
   | { op: 'pause'; deck: number }
   | { op: 'seek'; deck: number; ms: number }
+  /**
+   * Move by `ms` from wherever the engine's playhead is when this arrives. While playing the deck
+   * keeps time through it, landing where an instant jump would have put it.
+   */
+  | { op: 'nudge'; deck: number; ms: number }
   /** Pause and move in one step, as releasing CUE does. */
   | { op: 'stopAt'; deck: number; ms: number }
   | { op: 'scrubBegin'; deck: number }
@@ -19,7 +24,15 @@ export type DeckCommand =
   | { op: 'tempo'; deck: number; tempo: number }
   /** Keep the key when the tempo changes. */
   | { op: 'masterTempo'; deck: number; on: boolean }
+  /** Move the key by whole semitones, keeping the speed. Within an octave either way. */
+  | { op: 'keyShift'; deck: number; semitones: number }
   | { op: 'volume'; gain: number }
+  /** One deck's own level, linear, 0 to 1, under the master: what a crossfader sets. */
+  | { op: 'deckGain'; deck: number; gain: number }
+  /** One deck's isolator low band, linear, 0 (killed) to 1 (full). Null takes the isolator out of its path. */
+  | { op: 'deckLow'; deck: number; gain: number | null }
+  /** Start several decks in the same instant, so the gap between their playheads holds. */
+  | { op: 'playTogether'; decks: number[] }
 
 /** One deck as the engine last reported it. Frames are at `sampleRate`. */
 export interface DeckTick {
