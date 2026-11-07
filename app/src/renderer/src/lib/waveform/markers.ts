@@ -29,6 +29,15 @@ export function paintLoops(frame: Frame): void {
   if (x1 < 0 || x0 > pw) return
   ctx.fillStyle = LOOP_ACTIVE_COLOR + (loop.active ? '40' : '18')
   ctx.fillRect(x0, 0, x1 - x0, ph)
+}
+
+export function paintLoopEdges(frame: Frame): void {
+  const { ctx, view, pw, ph, toX } = frame
+  const loop = view.loop
+  if (!loop) return
+  const x0 = toX(loop.start)
+  const x1 = toX(loop.end)
+  if (x1 < 0 || x0 > pw) return
   ctx.fillStyle = LOOP_ACTIVE_COLOR
   const edge = Math.max(1, Math.round(frame.dpr))
   ctx.fillRect(Math.round(x0), 0, edge, ph)

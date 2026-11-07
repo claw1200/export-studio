@@ -9,6 +9,7 @@ import {
   paintCuePoint,
   paintCues,
   paintGridHandles,
+  paintLoopEdges,
   paintLoops,
   paintPlayhead
 } from './markers'
@@ -71,6 +72,7 @@ export function drawDetail(
   }
   paintLoops(frame)
   paintWave(frame, mode, samples, quality, fallBlocks)
+  paintLoopEdges(frame)
   paintBeatGrid(frame)
   paintCues(frame)
   paintCuePoint(frame)
