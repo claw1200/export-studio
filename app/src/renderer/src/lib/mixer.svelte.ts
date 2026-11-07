@@ -178,7 +178,7 @@ export class Mixer {
   setSwapBass(on: boolean): void {
     this.swapBass = on
     setSetting('swapBass', String(on))
-    this.swap = startBassSwap(this.crossfader)
+    this.swap = startBassSwap(this.crossfader, this.prefs.swapRange)
     this.apply()
   }
 

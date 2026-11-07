@@ -51,9 +51,40 @@ describe('bass swap', () => {
   })
 
   it('waits out the start again after turning round, without a jump', () => {
-    const range = { start: 0.1, end: 0.5 }
-    // A to 0.3 is half the swap; back 0.1 is inside the start, then the half swaps back.
-    assert.deepEqual(sweep(0, [0.3, 0.2, 0.1, 0], range), [0.5, 0.5, 0.25, 0])
+    const late = { start: 0.5, end: 1 }
+    // To 0.8 is 60% swapped; turning back holds it there until the fader has come back half way.
+    assert.deepEqual(sweep(0, [0.8, 0.6, 0.5, 0.3, 0.1, 0], late), [0.6, 0.6, 0.6, 0.6, 0.2, 0])
+  })
+
+  it('ends clean at either side after a wiggle', () => {
+    const late = { start: 0.5, end: 1 }
+    assert.deepEqual(sweep(0, [0.8, 0.5, 1], late), [0.6, 0.6, 1])
+    assert.deepEqual(sweep(1, [0.2, 0.5, 0], late), [0.4, 0.4, 0])
+  })
+
+  it('never jumps and always ends clean, however the fader is wiggled', () => {
+    const ranges = [
+      { start: 0, end: 0.5 },
+      { start: 0.25, end: 0.75 },
+      { start: 0.5, end: 1 }
+    ]
+    let seed = 7
+    const random = (): number => (seed = (seed * 16807) % 2147483647) / 2147483647
+    for (const range of ranges) {
+      const rate = 1 / (range.end - range.start)
+      for (let run = 0; run < 200; run++) {
+        let swap = startBassSwap(random(), range)
+        for (let step = 0; step < 60; step++) {
+          const position = Math.min(1, Math.max(0, swap.position + (random() - 0.5) * 0.2))
+          const next = bassSwap(swap, position, range)
+          const change = Math.abs(next.share - swap.share)
+          assert.ok(change <= Math.abs(position - swap.position) * rate + 1e-9, `jumped by ${change}`)
+          swap = next
+        }
+        assert.equal(bassSwap(swap, 1, range).share, 1)
+        assert.equal(bassSwap(swap, 0, range).share, 0)
+      }
+    }
   })
 
   it('carries on from where it stands when the range changes', () => {

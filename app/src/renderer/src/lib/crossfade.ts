@@ -57,7 +57,9 @@ export function swapRange(range: SwapRange): SwapRange {
  *
  * Which deck is outgoing depends on which way the fader is moving, so the fade begins wherever
  * the fader last turned round. Turning round mid-swap swaps the bass back from where it stands,
- * after the same start travel and at the same rate. The bass never jumps, whatever the fader does.
+ * after the same start travel and at the same rate. The fader's position also bounds the swap
+ * (see `bassBounds`), so it always ends clean at either side. The bass never jumps, whatever the
+ * fader does.
  */
 export interface BassSwap {
   /** Deck B's share of the bass, 0 all A's to 1 all B's. Deck A has the rest. */
@@ -71,9 +73,13 @@ export interface BassSwap {
   direction: -1 | 0 | 1
 }
 
-/** The swap with the fader at `position` and nothing yet known about direction: the nearer deck has the bass. */
-export function startBassSwap(position: number): BassSwap {
-  return rebaseBassSwap(position <= 0.5 ? 0 : 1, position)
+/**
+ * The swap with the fader at `position` and nothing yet known about direction: the nearer deck
+ * has the bass, as much as `bassBounds` allows.
+ */
+export function startBassSwap(position: number, range: SwapRange = DEFAULT_SWAP_RANGE): BassSwap {
+  const [low, high] = bassBounds(position, range)
+  return rebaseBassSwap(Math.min(high, Math.max(low, position <= 0.5 ? 0 : 1)), position)
 }
 
 /** A swap holding `share` with the fader at `position`, whichever way it moves next. */
@@ -81,17 +87,35 @@ export function rebaseBassSwap(share: number, position: number): BassSwap {
   return { share, position, turn: position, from: share, direction: 0 }
 }
 
-/** The swap after the fader moves from where it was in `swap` to `position`. */
+/**
+ * The least and most of the bass deck B can have with the fader at `position`, whichever way it
+ * has moved. One edge is a fade from A, swapping over `range` from the left; the other a fade
+ * from B, swapping over `range` from the right. Both meet at the ends, so the fader fully to one
+ * side always leaves that deck with all the bass, however it was wiggled on the way.
+ */
+export function bassBounds(position: number, range: SwapRange = DEFAULT_SWAP_RANGE): [low: number, high: number] {
+  const { start, end } = swapRange(range)
+  const done = (away: number): number => Math.min(1, Math.max(0, (away - start) / (end - start)))
+  const fromA = done(position)
+  const fromB = 1 - done(1 - position)
+  return [Math.min(fromA, fromB), Math.max(fromA, fromB)]
+}
+
+/**
+ * The swap after the fader moves from where it was in `swap` to `position`: on from where it
+ * stood by the fader's travel since it last turned round, kept within `bassBounds`.
+ */
 export function bassSwap(swap: BassSwap, position: number, range: SwapRange = DEFAULT_SWAP_RANGE): BassSwap {
+  const [low, high] = bassBounds(position, range)
   const moved = position - swap.position
-  if (moved === 0) return swap
+  if (moved === 0) return { ...swap, share: Math.min(high, Math.max(low, swap.share)) }
   const direction = moved > 0 ? 1 : -1
   const turned = direction !== swap.direction
   const turn = turned ? swap.position : swap.turn
   const from = turned ? swap.share : swap.from
   const { start, end } = swapRange(range)
   const swapped = Math.max(0, Math.abs(position - turn) - start) / (end - start)
-  const share = Math.min(1, Math.max(0, from + direction * swapped))
+  const share = Math.min(high, Math.max(low, from + direction * swapped))
   return { share, position, turn, from, direction }
 }
 
