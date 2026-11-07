@@ -17,6 +17,8 @@
   import Transport from './deck/Transport.svelte'
   import HotCueBar from './deck/HotCueBar.svelte'
   import LoopControls from './deck/LoopControls.svelte'
+  import TempoReadout from './deck/TempoReadout.svelte'
+  import { segment, segmentButton } from './deck/segment'
 
   /** The player this deck shows. Fixed for the component's life: key the deck on it to swap. */
   let { player }: { player: Player } = $props()
@@ -128,27 +130,60 @@
     <TempoLane />
   {/if}
 
+  <!--
+    The mix deck's pieces, packed into two columns so nothing is left empty. On the left, the
+    playing BPM and key, then the track and its clock, with play, cue and loops under them; on the
+    right, the overview with the hot cues centred under it. A switch pinned at the head of the hot
+    cue row swaps them for the beatgrid editor, centred in the same space so the switch never moves.
+    The tempo fader leads, left of both.
+  -->
   <div class="flex">
-    <div class="min-w-0 flex-1">
-      <div class="flex items-center gap-4 px-4 py-3">
-        {#if player.grid.editing}
-          <GridEditorBar bpm={currentBpm} onsave={saveGrid} />
-        {:else}
-          <TrackInfo bpm={currentBpm} {gridEditable} {gridTitle} ongridedit={toggleGridEdit} />
-        {/if}
-
-        <div class="h-12 min-w-0 flex-1">
-          <WaveformOverview />
-        </div>
-
-        <Transport />
+    <TempoFader />
+    <div class="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2.5 px-4 py-3">
+      <div class="flex items-center gap-3">
+        <TempoReadout bpm={currentBpm} />
+        <TrackInfo />
+      </div>
+      <div class="relative h-[52px] overflow-hidden rounded bg-[oklch(0.12_0.005_260)]">
+        <WaveformOverview />
       </div>
 
-      <div class="flex items-center gap-1.5 px-4 pb-3">
-        <HotCueBar />
-        <LoopControls />
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-1.5">
+          <Transport />
+        </div>
+        <div class="flex items-center gap-1.5">
+          <LoopControls />
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class={segment} role="group" aria-label="Show under the overview">
+          <button
+            class={segmentButton(!player.grid.editing, 'accent')}
+            aria-pressed={!player.grid.editing}
+            title={player.grid.editing ? 'Save the beatgrid and go back to the hot cues' : 'Hot cues'}
+            onclick={() => player.grid.editing && void saveGrid()}>CUES</button
+          >
+          <button
+            class={segmentButton(player.grid.editing, 'accent')}
+            disabled={!player.grid.editing && !gridEditable}
+            aria-pressed={player.grid.editing}
+            title={player.grid.editing ? 'Editing the beatgrid' : gridTitle}
+            onclick={() => !player.grid.editing && toggleGridEdit()}>GRID</button
+          >
+        </div>
+        {#if player.grid.editing}
+          <div class="flex min-w-0 flex-1 justify-center">
+            <GridEditorBar bpm={currentBpm} onsave={saveGrid} />
+          </div>
+        {:else}
+          <div class="flex min-w-0 flex-1 justify-center">
+            <div class="grid w-full max-w-[618px] grid-cols-8 gap-1.5">
+              <HotCueBar />
+            </div>
+          </div>
+        {/if}
       </div>
     </div>
-    <TempoFader />
   </div>
 </section>

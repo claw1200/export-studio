@@ -26,8 +26,9 @@
       cue: bySlot.get(letter) ?? null
     }))
   })
-  const memoryCount = $derived((player.detail?.cues ?? []).filter((c) => c.kind === 'memory').length)
-  const editable = $derived(library.writable && !!player.detail && !player.grid.editing && !player.track?.id.startsWith('usb:'))
+  const editable = $derived(
+    library.writable && !!player.detail && !player.grid.editing && !player.track?.id.startsWith('usb:')
+  )
   const placementLabel = $derived(player.cuePlacement === 'cuePoint' ? 'cue point' : 'playhead')
   /** Closes whenever editing turns on or off. */
   let pickerCueId = $derived.by((): string | null => {
@@ -51,9 +52,9 @@
 
 {#each hotCues as { letter, kind, cue } (letter)}
   {#if cue}
-    <div class="group relative">
+    <div class="group relative min-w-0">
       <button
-        class="flex h-7 w-[72px] touch-none items-center gap-1.5 rounded-md px-2 text-[11px] font-semibold text-bg transition select-none hover:brightness-110"
+        class="flex h-6 w-full min-w-0 touch-none items-center gap-1.5 rounded px-2 text-[11px] font-semibold text-bg transition select-none hover:brightness-110"
         style:background={cueColor(cue)}
         title={cue.comment || undefined}
         onpointerdown={(e) => {
@@ -141,7 +142,7 @@
     </div>
   {:else if editable}
     <button
-      class="group flex h-7 w-[72px] items-center gap-1.5 rounded-md border border-dashed border-line px-2 text-[11px] font-semibold text-faint transition hover:border-accent/60 hover:bg-accent-soft hover:text-accent disabled:pointer-events-none disabled:opacity-50"
+      class="group flex h-6 w-full min-w-0 items-center gap-1.5 rounded border border-dashed border-line px-2 text-[11px] font-semibold text-faint transition hover:border-accent/60 hover:bg-accent-soft hover:text-accent disabled:pointer-events-none disabled:opacity-50"
       disabled={player.editing}
       onclick={() => player.setHotCue(kind)}
       aria-label="Set hot cue {letter} at the {placementLabel}"
@@ -152,11 +153,9 @@
     </button>
   {:else}
     <div
-      class="flex h-7 w-[72px] items-center rounded-md border border-line-soft px-2 text-[11px] font-semibold text-faint/60"
+      class="flex h-6 w-full min-w-0 items-center rounded border border-line-soft px-2 text-[11px] font-semibold text-faint/60"
     >
       {letter}
     </div>
   {/if}
 {/each}
-
-<span class="ml-3 text-[11px] text-faint">{memoryCount} memory cues</span>

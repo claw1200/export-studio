@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { LoaderCircle, Minus, Music, Pause, Play, Plus, SquarePen } from '@lucide/svelte'
+  import { LoaderCircle, Music, Pause, Play, SquarePen } from '@lucide/svelte'
   import { artworkUrl } from '$lib/api'
   import { setPlayer } from '$lib/deck/context'
   import { TrackDrop } from '$lib/deck/drop.svelte'
@@ -12,6 +12,7 @@
   import type { Track } from '$lib/types'
   import WaveformDetail from '../WaveformDetail.svelte'
   import WaveformOverview from '../WaveformOverview.svelte'
+  import Stepper from '../deck/Stepper.svelte'
 
   /**
    * One side of the mixer: the track, where its playhead is, the scrolling waveform and an overview
@@ -96,80 +97,7 @@
       : 'border border-line text-faint hover:bg-hover hover:text-muted'
   ]
   const signed = (n: number): string => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '')
-
-  /** Vertical travel, in pixels, per step when dragging a stepper's value. */
-  const DRAG_STEP_PX = 8
-  /** Where the drag started counting from, and whether it has stepped (so the release is not a click). */
-  let drag: { pointer: number; y: number; moved: boolean } | null = null
-
-  function dragDown(e: PointerEvent): void {
-    if (e.button !== 0) return
-    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-    drag = { pointer: e.pointerId, y: e.clientY, moved: false }
-  }
-
-  function dragMove(e: PointerEvent, onstep: (step: number) => void): void {
-    if (!drag || drag.pointer !== e.pointerId) return
-    const steps = Math.trunc((drag.y - e.clientY) / DRAG_STEP_PX)
-    if (!steps) return
-    drag.y -= steps * DRAG_STEP_PX
-    drag.moved = true
-    onstep(steps)
-  }
-
-  /** A release after a drag swallows the click that follows it, so dragging does not also reset. */
-  function dragClick(onreset: () => void): void {
-    const moved = drag?.moved
-    drag = null
-    if (!moved) onreset()
-  }
 </script>
-
-{#snippet stepper(
-  name: string,
-  value: string,
-  valueClass: string | null,
-  color: string | null,
-  title: string,
-  disabled: boolean,
-  onstep: (step: number) => void,
-  onreset: () => void,
-  badge: string = ''
-)}
-  <div class={['flex h-6 items-center rounded border border-line-soft', disabled && 'opacity-40']}>
-    <button
-      class="grid h-full w-5 place-items-center text-faint hover:bg-hover hover:text-fg disabled:pointer-events-none"
-      {disabled}
-      aria-label="{name} down"
-      title="{name} down 1"
-      onclick={() => onstep(-1)}><Minus class="size-3" /></button
-    >
-    <button
-      class={[
-        'tabular flex h-full min-w-[60px] cursor-ns-resize touch-none items-center justify-center gap-1 px-1 font-mono text-[11.5px] font-semibold hover:bg-hover disabled:pointer-events-none',
-        valueClass
-      ]}
-      style:color={color ?? undefined}
-      {disabled}
-      title="{title.replace(/\.?$/, '.')} Drag up or down to change it."
-      onpointerdown={dragDown}
-      onpointermove={(e) => dragMove(e, onstep)}
-      onpointercancel={() => (drag = null)}
-      onclick={() => dragClick(onreset)}
-    >
-      <span class="text-[9px] font-sans font-semibold tracking-wide text-faint uppercase">{name}</span>
-      {value}
-      {#if badge}<span class="text-[9.5px] text-faint">{badge}</span>{/if}
-    </button>
-    <button
-      class="grid h-full w-5 place-items-center text-faint hover:bg-hover hover:text-fg disabled:pointer-events-none"
-      {disabled}
-      aria-label="{name} up"
-      title="{name} up 1"
-      onclick={() => onstep(1)}><Plus class="size-3" /></button
-    >
-  </div>
-{/snippet}
 
 {#snippet placeholder()}
   <div class="grid h-full place-items-center px-4 text-center text-[12px] text-faint">
@@ -324,27 +252,25 @@
         title={isMaster ? `Deck ${label} is the master` : `Make deck ${label} the master the other deck syncs to`}
         onclick={() => mixer.setMaster(player)}>MASTER</button
       >
-      {@render stepper(
-        'BPM',
-        track ? formatBpm(bpm) : '—',
-        rate !== 1 ? 'text-accent' : 'text-fg',
-        null,
-        bpmTitle,
-        !track || following || !(ownBpm(player) > 0),
-        (step) => mixer.stepBpm(player, step),
-        () => mixer.resetTempo(player)
-      )}
-      {@render stepper(
-        'Key',
-        key || '—',
-        null,
-        key ? keyColor(key) : null,
-        keyTitle,
-        !track,
-        (step) => mixer.stepKey(player, step),
-        () => mixer.resetKey(player),
-        signed(keyShift)
-      )}
+      <Stepper
+        name="BPM"
+        value={track ? formatBpm(bpm) : '—'}
+        valueClass={rate !== 1 ? 'text-accent' : 'text-fg'}
+        title={bpmTitle}
+        disabled={!track || following || !(ownBpm(player) > 0)}
+        onstep={(step) => mixer.stepBpm(player, step)}
+        onreset={() => mixer.resetTempo(player)}
+      />
+      <Stepper
+        name="Key"
+        value={key || '—'}
+        color={key ? keyColor(key) : null}
+        title={keyTitle}
+        disabled={!track}
+        onstep={(step) => mixer.stepKey(player, step)}
+        onreset={() => mixer.resetKey(player)}
+        badge={signed(keyShift)}
+      />
       <button
         class={[
           'h-6 rounded px-1.5 text-[10.5px] font-bold transition-colors disabled:opacity-40',
