@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Star } from '@lucide/svelte'
+  import RowIcon from './RowIcon.svelte'
 
   let {
     value,
@@ -40,10 +40,10 @@
         aria-label="{n} star{n === 1 ? '' : 's'}"
         onclick={() => choose(n)}
       >
-        <Star class={[starClass, lit ? 'fill-warn text-warn' : 'text-line']} strokeWidth={lit ? 0 : 2} />
+        <RowIcon name="star" class={[starClass, lit ? 'fill-warn text-warn' : 'text-line']} strokeWidth={lit ? 0 : 2} />
       </button>
     {:else}
-      <Star class={[starClass, lit ? 'fill-warn text-warn' : 'text-line']} strokeWidth={lit ? 0 : 2} />
+      <RowIcon name="star" class={[starClass, lit ? 'fill-warn text-warn' : 'text-line']} strokeWidth={lit ? 0 : 2} />
     {/if}
   {/each}
 </span>

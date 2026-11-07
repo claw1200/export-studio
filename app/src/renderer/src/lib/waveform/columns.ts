@@ -47,66 +47,97 @@ export function stridePeak(data: Uint8Array, src: number, index: number, stride:
   return peak
 }
 
-type ColumnSpan =
-  { kind: 'hold'; index: number; next: number; fraction: number } | { kind: 'peak'; from: number; to: number }
+const BYTE_MAX = 255
 
-function columnSpan(count: number, start: number, end: number): ColumnSpan | null {
-  if (!(end > start) || end <= 0 || start >= count) return null
-  if (end - start <= 1) {
-    const at = Math.min(count - 1, Math.max(0, (start + end) / 2))
-    const index = at | 0
-    return { kind: 'hold', index, next: Math.min(count - 1, index + 1), fraction: at - index }
-  }
-  return { kind: 'peak', from: Math.max(0, Math.floor(start)), to: Math.min(count, Math.ceil(end)) }
+/** A waveform byte as a level from 0 to 1. */
+export function byteLevel(byte: number): number {
+  return byte / BYTE_MAX
 }
 
-/** Slopes down toward the next block. A rise stays flat until the block boundary. */
-function fall(current: number, next: number, fraction: number): number {
-  if (next >= current) return current
-  return current + (next - current) * fraction
+/*
+ * Reading a pixel column that covers entries `start`–`end`. A column narrower than one entry shows
+ * the entry under its middle; a wider one shows the peak of the entries it touches.
+ *
+ * These run for every pixel column of every deck frame, so they take and return plain numbers:
+ * an object or closure per column would be thousands of allocations a frame.
+ */
+
+function coversNoEntries(count: number, start: number, end: number): boolean {
+  return !(end > start) || end <= 0 || start >= count
 }
 
-/** The peak of entries `start`–`end`, or NaN outside the data. */
-export function readAmp(
-  get: (i: number) => number,
-  count: number,
-  start: number,
-  end: number,
-  lerpDown: boolean
-): number {
-  const span = columnSpan(count, start, end)
-  if (!span) return NaN
-  if (span.kind === 'hold') {
-    return lerpDown ? fall(get(span.index), get(span.next), span.fraction) : get(span.index)
+function isWithinOneEntry(start: number, end: number): boolean {
+  return end - start <= 1
+}
+
+/** The fractional entry under the column's middle, kept inside the data. */
+function entryUnderMiddle(count: number, start: number, end: number): number {
+  return Math.min(count - 1, Math.max(0, (start + end) / 2))
+}
+
+function firstTouchedEntry(start: number): number {
+  return Math.max(0, Math.floor(start))
+}
+
+function pastLastTouchedEntry(count: number, end: number): number {
+  return Math.min(count, Math.ceil(end))
+}
+
+/** Slopes down toward the next entry. A rise stays flat until the entry boundary. */
+function fallToward(current: number, next: number, fraction: number): number {
+  return next >= current ? current : current + (next - current) * fraction
+}
+
+/** Interleaved low/mid/high band bytes, read every `stride` raw entries as one. */
+export interface BandSource {
+  data: Uint8Array
+  /** Entries in `data`. */
+  rawCount: number
+  stride: number
+  /** Entries after `stride`; what `start` and `end` index. */
+  count: number
+}
+
+export function bandSource(data: Uint8Array, stride: number): BandSource {
+  const rawCount = data.length / 3
+  return { data, rawCount, stride, count: logicalCount(rawCount, stride) }
+}
+
+function bandByte(source: BandSource, band: number, entry: number): number {
+  const { data, rawCount, stride } = source
+  return stride <= 1 ? data[entry * 3 + band] : stridePeak(data, rawCount, entry, stride, band)
+}
+
+/**
+ * One band's level, 0 to 1, for the column covering `start`–`end`, or NaN outside the data.
+ * With `fall`, a column narrower than an entry slopes down toward the next one.
+ */
+export function readBandLevel(source: BandSource, band: number, start: number, end: number, fall: boolean): number {
+  const { count } = source
+  if (coversNoEntries(count, start, end)) return NaN
+  if (isWithinOneEntry(start, end)) {
+    const at = entryUnderMiddle(count, start, end)
+    const entry = at | 0
+    const current = byteLevel(bandByte(source, band, entry))
+    if (!fall) return current
+    const next = byteLevel(bandByte(source, band, Math.min(count - 1, entry + 1)))
+    return fallToward(current, next, at - entry)
   }
+  const to = pastLastTouchedEntry(count, end)
   let peak = 0
-  for (let i = span.from; i < span.to; i++) {
-    const value = get(i)
-    if (value > peak) peak = value
-  }
-  return peak
+  for (let entry = firstTouchedEntry(start); entry < to; entry++) peak = Math.max(peak, bandByte(source, band, entry))
+  return byteLevel(peak)
 }
 
-/** The tallest entry of `start`–`end` and its colour. */
-export function readRgbColumn(
-  heights: Uint8Array,
-  colors: Uint8Array,
-  count: number,
-  start: number,
-  end: number
-): { amp: number; color: number } | null {
-  const span = columnSpan(count, start, end)
-  if (!span) return null
-  if (span.kind === 'hold') return { amp: heights[span.index] / 255, color: packColor(colors, span.index) }
-  let peak = -1
-  let peakIndex = span.from
-  for (let i = span.from; i < span.to; i++) {
-    if (heights[i] > peak) {
-      peak = heights[i]
-      peakIndex = i
-    }
-  }
-  return { amp: Math.max(0, peak) / 255, color: packColor(colors, peakIndex) }
+/** The tallest entry the column covering `start`–`end` touches (the first, on a tie), or -1 outside the data. */
+export function rgbPeakIndex(heights: Uint8Array, count: number, start: number, end: number): number {
+  if (coversNoEntries(count, start, end)) return -1
+  if (isWithinOneEntry(start, end)) return entryUnderMiddle(count, start, end) | 0
+  const from = firstTouchedEntry(start)
+  const to = pastLastTouchedEntry(count, end)
+  let tallest = from
+  for (let entry = from + 1; entry < to; entry++) if (heights[entry] > heights[tallest]) tallest = entry
+  return tallest
 }
 
 /** Fills the columns as shapes, one per run of the same colour. */

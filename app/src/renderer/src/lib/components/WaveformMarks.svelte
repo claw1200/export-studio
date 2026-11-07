@@ -3,6 +3,7 @@
   import { cueColor, formatClock, hotCueLetter } from '$lib/format'
   import type { Cue } from '$lib/types'
   import { LOOP_ACTIVE_COLOR } from '$lib/waveform/colors'
+  import { CUE_MARK } from '$lib/waveform/cueMarks'
 
   let {
     cues,
@@ -24,6 +25,10 @@
     onclick?: (cue: Cue, e: MouseEvent) => void
   } = $props()
 
+  const HOT_BOX_STYLE =
+    `width:${CUE_MARK.hotSize}px;height:${CUE_MARK.hotSize}px;` +
+    `font-size:${CUE_MARK.hotFontSize}px;color:${CUE_MARK.hotTextColor};`
+
   function label(cue: Cue): string {
     const name = cue.kind === 'hot' ? `Hot cue ${hotCueLetter(cue.slot)}` : 'Memory cue'
     const time = formatClock(cue.start)
@@ -44,7 +49,8 @@
 {#each cues as cue (cue.id)}
   {#if cue.end != null}
     <div
-      class="pointer-events-none absolute inset-y-0 opacity-25"
+      class="pointer-events-none absolute inset-y-0"
+      style:opacity={CUE_MARK.loopOpacity}
       style:left="{pct(cue.start / 1000)}%"
       style:width="{pct(cue.end / 1000) - pct(cue.start / 1000)}%"
       style:background={cueColor(cue)}
@@ -55,11 +61,11 @@
     class={[
       'absolute cursor-pointer border-0 bg-transparent p-0 hover:brightness-125',
       cue.kind === 'hot'
-        ? 'top-0 z-20 grid size-3 place-items-center text-[8px] leading-none font-bold text-black/85'
+        ? 'top-0 z-20 grid place-items-center leading-none font-bold'
         : 'top-0 z-10 flex h-4 w-4 -translate-x-1/2 items-start justify-center'
     ]}
     style:left="{pct(cue.start / 1000)}%"
-    style:background={cue.kind === 'hot' ? cueColor(cue) : undefined}
+    style={cue.kind === 'hot' ? `${HOT_BOX_STYLE}background:${cueColor(cue)}` : undefined}
     title={label(cue)}
     aria-label={label(cue)}
     draggable={draggable === false ? 'false' : undefined}
@@ -72,7 +78,9 @@
       {hotCueLetter(cue.slot)}
     {:else}
       <span
-        class="pointer-events-none h-[7px] w-[9px]"
+        class="pointer-events-none"
+        style:width="{CUE_MARK.memoryWidth}px"
+        style:height="{CUE_MARK.memoryHeight}px"
         style:background={cueColor(cue)}
         style:clip-path="polygon(0 0, 100% 0, 50% 100%)"
       ></span>

@@ -1,14 +1,15 @@
 /** Drawing rekordbox-style analysis data: an RGB waveform, and 3-band waveforms. */
 import { BANDS_LOW_TO_HIGH } from './colors'
 import {
+  bandSource,
+  byteLevel,
   columns,
   fitColumns,
-  logicalCount,
   paintColumns,
+  packColor,
   pixelGrid,
-  readAmp,
-  readRgbColumn,
-  stridePeak
+  readBandLevel,
+  rgbPeakIndex
 } from './columns'
 import { bandFall } from './fall'
 
@@ -35,14 +36,14 @@ export function drawAnalysisRgb(
   const reach = anchor === 'center' ? ph / 2 : ph * (1 - OVERVIEW_TOP_PAD)
   for (let x = 0; x < pw; x++) {
     const start = (first + x) * per
-    const col = readRgbColumn(heights, colors, n, start, start + per)
-    if (!col) {
+    const peak = rgbPeakIndex(heights, n, start, start + per)
+    if (peak < 0) {
       amp[x] = NaN
       color[x] = -1
       continue
     }
-    amp[x] = Math.max(1, Math.round(col.amp * reach))
-    color[x] = col.color
+    amp[x] = Math.max(1, Math.round(byteLevel(heights[peak]) * reach))
+    color[x] = packColor(colors, peak)
   }
   paintColumns(ctx, pw, ph, anchor, (x) => {
     const c = color[x]
@@ -65,37 +66,41 @@ export function drawAnalysisBands(
   stride = 1,
   fallBlocks = 0
 ): void {
-  const prepared = fallBlocks >= 1 ? bandFall(bands, stride, fallBlocks) : null
-  const data = prepared ?? bands
-  const drawStride = prepared ? 1 : stride
-  const src = data.length / 3
-  const n = logicalCount(src, drawStride)
+  // The fallen bands are worked out at `stride` already, so they are read entry by entry.
+  const fallen = fallBlocks >= 1 ? bandFall(bands, stride, fallBlocks) : null
+  const source = fallen ? bandSource(fallen, 1) : bandSource(bands, stride)
   const grid = pixelGrid(from, to, pw)
-  if (!grid || n < 1) return
+  if (!grid || source.count < 1) return
   fitColumns(pw)
   const { amp, color } = columns
   const { per, first } = grid
   const reach = anchor === 'center' ? ph / 2 : ph
-  const bandAt = (band: number, i: number): number => {
-    if (drawStride <= 1) return data[i * 3 + band] / 255
-    return stridePeak(data, src, i, drawStride, band) / 255
-  }
   for (const layer of BANDS_LOW_TO_HIGH) {
+    const fill = layer.color
     for (let x = 0; x < pw; x++) {
       const start = (first + x) * per
-      const level = readAmp((i) => bandAt(layer.band, i), n, start, start + per, prepared != null)
-      amp[x] = Number.isNaN(level) ? NaN : level * reach
-      color[x] = Number.isNaN(level) ? -1 : 1
+      const level = readBandLevel(source, layer.band, start, start + per, fallen != null)
+      const empty = Number.isNaN(level)
+      amp[x] = empty ? NaN : level * reach
+      color[x] = empty ? -1 : 1
     }
-    paintColumns(ctx, pw, ph, anchor, () => layer.color, true)
+    paintColumns(ctx, pw, ph, anchor, () => fill, true)
   }
 }
+
+/** Per-pixel buffers for `drawStackedBands`, shared between draws and only grown. */
+let stackedLevels = [new Float32Array(0), new Float32Array(0), new Float32Array(0)]
+let stackedFloor = new Float32Array(0)
 
 /** The whole track's bands stacked from the bottom, averaged per pixel, as the overview shows them. */
 export function drawStackedBands(ctx: CanvasRenderingContext2D, bands: Uint8Array, pw: number, ph: number): void {
   const length = bands.length / 3
-  const level = [new Float32Array(pw), new Float32Array(pw), new Float32Array(pw)]
-  const floor0 = new Float32Array(pw)
+  if (stackedFloor.length < pw) {
+    stackedLevels = [new Float32Array(pw), new Float32Array(pw), new Float32Array(pw)]
+    stackedFloor = new Float32Array(pw)
+  }
+  const level = stackedLevels
+  const floor0 = stackedFloor
   let peak = 1
   for (let x = 0; x < pw; x++) {
     const a = Math.floor((x * length) / pw)

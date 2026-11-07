@@ -1,6 +1,6 @@
 <script lang="ts">
   import { flushSync } from 'svelte'
-  import { ArrowUp, ArrowDown, Star, AudioLines, Music, X } from '@lucide/svelte'
+  import { ArrowUp, ArrowDown } from '@lucide/svelte'
   import { browserPreviews } from '$lib/browserPreview.svelte'
   import {
     BROWSER_COLUMNS_KEY,
@@ -31,6 +31,7 @@
   import ContextMenu from './ContextMenu.svelte'
   import WaveformThumb from './WaveformThumb.svelte'
   import RatingStars from './RatingStars.svelte'
+  import RowIcon from './RowIcon.svelte'
 
   let {
     onselect,
@@ -299,7 +300,7 @@
 
   /** Height of the sticky column header, which stays the same at every row height. */
   const HEADER = 32
-  const OVERSCAN = 12
+  const OVERSCAN = 4
   const ROW = $derived(stacked ? stackedRowHeight(library.browserRowHeight) : library.browserRowHeight)
   const rowFont = $derived(rowFontSize(library.browserRowHeight))
 
@@ -584,7 +585,7 @@
 {#snippet cell(column: Column, track: Track, index: number)}
   {#if column.id === 'index'}
     {#if track.id in onDeck}
-      <AudioLines class={['ml-auto size-[1.12em] text-accent', onDeck[track.id] && 'animate-pulse']} />
+      <RowIcon name="audio-lines" class={['ml-auto size-[1.12em] text-accent', onDeck[track.id] && 'animate-pulse']} />
     {:else}
       {@const group = duplicateView ? library.positions.get(track.id) : undefined}
       <span class={track.missing ? 'text-warn/70' : 'text-faint'} title={group ? `Group ${group}` : undefined}>
@@ -615,7 +616,7 @@
           fill ? 'absolute inset-0' : 'aspect-square h-full shrink-0'
         ]}
       >
-        <Music class="size-[1.12em]" />
+        <RowIcon name="music" class="size-[1.12em]" />
       </span>
     {/if}
   {:else if column.id === 'title' && stacked}
@@ -658,7 +659,7 @@
   {:else if column.id === 'cue'}
     {#if track.collected === false}
       <span class="text-faint" title="Not in the collection" aria-label="Not in the collection">
-        <X class="size-[1.12em]" />
+        <RowIcon name="x" class="size-[1.12em]" />
       </span>
     {:else}
       {@const preview = browserPreviews.preview(track.id)}
@@ -673,7 +674,7 @@
           {#each CUE_STARS as star (star.key)}
             {#if preview?.[star.key]}
               <span class="inline-flex min-w-[0.36em] shrink last:shrink-0" style:color={star.color} aria-hidden="true">
-                <Star class="size-[1.12em] shrink-0 fill-current" strokeWidth={0} />
+                <RowIcon name="star" class="size-[1.12em] shrink-0 fill-current" strokeWidth={0} />
               </span>
             {/if}
           {/each}
