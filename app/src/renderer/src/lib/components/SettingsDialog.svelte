@@ -1,10 +1,12 @@
 <script module lang="ts">
-  export type SettingsSection = 'general' | 'display' | 'analysis' | 'convert' | 'database' | 'keyboard' | 'developer'
+  export type SettingsSection =
+    'general' | 'display' | 'mix' | 'analysis' | 'convert' | 'database' | 'keyboard' | 'developer'
 </script>
 
 <script lang="ts">
   import {
     ArchiveRestore,
+    Blend,
     AudioWaveform,
     Database,
     DatabaseBackup,
@@ -47,16 +49,20 @@
   import type { Backup, BackupProgress, BackupReason, ConvertFormat, ConvertPreset } from '$lib/types'
   import type { GridMode } from '../../../../preload/analysis'
   import ConfirmDialog from './ConfirmDialog.svelte'
+  import MixCurvePreview from './mix/MixCurvePreview.svelte'
+  import { CURVES, SWAP_TIMINGS, type CurveId, type SwapTimingId } from '$lib/mix/prefs.svelte'
 
   let { initialSection = 'general', onclose }: { initialSection?: SettingsSection; onclose: () => void } = $props()
 
   const { library, decks, keybinds, analysis, backups } = getApp()
   const prefs = decks.prefs
+  const mixPrefs = decks.mixPrefs
 
   type Choice = { id: string; label: string }
   const SECTIONS: { id: SettingsSection; label: string; icon: typeof Keyboard }[] = [
     { id: 'general', label: 'General', icon: SlidersHorizontal },
     { id: 'display', label: 'Display', icon: Monitor },
+    { id: 'mix', label: 'Mix', icon: Blend },
     { id: 'analysis', label: 'Import & analysis', icon: AudioWaveform },
     { id: 'convert', label: 'Convert formats', icon: FileAudio },
     { id: 'database', label: 'Database & files', icon: Database },
@@ -373,6 +379,24 @@
               </span>
             </div>
           </section>
+        {:else if section === 'mix'}
+          <MixCurvePreview curve={mixPrefs.curve} range={mixPrefs.swapRange} />
+          <div class="flex flex-col gap-1">
+            {@render choice(
+              'Crossfader curve',
+              'How quickly a deck fades out as the fader moves away from it.',
+              CURVES,
+              mixPrefs.curveId,
+              (id) => mixPrefs.setCurve(id as CurveId)
+            )}
+            {@render choice(
+              'Bass swap',
+              'When Swap bass is on, how soon the incoming deck takes the bass during a fade.',
+              SWAP_TIMINGS,
+              mixPrefs.swapTimingId,
+              (id) => mixPrefs.setSwapTiming(id as SwapTimingId)
+            )}
+          </div>
         {:else if section === 'general'}
           <div class="flex flex-col gap-1">
             {@render toggle(

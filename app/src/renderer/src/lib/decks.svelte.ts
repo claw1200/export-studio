@@ -2,6 +2,7 @@ import { ENGINE_DECKS } from '../../../shared/engine'
 import { Audition } from './audition.svelte'
 import { Output } from './deck/output.svelte'
 import { DeckPrefs } from './deck/prefs.svelte'
+import { MixPrefs } from './mix/prefs.svelte'
 import { Player } from './player.svelte'
 
 /** The browser preview keeps the last engine deck, so adding decks never moves it. */
@@ -17,6 +18,8 @@ const AUDITION_SLOT = ENGINE_DECKS - 1
  */
 export class Decks {
   readonly prefs = new DeckPrefs()
+  /** How mix mode's crossfader and bass swap behave. */
+  readonly mixPrefs = new MixPrefs()
   readonly output = new Output()
   readonly audition = new Audition(AUDITION_SLOT)
   focused = $state.raw<Player | null>(null)

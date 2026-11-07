@@ -44,6 +44,35 @@ describe('crossfade', () => {
   })
 })
 
+describe('crossfade curve', () => {
+  it('defaults to full level to the centre', () => {
+    for (let x = 0; x <= 1; x += 0.05) assert.deepEqual(crossfade(x, 0.5), crossfade(x))
+  })
+
+  it('smooth keeps constant power with both decks at −3 dB in the centre', () => {
+    const [a, b] = crossfade(0.5, 0)
+    close(a, Math.SQRT1_2)
+    close(b, Math.SQRT1_2)
+    for (let x = 0; x <= 1; x += 0.05) {
+      const [l, r] = crossfade(x, 0)
+      close(l * l + r * r, 1)
+    }
+  })
+
+  it('sharp holds both decks full until near the far end, then cuts', () => {
+    assert.deepEqual(crossfade(0.9, 0.95), [1, 1])
+    const [a] = crossfade(1, 0.95)
+    close(a, 0)
+    const [mid] = crossfade(0.975, 0.95)
+    close(mid, Math.SQRT1_2)
+  })
+
+  it('clamps the curve so the sharpest still fades', () => {
+    assert.deepEqual(crossfade(0.97, 1), crossfade(0.97, 0.95))
+    assert.deepEqual(crossfade(0.3, -1), crossfade(0.3, 0))
+  })
+})
+
 describe('faderPosition', () => {
   it('snaps onto the centre when close to it', () => {
     assert.equal(faderPosition(0.51), 0.5)

@@ -1,16 +1,27 @@
 /** How close to the middle snaps to it, so the centre is easy to find by hand. */
 export const CENTRE_SNAP = 0.02
 
+/** The sharpest curve: a deck still fades out over the last stretch of travel rather than clicking off. */
+export const CURVE_MAX = 0.95
+/** The curve the fader had before it could be set: full level to the centre, then a quarter cosine. */
+export const DEFAULT_CURVE = 0.5
+
 /**
- * Levels for a crossfader at `position`, 0 all A to 1 all B. Both decks are at full level (0 dB)
- * from the centre outwards to their own side; moving away from a deck past the centre fades only
- * that deck, along a quarter cosine, so it eases out rather than dropping at the end.
+ * Levels for a crossfader at `position`, 0 all A to 1 all B. `curve` is how far a deck holds full
+ * level (0 dB) as the fader moves away from it, as a fraction of the travel: 0 fades it from its
+ * own end, so both decks are at −3 dB in the centre with constant power throughout; 0.5 keeps
+ * both full to the centre; near 1 is a cut at the far end, for scratching. Past that point the
+ * deck fades along a quarter cosine, so it eases out rather than dropping at the end.
  */
-export function crossfade(position: number): [a: number, b: number] {
+export function crossfade(position: number, curve = DEFAULT_CURVE): [a: number, b: number] {
   const x = Math.min(1, Math.max(0, position))
-  /** Level of a deck the fader has moved `away` from, 0 at the centre to 1 at the far end. */
-  const fade = (away: number): number => (away <= 0 ? 1 : Math.cos((Math.min(1, away) * Math.PI) / 2))
-  return [fade((x - 0.5) * 2), fade((0.5 - x) * 2)]
+  const hold = Math.min(CURVE_MAX, Math.max(0, curve))
+  /** Level of a deck `away` from its own end, 0 there to 1 at the other end. */
+  const fade = (away: number): number => {
+    const t = (away - hold) / (1 - hold)
+    return t <= 0 ? 1 : Math.cos((Math.min(1, t) * Math.PI) / 2)
+  }
+  return [fade(x), fade(1 - x)]
 }
 
 /** A dragged position, clamped and pulled onto the centre when it is close. */
@@ -19,35 +30,69 @@ export function faderPosition(position: number): number {
   return Math.abs(x - 0.5) < CENTRE_SNAP ? 0.5 : x
 }
 
-/** Fader travel over which the bass swaps from one deck to the other. */
-export const SWAP_TRAVEL = 0.5
+/**
+ * Where on the fade the bass swaps, as fader travel from where the fade began: it starts moving
+ * after `start` and is done by `end`.
+ */
+export interface SwapRange {
+  start: number
+  end: number
+}
+
+/** The swap's range before it could be set: over the first half of the fade, done by the centre. */
+export const DEFAULT_SWAP_RANGE: SwapRange = { start: 0, end: 0.5 }
+/** The shortest swap, so the bass is never cut over in a click. */
+export const MIN_SWAP_TRAVEL = 0.05
+
+/** `range` within the travel, at least `MIN_SWAP_TRAVEL` long. */
+export function swapRange(range: SwapRange): SwapRange {
+  const start = Math.min(1 - MIN_SWAP_TRAVEL, Math.max(0, range.start))
+  return { start, end: Math.min(1, Math.max(start + MIN_SWAP_TRAVEL, range.end)) }
+}
 
 /**
  * Where a bass swap stands, for swapping the bass the way a DJ does on the EQs rather than by
- * fader position alone: the deck being faded away from gives its bass up over the first half of
- * the fade, so by the centre the incoming deck has all of it and the outgoing none.
+ * fader position alone: the deck being faded away from gives its bass up as the fader travels
+ * through the swap range, measured from where the fade began.
  *
- * Which deck is outgoing depends on which way the fader is moving, so the swap is the fader's
- * position with `SWAP_TRAVEL` of slack in it. `anchor` is the trailing edge of that slack: moving
- * towards B drags it along behind the fader once the swap is complete, and moving back towards A
- * swaps the bass back from wherever the fader turns round. The bass never jumps, whatever the
- * fader does.
+ * Which deck is outgoing depends on which way the fader is moving, so the fade begins wherever
+ * the fader last turned round. Turning round mid-swap swaps the bass back from where it stands,
+ * after the same start travel and at the same rate. The bass never jumps, whatever the fader does.
  */
 export interface BassSwap {
-  anchor: number
   /** Deck B's share of the bass, 0 all A's to 1 all B's. Deck A has the rest. */
   share: number
+  /** The fader's position at the last move. */
+  position: number
+  /** Where the fader last turned round, and B's share there. */
+  turn: number
+  from: number
+  /** Which way the fader is moving: 1 towards B, −1 towards A, 0 not yet known. */
+  direction: -1 | 0 | 1
 }
 
 /** The swap with the fader at `position` and nothing yet known about direction: the nearer deck has the bass. */
 export function startBassSwap(position: number): BassSwap {
-  return bassSwap(position <= 0.5 ? position : position - SWAP_TRAVEL, position)
+  return rebaseBassSwap(position <= 0.5 ? 0 : 1, position)
 }
 
-/** The swap after the fader moves to `position` from wherever left `anchor`. */
-export function bassSwap(anchor: number, position: number): BassSwap {
-  const at = Math.min(1, Math.max(0, anchor, position - SWAP_TRAVEL), position)
-  return { anchor: at, share: (position - at) / SWAP_TRAVEL }
+/** A swap holding `share` with the fader at `position`, whichever way it moves next. */
+export function rebaseBassSwap(share: number, position: number): BassSwap {
+  return { share, position, turn: position, from: share, direction: 0 }
+}
+
+/** The swap after the fader moves from where it was in `swap` to `position`. */
+export function bassSwap(swap: BassSwap, position: number, range: SwapRange = DEFAULT_SWAP_RANGE): BassSwap {
+  const moved = position - swap.position
+  if (moved === 0) return swap
+  const direction = moved > 0 ? 1 : -1
+  const turned = direction !== swap.direction
+  const turn = turned ? swap.position : swap.turn
+  const from = turned ? swap.share : swap.from
+  const { start, end } = swapRange(range)
+  const swapped = Math.max(0, Math.abs(position - turn) - start) / (end - start)
+  const share = Math.min(1, Math.max(0, from + direction * swapped))
+  return { share, position, turn, from, direction }
 }
 
 /**

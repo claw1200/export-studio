@@ -4,13 +4,14 @@ import { describe, it } from 'node:test'
 
 register(new URL('./resolve-ts.mjs', import.meta.url).href)
 
-const { bassLevel, bassSwap, startBassSwap } = await import('../src/renderer/src/lib/crossfade.ts')
+const { bassLevel, bassSwap, rebaseBassSwap, startBassSwap, swapRange } =
+  await import('../src/renderer/src/lib/crossfade.ts')
 
 /** Moves the fader through `positions` in turn and returns B's share of the bass at each. */
-function sweep(from: number, positions: number[]): number[] {
+function sweep(from: number, positions: number[], range?: { start: number; end: number }): number[] {
   let swap = startBassSwap(from)
   return positions.map((position) => {
-    swap = bassSwap(swap.anchor, position)
+    swap = bassSwap(swap, position, range)
     return Math.round(swap.share * 1e9) / 1e9
   })
 }
@@ -37,6 +38,36 @@ describe('bass swap', () => {
   it('starts with the bass on the nearer deck', () => {
     assert.equal(startBassSwap(0.3).share, 0)
     assert.equal(startBassSwap(0.8).share, 1)
+  })
+
+  it('turning back part way swaps back at the same rate', () => {
+    assert.deepEqual(sweep(0, [0.3, 0.2, 0.05]), [0.6, 0.4, 0.1])
+  })
+
+  it('swaps only between the start and end of a set range', () => {
+    const range = { start: 0.25, end: 0.75 }
+    assert.deepEqual(sweep(0, [0.1, 0.25, 0.5, 0.75, 1], range), [0, 0, 0.5, 1, 1])
+    assert.deepEqual(sweep(1, [0.9, 0.75, 0.5, 0.25, 0], range), [1, 1, 0.5, 0, 0])
+  })
+
+  it('waits out the start again after turning round, without a jump', () => {
+    const range = { start: 0.1, end: 0.5 }
+    // A to 0.3 is half the swap; back 0.1 is inside the start, then the half swaps back.
+    assert.deepEqual(sweep(0, [0.3, 0.2, 0.1, 0], range), [0.5, 0.5, 0.25, 0])
+  })
+
+  it('carries on from where it stands when the range changes', () => {
+    let swap = bassSwap(startBassSwap(0), 0.25)
+    assert.equal(swap.share, 0.5)
+    swap = rebaseBassSwap(swap.share, swap.position)
+    swap = bassSwap(swap, 0.3, { start: 0, end: 0.2 })
+    assert.ok(Math.abs(swap.share - 0.75) < 1e-9)
+  })
+
+  it('keeps the range within the travel and never instant', () => {
+    assert.deepEqual(swapRange({ start: 0.5, end: 0.5 }), { start: 0.5, end: 0.55 })
+    assert.deepEqual(swapRange({ start: 1, end: 1 }), { start: 0.95, end: 1 })
+    assert.deepEqual(swapRange({ start: -1, end: 2 }), { start: 0, end: 1 })
   })
 
   it('keeps the power of one bass part way through', () => {

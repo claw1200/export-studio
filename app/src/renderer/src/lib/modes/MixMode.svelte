@@ -22,7 +22,7 @@
   const { decks, keybinds } = getApp()
   // svelte-ignore state_referenced_locally
   const [a, b] = players
-  const mixer = new Mixer(a, b)
+  const mixer = new Mixer(a, b, decks.mixPrefs)
 
   const playShortcut = $derived(keybinds.bindings['mix.playBoth'][0])
   const playTitle = $derived(
@@ -36,6 +36,8 @@
   $effect(() => keybinds.register(mixKeys(a)))
   $effect(() => keybinds.register(mixKeys(b), 'shift'))
   $effect(() => keybinds.register({ 'mix.playBoth': () => mixer.toggle() }))
+  // A change in settings to the crossfader curve or the bass swap applies straight away.
+  $effect(() => mixer.retune())
   // Keeps the follower on the master's tempo as either deck plays through tempo changes.
   $effect(() => mixer.follow())
   // A deck losing its track cannot be synced to.

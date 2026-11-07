@@ -1,6 +1,15 @@
 import { untrack } from 'svelte'
 import { bpmAt, fractionalBeatIndex } from './beat'
-import { bassLevel, bassSwap, crossfade, faderPosition, startBassSwap, type BassSwap } from './crossfade'
+import {
+  bassLevel,
+  bassSwap,
+  crossfade,
+  faderPosition,
+  rebaseBassSwap,
+  startBassSwap,
+  type BassSwap
+} from './crossfade'
+import type { MixPrefs } from './mix/prefs.svelte'
 import { beatOffset, matchTempo, stepTempo } from './mix/sync'
 import { Player } from './player.svelte'
 import { getSetting, setSetting } from './settings'
@@ -58,7 +67,8 @@ export class Mixer {
 
   constructor(
     readonly a: Player,
-    readonly b: Player
+    readonly b: Player,
+    readonly prefs: MixPrefs
   ) {
     this.master = $state.raw(a)
     this.apply()
@@ -228,12 +238,25 @@ export class Mixer {
     player.play()
   }
 
+  /**
+   * Picks up a change to the curve or swap range. The swap carries on from where it stands, as
+   * though the fade began here, so the bass does not jump. Run it from an effect: it reads `prefs`.
+   */
+  retune(): void {
+    void this.prefs.curve
+    void this.prefs.swapRange
+    untrack(() => {
+      this.swap = rebaseBassSwap(this.swap.share, this.swap.position)
+      this.apply()
+    })
+  }
+
   private apply(): void {
-    const [a, b] = crossfade(this.crossfader)
+    const [a, b] = crossfade(this.crossfader, this.prefs.curve)
     this.a.setGain(a)
     this.b.setGain(b)
     if (this.swapBass) {
-      this.swap = bassSwap(this.swap.anchor, this.crossfader)
+      this.swap = bassSwap(this.swap, this.crossfader, this.prefs.swapRange)
       this.lows = [1 - this.swap.share, this.swap.share]
       this.a.setLow(bassLevel(this.lows[0]))
       this.b.setLow(bassLevel(this.lows[1]))
