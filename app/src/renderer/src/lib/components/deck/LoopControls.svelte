@@ -4,7 +4,7 @@
   import { chordLabel, type ActionId } from '$lib/keymap'
   import { segment, segmentButton } from './segment'
 
-  /** In, out and reloop/exit as on the mix deck, then beat loop and resize, then quantise. */
+  /** In, out and reloop/exit as on the mix deck, then beat loop and resize. */
   const { keybinds } = getApp()
   const player = getPlayer()
 
@@ -61,15 +61,5 @@
     onclick={() => player.resizeLoop(2)}
     aria-label="Double loop"
     title="Double loop{shortcut('deck.loopDouble')}">×2</button
-  >
-</div>
-
-<div class={segment}>
-  <button
-    class={segmentButton(player.quantise, 'accent')}
-    onclick={() => player.setQuantise(!player.quantise)}
-    aria-pressed={player.quantise}
-    title={(player.quantise ? 'Quantise on. Scrubbing and new hot cues snap to the beat.' : 'Quantise off') +
-      shortcut('deck.quantise')}>QUANT</button
   >
 </div>
