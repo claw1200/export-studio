@@ -47,66 +47,63 @@ export function stridePeak(data: Uint8Array, src: number, index: number, stride:
   return peak
 }
 
-type ColumnSpan =
-  { kind: 'hold'; index: number; next: number; fraction: number } | { kind: 'peak'; from: number; to: number }
+/*
+ * The readers below run for every pixel column of every frame the deck draws, so they take plain
+ * arguments and return numbers: no closure per call and no object per column, which would
+ * otherwise be thousands of short-lived allocations a frame and steady garbage collection.
+ *
+ * A pixel column covers entries `start`–`end`. Narrower than one entry, it holds the entry under its
+ * middle; wider, it takes the peak of the entries it touches.
+ */
 
-function columnSpan(count: number, start: number, end: number): ColumnSpan | null {
-  if (!(end > start) || end <= 0 || start >= count) return null
-  if (end - start <= 1) {
-    const at = Math.min(count - 1, Math.max(0, (start + end) / 2))
-    const index = at | 0
-    return { kind: 'hold', index, next: Math.min(count - 1, index + 1), fraction: at - index }
-  }
-  return { kind: 'peak', from: Math.max(0, Math.floor(start)), to: Math.min(count, Math.ceil(end)) }
+/** One band's byte at logical entry `i`, reading every `stride` entries as one. */
+function bandByte(data: Uint8Array, src: number, i: number, stride: number, band: number): number {
+  return stride <= 1 ? data[i * 3 + band] : stridePeak(data, src, i, stride, band)
 }
 
-/** Slopes down toward the next block. A rise stays flat until the block boundary. */
-function fall(current: number, next: number, fraction: number): number {
-  if (next >= current) return current
-  return current + (next - current) * fraction
-}
-
-/** The peak of entries `start`–`end`, or NaN outside the data. */
-export function readAmp(
-  get: (i: number) => number,
+/**
+ * One band's level, 0 to 1, for the pixel column covering logical entries `start`–`end` of
+ * interleaved low/mid/high `data` (`src` entries, `count` after `stride`), or NaN outside the data.
+ * With `lerpDown`, a column narrower than an entry slopes down toward the next entry; a rise stays
+ * flat until the entry boundary.
+ */
+export function readBandLevel(
+  data: Uint8Array,
+  src: number,
   count: number,
+  stride: number,
+  band: number,
   start: number,
   end: number,
   lerpDown: boolean
 ): number {
-  const span = columnSpan(count, start, end)
-  if (!span) return NaN
-  if (span.kind === 'hold') {
-    return lerpDown ? fall(get(span.index), get(span.next), span.fraction) : get(span.index)
+  if (!(end > start) || end <= 0 || start >= count) return NaN
+  if (end - start <= 1) {
+    const at = Math.min(count - 1, Math.max(0, (start + end) / 2))
+    const index = at | 0
+    const current = bandByte(data, src, index, stride, band) / 255
+    if (!lerpDown) return current
+    const next = bandByte(data, src, Math.min(count - 1, index + 1), stride, band) / 255
+    return next >= current ? current : current + (next - current) * (at - index)
   }
+  const to = Math.min(count, Math.ceil(end))
   let peak = 0
-  for (let i = span.from; i < span.to; i++) {
-    const value = get(i)
+  for (let i = Math.max(0, Math.floor(start)); i < to; i++) {
+    const value = bandByte(data, src, i, stride, band)
     if (value > peak) peak = value
   }
-  return peak
+  return peak / 255
 }
 
-/** The tallest entry of `start`–`end` and its colour. */
-export function readRgbColumn(
-  heights: Uint8Array,
-  colors: Uint8Array,
-  count: number,
-  start: number,
-  end: number
-): { amp: number; color: number } | null {
-  const span = columnSpan(count, start, end)
-  if (!span) return null
-  if (span.kind === 'hold') return { amp: heights[span.index] / 255, color: packColor(colors, span.index) }
-  let peak = -1
-  let peakIndex = span.from
-  for (let i = span.from; i < span.to; i++) {
-    if (heights[i] > peak) {
-      peak = heights[i]
-      peakIndex = i
-    }
-  }
-  return { amp: Math.max(0, peak) / 255, color: packColor(colors, peakIndex) }
+/** The tallest of entries `start`–`end` (the first, on a tie), or -1 outside the data. */
+export function rgbPeakIndex(heights: Uint8Array, count: number, start: number, end: number): number {
+  if (!(end > start) || end <= 0 || start >= count) return -1
+  if (end - start <= 1) return Math.min(count - 1, Math.max(0, (start + end) / 2)) | 0
+  const from = Math.max(0, Math.floor(start))
+  const to = Math.min(count, Math.ceil(end))
+  let peakIndex = from
+  for (let i = from + 1; i < to; i++) if (heights[i] > heights[peakIndex]) peakIndex = i
+  return peakIndex
 }
 
 /** Fills the columns as shapes, one per run of the same colour. */
