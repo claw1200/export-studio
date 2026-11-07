@@ -411,7 +411,7 @@
             )}
             {@render choice(
               'Highlight matching keys',
-              'Colours keys in the browser that mix with the master deck, green for the same key to orange for a semitone up. Pick the loosest match to show: same key, relative major or minor, one step either way round the Camelot wheel, two steps up (1A to 3A), or seven up (1A to 8A).',
+              'Colours browser keys that mix with the master deck. Pick the loosest match to show.',
               KEY_HIGHLIGHTS,
               mixPrefs.keyHighlightId,
               (id) => mixPrefs.setKeyHighlight(id as KeyHighlightId)
