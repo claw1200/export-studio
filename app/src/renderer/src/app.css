@@ -24,6 +24,7 @@
   --color-warn: oklch(0.82 0.15 80);
   --color-ok: oklch(0.78 0.17 145);
   --color-cue: #ff8a1f;
+  --color-play: #2bd94a;
   --color-flag: #b48cff;
 }
 

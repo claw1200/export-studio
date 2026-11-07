@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Pause, Play } from '@lucide/svelte'
+  import DeckButton from './DeckButton.svelte'
+  import PlayButton from './PlayButton.svelte'
   import { deckName, getDeckInfo, getPlayer } from '$lib/deck/context'
   import { hold } from '$lib/deck/hold'
   import { useShortcut } from '$lib/deck/shortcut'
@@ -28,29 +29,16 @@
 </script>
 
 <div class="flex shrink-0 items-center gap-1.5">
-  <button
-    class={[
-      'grid size-7 place-items-center rounded-full transition disabled:opacity-30',
-      player.playing ? 'bg-accent text-bg hover:brightness-110' : 'bg-raised text-fg hover:bg-hover'
-    ]}
+  <PlayButton
+    playing={player.playing}
     disabled={!player.playable}
     onclick={() => (onplay ? onplay() : player.toggle())}
-    aria-label={player.playing ? `Pause ${name}` : `Play ${name}`}
+    label={player.playing ? `Pause ${name}` : `Play ${name}`}
     title={(player.playing ? `Pause ${name}` : (playTitle ?? `Play ${name}`)) + shortcut('deck.playPause')}
-  >
-    {#if player.playing}
-      <Pause class="size-3.5 fill-current" />
-    {:else}
-      <Play class="ml-px size-3.5 fill-current" />
-    {/if}
-  </button>
-  <button
-    class={[
-      'h-6 w-11 touch-none rounded-full border text-[10.5px] font-bold tracking-wide transition select-none disabled:opacity-30',
-      cueLit
-        ? 'border-transparent bg-cue text-bg shadow-[0_0_10px] shadow-cue/50'
-        : 'border-cue/60 text-cue hover:bg-cue/15'
-    ]}
+  />
+  <DeckButton
+    tone="cue"
+    lit={cueLit}
     disabled={!player.playable}
     {@attach hold(
       () => player.cueDown(),
@@ -59,6 +47,6 @@
     aria-label="Cue {name}"
     title={cueTitle + shortcut('deck.cue')}
   >
-    CUE
-  </button>
+    <span class="text-[9px] font-bold tracking-wide drop-shadow-sm">CUE</span>
+  </DeckButton>
 </div>
