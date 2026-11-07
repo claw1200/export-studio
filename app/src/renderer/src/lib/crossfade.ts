@@ -126,3 +126,12 @@ export function bassSwap(swap: BassSwap, position: number, range: SwapRange = DE
 export function bassLevel(share: number): number {
   return Math.sin((Math.min(1, Math.max(0, share)) * Math.PI) / 2)
 }
+
+/** Below this level a deck counts as silent: about -40 dB. */
+export const AUDIBLE_GAIN = 0.01
+
+/** The one deck heard (0 for A, 1 for B): playing and not faded out. Null when neither or both are. */
+export function soleAudible(playing: [boolean, boolean], gains: [number, number]): 0 | 1 | null {
+  const heard = [0, 1].filter((i) => playing[i] && gains[i] >= AUDIBLE_GAIN) as (0 | 1)[]
+  return heard.length === 1 ? heard[0] : null
+}

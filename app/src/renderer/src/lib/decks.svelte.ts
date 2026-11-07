@@ -18,11 +18,13 @@ const AUDITION_SLOT = ENGINE_DECKS - 1
  */
 export class Decks {
   readonly prefs = new DeckPrefs()
-  /** How mix mode's crossfader and bass swap behave. */
+  /** How mix mode's crossfader, bass swap and key highlighting behave. */
   readonly mixPrefs = new MixPrefs()
   readonly output = new Output()
   readonly audition = new Audition(AUDITION_SLOT)
   focused = $state.raw<Player | null>(null)
+  /** Mix mode's master deck while mix mode is shown; the browser highlights keys that mix with it. */
+  mixMaster = $state.raw<Player | null>(null)
 
   private players = $state.raw<Player[]>([])
   private byKey = new Map<string, Player>()

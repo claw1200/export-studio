@@ -5,7 +5,8 @@
   import { TrackDrop } from '$lib/deck/drop.svelte'
   import { getApp } from '$lib/context'
   import { chordLabel, withShift, type ActionId } from '$lib/keymap'
-  import { formatBpm, formatClock, keyColor, pitchSemitones, shiftKey } from '$lib/format'
+  import { formatBpm, formatClock, keyColor, pitchSemitones } from '$lib/format'
+  import { heardKey } from '$lib/mix/harmonic'
   import { ownBpm, playingBpm, type Mixer } from '$lib/mixer.svelte'
   import type { Player } from '$lib/player.svelte'
   import WaveformDetail from '../WaveformDetail.svelte'
@@ -54,7 +55,7 @@
   const keyShift = $derived(player.tempo.keyShift)
   /** The key heard: the shift, and the tempo's pitch change too unless master tempo holds it. */
   const semitones = $derived(keyShift + (masterTempo ? 0 : pitchSemitones(rate)))
-  const key = $derived(track?.key ? shiftKey(track.key, semitones) : '')
+  const key = $derived(heardKey(track?.key ?? '', player.tempo))
   const bpmTitle = $derived(
     following
       ? `Following deck ${mixer.master === mixer.a ? 'A' : 'B'}`

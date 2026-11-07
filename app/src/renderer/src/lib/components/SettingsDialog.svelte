@@ -50,7 +50,14 @@
   import type { GridMode } from '../../../../preload/analysis'
   import ConfirmDialog from './ConfirmDialog.svelte'
   import MixCurvePreview from './mix/MixCurvePreview.svelte'
-  import { CURVES, SWAP_TIMINGS, type CurveId, type SwapTimingId } from '$lib/mix/prefs.svelte'
+  import {
+    CURVES,
+    KEY_HIGHLIGHTS,
+    SWAP_TIMINGS,
+    type CurveId,
+    type KeyHighlightId,
+    type SwapTimingId
+  } from '$lib/mix/prefs.svelte'
 
   let { initialSection = 'general', onclose }: { initialSection?: SettingsSection; onclose: () => void } = $props()
 
@@ -395,6 +402,19 @@
               SWAP_TIMINGS,
               mixPrefs.swapTimingId,
               (id) => mixPrefs.setSwapTiming(id as SwapTimingId)
+            )}
+            {@render toggle(
+              'Auto master',
+              'The deck that alone has sound, playing and not faded out, becomes the master.',
+              mixPrefs.autoMaster,
+              () => mixPrefs.setAutoMaster(!mixPrefs.autoMaster)
+            )}
+            {@render choice(
+              'Highlight matching keys',
+              'Colours keys in the browser that mix with the master deck, green for the same key to orange for a semitone up. Pick the loosest match to show: same key, relative major or minor, one step either way round the Camelot wheel, two steps up (1A to 3A), or seven up (1A to 8A).',
+              KEY_HIGHLIGHTS,
+              mixPrefs.keyHighlightId,
+              (id) => mixPrefs.setKeyHighlight(id as KeyHighlightId)
             )}
           </div>
         {:else if section === 'general'}

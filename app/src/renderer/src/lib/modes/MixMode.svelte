@@ -38,8 +38,17 @@
   $effect(() => keybinds.register({ 'mix.playBoth': () => mixer.toggle() }))
   // A change in settings to the crossfader curve or the bass swap applies straight away.
   $effect(() => mixer.retune())
+  // The browser highlights keys that mix with the master deck while mix mode is shown.
+  $effect(() => {
+    decks.mixMaster = mixer.master
+    return () => {
+      if (decks.mixMaster === mixer.master) decks.mixMaster = null
+    }
+  })
   // Keeps the follower on the master's tempo as either deck plays through tempo changes.
   $effect(() => mixer.follow())
+  // The deck that alone is heard becomes the master.
+  $effect(() => mixer.followSound())
   // A deck losing its track cannot be synced to.
   $effect(() => {
     if (mixer.synced && !mixer.canSync) mixer.setSynced(false)

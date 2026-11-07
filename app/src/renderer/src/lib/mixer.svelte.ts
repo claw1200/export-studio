@@ -6,6 +6,7 @@ import {
   crossfade,
   faderPosition,
   rebaseBassSwap,
+  soleAudible,
   startBassSwap,
   type BassSwap
 } from './crossfade'
@@ -93,6 +94,21 @@ export class Mixer {
     if (player !== this.a && player !== this.b) return
     this.master = player
     this.follow()
+  }
+
+  /**
+   * Makes the deck that alone has sound, playing and not faded out, the master. While both or
+   * neither are heard the master stays as it is, so a deck picked by hand keeps it. Run it from an
+   * effect: it reads both decks' play state and the fader. Off when `prefs.autoMaster` is.
+   */
+  followSound(): void {
+    if (!this.prefs.autoMaster) return
+    const sole = soleAudible([this.a.playing, this.b.playing], crossfade(this.crossfader, this.prefs.curve))
+    if (sole == null) return
+    const player = sole === 0 ? this.a : this.b
+    untrack(() => {
+      if (this.master !== player) this.setMaster(player)
+    })
   }
 
   /**

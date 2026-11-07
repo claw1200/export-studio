@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 
 register(new URL('./resolve-ts.mjs', import.meta.url).href)
 
-const { crossfade, faderPosition } = await import('../src/renderer/src/lib/crossfade.ts')
+const { crossfade, faderPosition, soleAudible } = await import('../src/renderer/src/lib/crossfade.ts')
 
 const close = (a: number, b: number): void => assert.ok(Math.abs(a - b) < 1e-9, `${a} ≉ ${b}`)
 
@@ -83,5 +83,23 @@ describe('faderPosition', () => {
   it('stays within the travel', () => {
     assert.equal(faderPosition(-0.2), 0)
     assert.equal(faderPosition(1.4), 1)
+  })
+})
+
+describe('soleAudible', () => {
+  it('picks the only deck playing', () => {
+    assert.equal(soleAudible([true, false], [1, 1]), 0)
+    assert.equal(soleAudible([false, true], [1, 1]), 1)
+  })
+
+  it('ignores a playing deck faded out', () => {
+    assert.equal(soleAudible([true, true], [1, 0]), 0)
+    assert.equal(soleAudible([true, true], [0.001, 1]), 1)
+  })
+
+  it('picks nothing while both or neither are heard', () => {
+    assert.equal(soleAudible([true, true], [1, 1]), null)
+    assert.equal(soleAudible([false, false], [1, 1]), null)
+    assert.equal(soleAudible([true, false], [0, 1]), null)
   })
 })

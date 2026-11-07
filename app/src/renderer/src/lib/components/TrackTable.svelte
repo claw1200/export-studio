@@ -18,6 +18,7 @@
   import { artworkUrl } from '$lib/api'
   import { verdictForTrack, type Verdict } from '$lib/hardware/compatibility'
   import { formatBpm, formatDuration, keyColor, TRACK_COLORS } from '$lib/format'
+  import { heardKey, keyMatch, keyMatchColor, withinCutoff, type KeyMatch } from '$lib/mix/harmonic'
   import { chordLabel } from '$lib/keymap'
   import { TRACK_DRAG_TYPE } from '$lib/library.svelte'
   import { droppedPaths, isFileDrag } from '$lib/library/drop'
@@ -59,6 +60,24 @@
     }
     return tracks
   })
+  /** In mix mode, the key the master deck is heard in, for highlighting keys that mix with it. */
+  const masterKey = $derived.by(() => {
+    const master = decks.mixMaster
+    return master?.track?.key && decks.mixPrefs.keyCutoff ? heardKey(master.track.key, master.tempo) : ''
+  })
+  /** How well `track` mixes with the master deck, when that is close enough to highlight. */
+  function highlightMatch(track: Track): KeyMatch | null {
+    if (!masterKey || track.missing || !track.key) return null
+    const match = keyMatch(masterKey, track.key)
+    return withinCutoff(match, decks.mixPrefs.keyCutoff) ? match : null
+  }
+  const MATCH_LABELS: Record<KeyMatch, string> = {
+    same: 'Same key as the master deck',
+    relative: 'Relative key of the master deck',
+    adjacent: 'One step from the master deck’s key',
+    two: 'Two steps above the master deck’s key',
+    boost: 'A semitone above the master deck’s key'
+  }
   const isMac = window.api.platform === 'darwin'
 
   const initial = readColumnPrefs(getSetting(BROWSER_COLUMNS_KEY))
@@ -617,7 +636,20 @@
   {:else if column.id === 'bpm'}
     <span class={track.missing ? 'text-warn' : 'text-fg/90'}>{formatBpm(track.bpm)}</span>
   {:else if column.id === 'key'}
-    <span class="font-medium" style:color={(!track.missing && keyColor(track.key)) || 'inherit'}>{track.key}</span>
+    {@const match = highlightMatch(track)}
+    {#if match}
+      <span
+        class="rounded px-[0.4em] py-[0.1em] font-semibold"
+        style:background-color={keyMatchColor(match)}
+        style:color="oklch(0.2 0.02 250)"
+        title={`${MATCH_LABELS[match]} (${masterKey})`}>{track.key}</span
+      >
+    {:else}
+      <!-- While keys are highlighted, only the matches keep a colour so they stand out. -->
+      <span class="font-medium" style:color={(!track.missing && !masterKey && keyColor(track.key)) || 'inherit'}
+        >{track.key}</span
+      >
+    {/if}
   {:else if column.id === 'duration'}
     {formatDuration(track.duration)}
   {:else if column.id === 'wave'}
