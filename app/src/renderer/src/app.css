@@ -10,6 +10,7 @@
   --color-hover: oklch(0.245 0.009 260);
   --color-line: oklch(0.27 0.008 260);
   --color-line-soft: oklch(0.225 0.007 260);
+  --color-wave: oklch(0.12 0.005 260);
 
   --color-fg: oklch(0.95 0.004 260);
   --color-muted: oklch(0.7 0.01 260);
@@ -23,6 +24,7 @@
   --color-warn: oklch(0.82 0.15 80);
   --color-ok: oklch(0.78 0.17 145);
   --color-cue: #ff8a1f;
+  --color-play: #2bd94a;
   --color-flag: #b48cff;
 }
 

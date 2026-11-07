@@ -6,3 +6,16 @@ import type { Player } from '../player.svelte'
  * components inside work on whichever player that deck shows, however many decks are on screen.
  */
 export const [getPlayer, setPlayer] = createContext<Player>()
+
+export interface DeckInfo {
+  /** Mix mode's "A" or "B"; edit mode's single deck has none. */
+  label: string | null
+  /** Deck B in mix mode takes deck A's shortcuts with Shift added. */
+  shifted: boolean
+}
+
+export const [getDeckInfo, setDeckInfo] = createContext<DeckInfo>()
+
+export function deckName({ label }: DeckInfo): string {
+  return label ? `deck ${label}` : 'the deck'
+}

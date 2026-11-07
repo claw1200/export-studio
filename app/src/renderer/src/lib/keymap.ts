@@ -230,3 +230,9 @@ export function chordLabel(chord: string): string {
   const key = keyLabel(code)
   return isMac ? mods.join('') + key : [...mods, key].join('+')
 }
+
+/** " (⌘Z)" for the end of a title, or nothing when the action is unbound. */
+export function shortcutHint(chords: readonly string[], shifted = false): string {
+  const chord = chords.map((c) => (shifted ? withShift(c) : c)).find((c) => c != null)
+  return chord ? ` (${chordLabel(chord)})` : ''
+}

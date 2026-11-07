@@ -157,6 +157,10 @@ export class Player {
     return () => this.fileListeners.delete(listener)
   }
 
+  get playable(): boolean {
+    return !!this.track && !this.audioError
+  }
+
   get audioError(): string | null {
     if (this.track?.streaming) return STREAMING
     if (this.fileMissing) return FILE_MISSING
@@ -249,7 +253,7 @@ export class Player {
 
   /** Starts every loaded player in the same instant, keeping the gap between their playheads. */
   static playTogether(players: readonly Player[]): void {
-    const loaded = players.filter((player) => player.track && !player.audioError)
+    const loaded = players.filter((player) => player.playable)
     for (const player of loaded) player.takeSpeakers()
     Deck.playTogether(loaded.map((player) => player.deck))
   }
@@ -437,14 +441,14 @@ export class Player {
   }
 
   setLoopIn(): void {
-    if (!this.track || this.audioError) return
+    if (!this.playable) return
     const here = this.here()
     this.cuePoint = here
     if (!this.playing && !this.deck.scrubbing) this.seek(here)
   }
 
   setLoopOut(): void {
-    if (!this.track || this.audioError) return
+    if (!this.playable) return
     const start = this.cuePoint
     const end = this.here()
     if (!(end > start + 0.01)) return
@@ -458,7 +462,7 @@ export class Player {
 
   /** Pressing the same loop length again leaves the loop. */
   beatLoop(beats: number): void {
-    if (!this.track || this.audioError) return
+    if (!this.playable) return
     const range = beatLoop(this.position, beats, this.displayGrid, this.track.bpm ?? 0, this.quantise)
     if (!range) return
     const loop = this.loop

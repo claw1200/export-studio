@@ -73,7 +73,7 @@
     'flex h-5 items-center justify-center rounded border text-[10px] font-bold tracking-wide transition disabled:opacity-30'
 </script>
 
-<div class="flex w-[132px] shrink-0 gap-3 border-l border-line-soft px-3 py-3">
+<div class="flex w-[132px] shrink-0 gap-3 border-r border-line-soft px-3 py-3">
   <div class="flex flex-col items-center text-[10px] leading-none font-semibold text-faint">
     <span aria-hidden="true">−</span>
     <div

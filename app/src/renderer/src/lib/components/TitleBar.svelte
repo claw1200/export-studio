@@ -12,10 +12,11 @@
     VolumeX,
     FilePlus,
     FolderInput,
-    Import
+    Import,
+    Magnet
   } from '@lucide/svelte'
   import { getApp } from '$lib/context'
-  import { chordLabel } from '$lib/keymap'
+  import { chordLabel, shortcutHint } from '$lib/keymap'
   import type { MenuRequest } from '$lib/menu'
   import ContextMenu from './ContextMenu.svelte'
   import SettingsDialog, { type SettingsSection } from './SettingsDialog.svelte'
@@ -42,6 +43,7 @@
 
   const { library, decks, keybinds } = getApp()
   const output = decks.output
+  const prefs = decks.prefs
   const silent = $derived(output.muted || output.volume === 0)
   const isMac = window.api.platform === 'darwin'
   let importMenu = $state<MenuRequest | null>(null)
@@ -220,6 +222,22 @@
         Import
       </button>
     {/if}
+
+    <button
+      class={[
+        'no-drag flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium',
+        prefs.quantise ? 'bg-accent-soft text-accent hover:bg-accent/25' : 'text-faint hover:bg-hover hover:text-muted'
+      ]}
+      onclick={() => prefs.setQuantise(!prefs.quantise)}
+      aria-pressed={prefs.quantise}
+      title={(prefs.quantise
+        ? 'Quantise on: cues, loops and scrubbing snap to the beat on every deck'
+        : 'Quantise off: cues, loops and scrubbing land exactly where you put them') +
+        shortcutHint(keybinds.bindings['deck.quantise'])}
+    >
+      <Magnet class="size-3" />
+      Quantise
+    </button>
 
     <div class="no-drag flex h-7 items-center rounded-md pr-1.5">
       <button

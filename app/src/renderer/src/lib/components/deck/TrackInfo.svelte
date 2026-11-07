@@ -1,63 +1,46 @@
 <script lang="ts">
-  import { Music, Pencil } from '@lucide/svelte'
+  import type { ClassValue } from 'svelte/elements'
+  import { Music } from '@lucide/svelte'
   import { artworkUrl } from '$lib/api'
   import { getPlayer } from '$lib/deck/context'
-  import { formatBpm, keyColor, pitchSemitones, shiftKey } from '$lib/format'
+  import { formatClock } from '$lib/format'
 
-  const {
-    bpm,
-    gridEditable,
-    gridTitle,
-    ongridedit
-  }: { bpm: number; gridEditable: boolean; gridTitle: string; ongridedit: () => void } = $props()
+  let { class: className, size = 'md' }: { class?: ClassValue; size?: 'md' | 'lg' } = $props()
 
   const player = getPlayer()
   const track = $derived(player.track)
-  const rate = $derived(player.tempo.rate)
-  /** Master tempo holds the pitch, so the key stays. Otherwise it moves with the fader. */
-  const semitones = $derived(player.tempo.masterTempo ? 0 : pitchSemitones(rate))
-  const key = $derived(track?.key ? shiftKey(track.key, semitones) : '')
+  const lg = $derived(size === 'lg')
 </script>
 
-<div class="size-14 shrink-0 overflow-hidden rounded-md bg-raised shadow-lg shadow-black/40">
-  {#if track?.hasArtwork}
-    <img src={artworkUrl(track.id, 'm')} alt="" class="size-full object-cover" draggable="false" />
-  {:else}
-    <div class="grid size-full place-items-center text-faint"><Music class="size-5" /></div>
-  {/if}
-</div>
-
-<div class="w-64 min-w-0 shrink-0">
-  {#if track}
-    <div class="truncate text-[14px] font-semibold text-fg" title={track.title}>{track.title}</div>
-    <div class="truncate text-[12.5px] text-muted">{track.artist || 'Unknown artist'}</div>
-    <div class="tabular mt-1.5 flex items-center gap-1.5 text-[11px]">
-      <span
-        class={['rounded bg-raised px-1.5 py-0.5 font-semibold', rate === 1 ? 'text-fg' : 'text-accent']}
-        title={rate === 1 ? undefined : `${formatBpm(bpm)} BPM at the track's own tempo`}
-        >{formatBpm(bpm * rate)} BPM</span
-      >
-      {#if key}
-        <span
-          class="rounded bg-raised px-1.5 py-0.5 font-semibold"
-          style:color={keyColor(key) ?? 'inherit'}
-          title={key === track.key ? undefined : `${track.key} at the track's own pitch`}
-          >{key}</span
-        >
-      {/if}
-      <span class="rounded bg-raised px-1.5 py-0.5 text-muted">{track.fileType}</span>
-      <button
-        class="ml-auto flex items-center gap-1 rounded border border-line-soft px-1.5 py-px font-semibold text-faint transition hover:bg-hover hover:text-muted disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-faint"
-        disabled={!gridEditable}
-        onclick={ongridedit}
-        aria-label="Edit beatgrid"
-        title={gridTitle}
-      >
-        <Pencil class="size-2.5" />
-        Grid
-      </button>
+<div class={['flex min-w-0 items-center', lg ? 'gap-3' : 'gap-2.5', className]}>
+  <div class={['shrink-0 overflow-hidden bg-raised', lg ? 'size-[68px] rounded-lg' : 'size-10 rounded-md']}>
+    {#if track?.hasArtwork}
+      <img src={artworkUrl(track.id, 'm')} alt="" class="size-full object-cover" draggable="false" />
+    {:else}
+      <div class="grid size-full place-items-center text-faint"><Music class={lg ? 'size-6' : 'size-4'} /></div>
+    {/if}
+  </div>
+  <div class="min-w-0 flex-1">
+    {#if track}
+      <div class={['truncate font-semibold text-fg', lg ? 'text-[16px]' : 'text-[13.5px]']} title={track.title}>
+        {track.title}
+      </div>
+      <div class={['tabular flex items-center gap-1.5', lg ? 'mt-1 text-[12.5px]' : 'mt-0.5 text-[11px]']}>
+        <span class="truncate text-muted">{track.artist || 'Unknown artist'}</span>
+        {#if track.fileType}
+          <span class="shrink-0 rounded bg-raised px-1 text-[10px] font-semibold text-faint uppercase"
+            >{track.fileType}</span
+          >
+        {/if}
+      </div>
+    {:else}
+      <div class={['text-faint', lg ? 'text-[14px]' : 'text-[13px]']}>No track loaded</div>
+    {/if}
+  </div>
+  <div class={['tabular shrink-0 text-right font-mono', lg ? 'w-[88px]' : 'w-[72px]']}>
+    <div class={['font-medium text-fg', lg ? 'text-[18px]' : 'text-[14px]']}>{formatClock(player.position * 1000)}</div>
+    <div class={['text-faint', lg ? 'mt-0.5 text-[12.5px]' : 'text-[11px]']}>
+      −{formatClock(Math.max(0, player.duration - player.position) * 1000)}
     </div>
-  {:else}
-    <div class="text-[13px] text-faint">No track loaded</div>
-  {/if}
+  </div>
 </div>

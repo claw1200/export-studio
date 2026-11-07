@@ -4,7 +4,7 @@
   import type { TempoMap } from '$lib/tempo-map'
   import { formatBpm } from '$lib/format'
 
-  let { bpm }: { bpm: number } = $props()
+  let { bpm, compact = false }: { bpm: number; compact?: boolean } = $props()
 
   const player = getPlayer()
 
@@ -42,7 +42,8 @@
 <input
   bind:this={input}
   class={[
-    'tabular w-[76px] rounded border bg-transparent px-1 py-0.5 font-mono text-[15px] font-semibold text-fg',
+    'tabular rounded border bg-transparent font-mono font-semibold text-fg',
+    compact ? 'h-5 w-[50px] min-w-0 px-0.5 text-[11.5px]' : 'w-[76px] px-1 py-0.5 text-[15px]',
     typing
       ? 'cursor-text border-accent/60 bg-bg'
       : 'cursor-ns-resize touch-none border-transparent select-none hover:border-line-soft'

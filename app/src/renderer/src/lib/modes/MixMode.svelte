@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { Play, Square } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import { playKeys } from '$lib/deck/keys'
   import { chordLabel } from '$lib/keymap'
@@ -9,6 +8,7 @@
   import Crossfader from '$lib/components/mix/Crossfader.svelte'
   import EqKnob from '$lib/components/mix/EqKnob.svelte'
   import MixDeck from '$lib/components/mix/MixDeck.svelte'
+  import PlayButton from '$lib/components/deck/PlayButton.svelte'
   import LibraryBrowser from '$lib/components/LibraryBrowser.svelte'
   import type { ModeProps } from './types'
 
@@ -88,22 +88,15 @@
   <div
     class="flex w-48 shrink-0 flex-col items-center justify-center gap-3 rounded-lg border border-line-soft bg-surface px-4 py-3"
   >
-    <button
-      class={[
-        'grid size-14 place-items-center rounded-full shadow-lg shadow-black/40 transition disabled:cursor-not-allowed disabled:opacity-40',
-        mixer.playing ? 'bg-accent text-bg hover:brightness-110' : 'bg-raised text-fg hover:bg-hover'
-      ]}
+    <PlayButton
+      size="lg"
+      stop
+      playing={mixer.playing}
       disabled={!mixer.ready && !mixer.playing}
       onclick={() => mixer.toggle()}
-      aria-label={mixer.playing ? 'Stop' : 'Play'}
+      label={mixer.playing ? 'Stop' : 'Play'}
       title={playTitle}
-    >
-      {#if mixer.playing}
-        <Square class="size-5" fill="currentColor" />
-      {:else}
-        <Play class="ml-0.5 size-6" fill="currentColor" />
-      {/if}
-    </button>
+    />
     <div class="text-[11px] font-medium text-faint">{mixer.playing ? 'Stop' : 'Play both'}</div>
     <button
       class={[

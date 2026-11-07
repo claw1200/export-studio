@@ -1,71 +1,64 @@
 <script lang="ts">
   import { getPlayer } from '$lib/deck/context'
+  import { useShortcut } from '$lib/deck/shortcut'
+  import { segment, segmentButton } from './segment'
+
+  let { showBeatLoop = true }: { showBeatLoop?: boolean } = $props()
 
   const player = getPlayer()
-
-  const noTrack = $derived(!player.track || !!player.audioError)
-  const loopButton = (lit: boolean): string[] => [
-    'flex h-7 items-center rounded-md border px-2 text-[10.5px] font-bold tracking-wide transition disabled:opacity-30',
-    lit
-      ? 'border-transparent bg-cue text-bg shadow-[0_0_10px] shadow-cue/50'
-      : 'border-line-soft text-faint hover:bg-hover hover:text-muted'
-  ]
+  const shortcut = useShortcut()
+  const looping = $derived(!!player.loop?.active)
 </script>
 
-<div class="ml-auto flex items-center gap-3">
-  <div class="flex items-center gap-1" role="group" aria-label="Loop">
-    <button class={loopButton(false)} disabled={noTrack} onclick={() => player.setLoopIn()} title="Loop in">
-      IN
-    </button>
-    <button class={loopButton(false)} disabled={noTrack} onclick={() => player.setLoopOut()} title="Loop out">
-      OUT
-    </button>
+<div class="flex items-center gap-1.5">
+  <div class={segment} role="group" aria-label="Loop">
     <button
-      class={loopButton(!!player.loop?.active)}
+      class={segmentButton()}
+      disabled={!player.playable}
+      onclick={() => player.setLoopIn()}
+      title="Loop in{shortcut('deck.loopIn')}">IN</button
+    >
+    <button
+      class={segmentButton()}
+      disabled={!player.playable}
+      onclick={() => player.setLoopOut()}
+      title="Loop out{shortcut('deck.loopOut')}">OUT</button
+    >
+    <button
+      class={segmentButton(looping)}
       disabled={!player.loop}
       onclick={() => player.reloopExit()}
-      aria-pressed={!!player.loop?.active}
-      title={player.loop?.active ? 'Exit loop' : 'Reloop'}
+      aria-pressed={looping}
+      title="{looping ? 'Exit the loop' : 'Back into the loop'}{shortcut('deck.reloopExit')}"
     >
-      <!-- Both labels share one cell, so the button is as wide as the longer and keeps its width. -->
-      <span class="grid place-items-center">
-        <span class={['col-start-1 row-start-1', !player.loop?.active && 'invisible']}>EXIT</span>
-        <span class={['col-start-1 row-start-1', player.loop?.active && 'invisible']}>RELOOP</span>
-      </span>
-    </button>
-    <button class={loopButton(false)} disabled={noTrack} onclick={() => player.beatLoop(4)} title="4-beat loop">
-      4 BEAT
-    </button>
-    <button
-      class={loopButton(false)}
-      disabled={!player.loop}
-      onclick={() => player.resizeLoop(0.5)}
-      aria-label="Halve loop"
-      title="Halve loop"
-    >
-      ½
-    </button>
-    <button
-      class={loopButton(false)}
-      disabled={!player.loop}
-      onclick={() => player.resizeLoop(2)}
-      aria-label="Double loop"
-      title="Double loop"
-    >
-      ×2
+      <!-- Both labels share one cell so the button keeps the longer one's width. -->
+      <span class={['col-start-1 row-start-1', !looping && 'invisible']}>EXIT</span>
+      <span class={['col-start-1 row-start-1', looping && 'invisible']}>RELOOP</span>
     </button>
   </div>
-  <button
-    class={[
-      'flex h-7 items-center rounded-md border px-2 text-[11px] font-semibold transition',
-      player.quantise
-        ? 'border-transparent bg-accent-soft text-accent'
-        : 'border-line-soft text-faint hover:bg-hover hover:text-muted'
-    ]}
-    onclick={() => player.setQuantise(!player.quantise)}
-    aria-pressed={player.quantise}
-    title={player.quantise ? 'Quantise on. Scrubbing and new hot cues snap to the beat.' : 'Quantise off'}
-  >
-    Quantise
-  </button>
+
+  {#if showBeatLoop}
+    <div class={segment} role="group" aria-label="Beat loop">
+      <button
+        class={segmentButton()}
+        disabled={!player.playable}
+        onclick={() => player.beatLoop(4)}
+        title="4-beat loop{shortcut('deck.beatLoop')}">4 BEAT</button
+      >
+      <button
+        class={segmentButton()}
+        disabled={!player.loop}
+        onclick={() => player.resizeLoop(0.5)}
+        aria-label="Halve loop"
+        title="Halve loop{shortcut('deck.loopHalve')}">½</button
+      >
+      <button
+        class={segmentButton()}
+        disabled={!player.loop}
+        onclick={() => player.resizeLoop(2)}
+        aria-label="Double loop"
+        title="Double loop{shortcut('deck.loopDouble')}">×2</button
+      >
+    </div>
+  {/if}
 </div>
