@@ -1,6 +1,5 @@
 <script module lang="ts">
-  export type SettingsSection =
-    'general' | 'display' | 'analysis' | 'convert' | 'database' | 'keyboard' | 'developer'
+  export type SettingsSection = 'general' | 'display' | 'analysis' | 'convert' | 'database' | 'keyboard' | 'developer'
 </script>
 
 <script lang="ts">
@@ -682,6 +681,9 @@
             <RotateCcw class="size-3.5" /> Restore defaults
           </button>
         {:else}
+          <p class="mb-4 px-2 text-[11.5px] leading-snug text-faint">
+            In mix mode the deck shortcuts control deck A. Hold Shift with them to control deck B.
+          </p>
           {#each groups as { group, ids } (group)}
             <section class="mb-5 last:mb-0">
               <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">{group}</h3>

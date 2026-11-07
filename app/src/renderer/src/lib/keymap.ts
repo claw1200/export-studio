@@ -37,6 +37,7 @@ const hotCueSpecs = Object.fromEntries(
 
 export const ACTIONS = {
   'deck.playPause': { label: 'Play / pause', group: 'Playback', fields: 'controls' },
+  'mix.playBoth': { label: 'Play / stop both decks (mix)', group: 'Playback', fields: 'controls' },
   'deck.cue': { label: 'Cue', group: 'Playback', hold: true, fields: 'controls' },
   'deck.loopIn': { label: 'Loop in', group: 'Playback', fields: 'controls' },
   'deck.loopOut': { label: 'Loop out', group: 'Playback', fields: 'controls' },
@@ -82,6 +83,7 @@ export const ACTION_IDS = Object.keys(ACTIONS) as ActionId[]
 
 export const DEFAULT_BINDINGS: Record<ActionId, readonly string[]> = {
   'deck.playPause': ['Space'],
+  'mix.playBoth': ['KeyB'],
   'deck.cue': ['KeyC'],
   'deck.loopIn': ['KeyI'],
   'deck.loopOut': ['KeyO'],
@@ -157,6 +159,21 @@ export function chordFromEvent(e: KeyboardEvent): string | null {
 function splitChord(chord: string): { modifiers: string[]; code: string } {
   const parts = chord.split('+')
   return { modifiers: parts.slice(0, -1), code: parts[parts.length - 1] }
+}
+
+/** `chord` with Shift added, in the order `chordFromEvent` writes it. Null if it already has Shift. */
+export function withShift(chord: string): string | null {
+  const parts = chord.split('+')
+  if (parts.includes('Shift')) return null
+  parts.splice(-1, 0, 'Shift')
+  return parts.join('+')
+}
+
+/** `chord` without Shift. Null if it has none. */
+export function withoutShift(chord: string): string | null {
+  const parts = chord.split('+')
+  if (!parts.includes('Shift')) return null
+  return parts.filter((part) => part !== 'Shift').join('+')
 }
 
 const NON_TEXT_KEYS = /^(Arrow|F\d|Page|Home$|End$|Enter$|NumpadEnter$|Escape$|Tab$|Insert$)/

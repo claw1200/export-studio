@@ -384,11 +384,14 @@ export class Player {
     return this.displayCues.find((c) => c.kind === 'hot' && c.slot === kind)
   }
 
-  /** A set hot cue jumps while playing and plays while held when paused. An empty slot stores one. */
-  hotCueDown(kind: number): void {
+  /**
+   * A set hot cue jumps while playing and plays while held when paused. An empty slot stores one,
+   * unless `create` is off (mix mode, where the track's cues are not edited).
+   */
+  hotCueDown(kind: number, create = true): void {
     const cue = this.hotCue(kind)
     if (!cue) {
-      void this.setHotCue(kind)
+      if (create) void this.setHotCue(kind)
       return
     }
     if (!this.track || this.holding || this.audioError) return

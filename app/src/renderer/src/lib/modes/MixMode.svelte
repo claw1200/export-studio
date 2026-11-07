@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Play, Square } from '@lucide/svelte'
   import { getApp } from '$lib/context'
+  import { playKeys } from '$lib/deck/keys'
   import { chordLabel } from '$lib/keymap'
   import { Mixer } from '$lib/mixer.svelte'
   import type { Player } from '$lib/player.svelte'
@@ -23,13 +24,18 @@
   const [a, b] = players
   const mixer = new Mixer(a, b)
 
-  const playShortcut = $derived(keybinds.bindings['deck.playPause'][0])
+  const playShortcut = $derived(keybinds.bindings['mix.playBoth'][0])
   const playTitle = $derived(
     (mixer.playing ? 'Stop both decks and go back to where they started' : 'Play both decks together') +
       (playShortcut ? ` (${chordLabel(playShortcut)})` : '')
   )
 
-  $effect(() => keybinds.register({ 'deck.playPause': () => mixer.toggle() }))
+  // Every deck shortcut works here as in prepare mode, bar track prep: on deck A as it is, on deck
+  // B with Shift added. A deck's own play lines a synced follower up with the master.
+  const mixKeys = (player: Player): ReturnType<typeof playKeys> => playKeys(player, () => mixer.toggleDeck(player))
+  $effect(() => keybinds.register(mixKeys(a)))
+  $effect(() => keybinds.register(mixKeys(b), 'shift'))
+  $effect(() => keybinds.register({ 'mix.playBoth': () => mixer.toggle() }))
   // Keeps the follower on the master's tempo as either deck plays through tempo changes.
   $effect(() => mixer.follow())
   // A deck losing its track cannot be synced to.

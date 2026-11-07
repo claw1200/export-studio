@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { LoaderCircle, Minus, Music, Plus } from '@lucide/svelte'
+  import { LoaderCircle, Minus, Music, Pause, Play, Plus } from '@lucide/svelte'
   import { artworkUrl } from '$lib/api'
   import { setPlayer } from '$lib/deck/context'
   import { TrackDrop } from '$lib/deck/drop.svelte'
   import { getApp } from '$lib/context'
+  import { chordLabel, withShift, type ActionId } from '$lib/keymap'
   import { formatBpm, formatClock, keyColor, pitchSemitones, shiftKey } from '$lib/format'
   import { ownBpm, playingBpm, type Mixer } from '$lib/mixer.svelte'
   import type { Player } from '$lib/player.svelte'
@@ -13,7 +14,8 @@
   /**
    * One side of the mixer: the track, where its playhead is, the scrolling waveform and an overview
    * split into the sections between cues. Set the playhead by clicking the overview or dragging the
-   * scrolling waveform; the mixer's play starts it. Below the track sit its tempo and key, each
+   * scrolling waveform; the mixer's play starts both, or the deck's own play and cue start it alone.
+   * Loop in, out and reloop/exit work as on a CDJ. Below the track sit its tempo and key, each
    * moved a step at a time, and the switches that make it the master and hold its key.
    */
   let {
@@ -35,7 +37,7 @@
   // svelte-ignore state_referenced_locally
   setPlayer(player)
 
-  const { library } = getApp()
+  const { library, keybinds } = getApp()
   // svelte-ignore state_referenced_locally
   const drop = new TrackDrop(library, (track) => {
     onfocus()
@@ -66,6 +68,27 @@
         ? 'At the track’s own key'
         : `${track.key} at the track’s own pitch. Click to clear the key shift.`
   )
+  const noAudio = $derived(!track || !!player.audioError)
+  const cueLit = $derived(player.cueHeld || (!player.playing && !!track && player.atCue))
+  /** Deck B's shortcuts are deck A's with Shift added: see `MixMode`. */
+  const shifted = $derived(player === mixer.b)
+  const shortcut = (id: ActionId): string => {
+    const chord = keybinds.bindings[id].map((c) => (shifted ? withShift(c) : c)).find((c) => c != null)
+    return chord ? ` (${chordLabel(chord)})` : ''
+  }
+  const cueTitle = $derived(
+    (player.playing
+      ? 'Return to the cue point and stop'
+      : player.atCue
+        ? 'Hold to play from the cue point'
+        : `Set the cue point here${player.quantise ? ', on the nearest beat' : ''}`) + shortcut('deck.cue')
+  )
+  const loopButton = (lit: boolean): string[] => [
+    'h-6 rounded px-1.5 text-[10.5px] font-bold tracking-wide transition disabled:opacity-30',
+    lit
+      ? 'bg-cue text-bg shadow-[0_0_10px] shadow-cue/50'
+      : 'border border-line text-faint hover:bg-hover hover:text-muted'
+  ]
   const signed = (n: number): string => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '')
 
   /** Vertical travel, in pixels, per step when dragging a stepper's value. */
@@ -256,6 +279,69 @@
           ? 'Master tempo on: the key holds when the tempo moves'
           : 'Master tempo off: the key moves with the tempo'}
         onclick={() => mixer.toggleMasterTempo(player)}>MT</button
+      >
+    </div>
+  </div>
+
+  <div class="flex items-center gap-2 px-3 pt-2.5">
+    <button
+      class={[
+        'grid size-7 place-items-center rounded-full transition disabled:opacity-30',
+        player.playing ? 'bg-accent text-bg hover:brightness-110' : 'bg-raised text-fg hover:bg-hover'
+      ]}
+      disabled={noAudio}
+      onclick={() => mixer.toggleDeck(player)}
+      aria-label={player.playing ? `Pause deck ${label}` : `Play deck ${label}`}
+      title={(player.playing
+        ? `Pause deck ${label}`
+        : `Play deck ${label} on its own${following ? ', in time with the master' : ''}`) + shortcut('deck.playPause')}
+    >
+      {#if player.playing}
+        <Pause class="size-3.5 fill-current" />
+      {:else}
+        <Play class="ml-px size-3.5 fill-current" />
+      {/if}
+    </button>
+    <button
+      class={[
+        'h-6 w-11 touch-none rounded-full border text-[10.5px] font-bold tracking-wide transition select-none disabled:opacity-30',
+        cueLit
+          ? 'border-transparent bg-cue text-bg shadow-[0_0_10px] shadow-cue/50'
+          : 'border-cue/60 text-cue hover:bg-cue/15'
+      ]}
+      disabled={noAudio}
+      onpointerdown={(e) => {
+        if (e.button !== 0) return
+        e.currentTarget.setPointerCapture(e.pointerId)
+        player.cueDown()
+      }}
+      onpointerup={() => player.cueUp()}
+      onpointercancel={() => player.cueUp()}
+      onlostpointercapture={() => player.cueUp()}
+      aria-label="Cue deck {label}"
+      title={cueTitle}>CUE</button
+    >
+
+    <div class="ml-auto flex items-center gap-1" role="group" aria-label="Deck {label} loop">
+      <button
+        class={loopButton(false)}
+        disabled={noAudio}
+        onclick={() => player.setLoopIn()}
+        title="Loop in{shortcut('deck.loopIn')}">IN</button
+      >
+      <button
+        class={loopButton(false)}
+        disabled={noAudio}
+        onclick={() => player.setLoopOut()}
+        title="Loop out{shortcut('deck.loopOut')}">OUT</button
+      >
+      <button
+        class={['w-[52px]', ...loopButton(!!player.loop?.active)]}
+        disabled={!player.loop}
+        onclick={() => player.reloopExit()}
+        aria-pressed={!!player.loop?.active}
+        title="{player.loop?.active ? 'Exit the loop' : 'Back into the loop'}{shortcut('deck.reloopExit')}"
+        >{player.loop?.active ? 'EXIT' : 'RELOOP'}</button
       >
     </div>
   </div>

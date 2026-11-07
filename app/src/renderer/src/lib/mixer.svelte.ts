@@ -208,6 +208,26 @@ export class Mixer {
     else this.play()
   }
 
+  /**
+   * One deck's own play/pause, leaving the other as it is. A synced follower lines its beats up
+   * with the master as it starts, so it can be dropped in over a playing master. Starting a deck
+   * while both are stopped forgets where the last play-both began, so stop does not jump back to it.
+   */
+  toggleDeck(player: Player): void {
+    if (player !== this.a && player !== this.b) return
+    // Play while a cue is held latches the hold, as on a CDJ.
+    if (player.cueHeld || player.playing) {
+      player.toggle()
+      return
+    }
+    if (!this.playing) this.starts = null
+    if (this.following(player)) {
+      this.follow()
+      this.alignBeats()
+    }
+    player.play()
+  }
+
   private apply(): void {
     const [a, b] = crossfade(this.crossfader)
     this.a.setGain(a)

@@ -5,11 +5,19 @@ import {
   type ActionSpec,
   chordFromEvent,
   chordTypesText,
-  DEFAULT_BINDINGS
+  DEFAULT_BINDINGS,
+  withoutShift
 } from './keymap'
 import { getSetting, setSetting } from './settings'
 
 export type ActionHandler = (() => void) | { down: () => void; up: () => void }
+
+/**
+ * `plain` handlers answer an action's own chords. `shift` handlers answer the same chords with
+ * Shift added, ahead of whatever action that Shift chord is bound to itself: mix mode puts deck B
+ * there, so every deck shortcut works on either deck.
+ */
+export type KeyLayer = 'plain' | 'shift'
 
 type Overrides = Partial<Record<ActionId, string[]>>
 
@@ -59,16 +67,32 @@ export class Keybinds {
     return map
   })
   private handlers = new Map<ActionId, ActionHandler>()
-  private held = new Map<string, ActionId>()
+  private shifted = new Map<ActionId, ActionHandler>()
+  /** The handler each held key went down on, so its release reaches the same one. */
+  private held = new Map<string, ActionHandler>()
   private swallowed = new Set<string>()
   private suspended = 0
 
-  register(handlers: Partial<Record<ActionId, ActionHandler>>): () => void {
+  register(handlers: Partial<Record<ActionId, ActionHandler>>, layer: KeyLayer = 'plain'): () => void {
+    const map = layer === 'shift' ? this.shifted : this.handlers
     const entries = Object.entries(handlers) as [ActionId, ActionHandler][]
-    for (const [id, handler] of entries) this.handlers.set(id, handler)
+    for (const [id, handler] of entries) map.set(id, handler)
     return () => {
-      for (const [id, handler] of entries) if (this.handlers.get(id) === handler) this.handlers.delete(id)
+      for (const [id, handler] of entries) if (map.get(id) === handler) map.delete(id)
     }
+  }
+
+  /** The action and handler a chord reaches: the Shift layer first, then the chord's own action. */
+  private resolve(chord: string): [ActionId, ActionHandler] | null {
+    const unshifted = this.shifted.size ? withoutShift(chord) : null
+    if (unshifted) {
+      const id = this.actionFor(unshifted)
+      const handler = id && this.shifted.get(id)
+      if (id && handler) return [id, handler]
+    }
+    const id = this.actionFor(chord)
+    const handler = id && this.handlers.get(id)
+    return id && handler ? [id, handler] : null
   }
 
   actionFor(chord: string): ActionId | undefined {
@@ -141,9 +165,9 @@ export class Keybinds {
   keydown = (e: KeyboardEvent): void => {
     if (this.suspended || e.defaultPrevented || e.isComposing) return
     const chord = chordFromEvent(e)
-    const id = chord ? this.actionFor(chord) : undefined
-    const handler = id && this.handlers.get(id)
-    if (!chord || !id || !handler) return
+    const match = chord ? this.resolve(chord) : null
+    if (!chord || !match) return
+    const [id, handler] = match
     const spec: ActionSpec = ACTIONS[id]
     if (!firesIn(spec, chord, e.target)) return
     e.preventDefault()
@@ -154,27 +178,26 @@ export class Keybinds {
       return
     }
     if (this.held.has(e.code)) return
-    this.held.set(e.code, id)
+    this.held.set(e.code, handler)
     handler.down()
   }
 
   keyup = (e: KeyboardEvent): void => {
     if (this.swallowed.delete(e.code)) e.preventDefault()
-    const id = this.held.get(e.code)
-    if (!id) return
+    const handler = this.held.get(e.code)
+    if (!handler) return
     this.held.delete(e.code)
-    this.release(id)
+    release(handler)
   }
 
   releaseAll = (): void => {
-    const ids = [...this.held.values()]
+    const handlers = [...this.held.values()]
     this.held.clear()
     this.swallowed.clear()
-    for (const id of ids) this.release(id)
+    for (const handler of handlers) release(handler)
   }
+}
 
-  private release(id: ActionId): void {
-    const handler = this.handlers.get(id)
-    if (handler && typeof handler !== 'function') handler.up()
-  }
+function release(handler: ActionHandler): void {
+  if (typeof handler !== 'function') handler.up()
 }
