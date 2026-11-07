@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { ClassValue } from 'svelte/elements'
   import DeckButton from './DeckButton.svelte'
   import PlayButton from './PlayButton.svelte'
   import { deckName, getDeckInfo, getPlayer } from '$lib/deck/context'
@@ -6,9 +7,12 @@
   import { useShortcut } from '$lib/deck/shortcut'
 
   let {
+    class: className,
     onplay,
     playTitle
   }: {
+    /** Lays the buttons out, as `flex-col` to stack cue under play. */
+    class?: ClassValue
     /** Replaces the player's own play/pause, as the mixer does to keep a follower in sync. */
     onplay?: () => void
     playTitle?: string
@@ -28,7 +32,7 @@
   )
 </script>
 
-<div class="flex shrink-0 items-center gap-1.5">
+<div class={['flex shrink-0 items-center gap-1.5', className]}>
   <PlayButton
     playing={player.playing}
     disabled={!player.playable}

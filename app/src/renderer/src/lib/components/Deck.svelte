@@ -102,18 +102,18 @@
     <TempoFader />
     <div class="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2.5 px-4 py-3">
       <div class="flex items-center gap-3">
-        <div class="flex shrink-0 flex-col gap-1">
-          <TempoSteppers stepperClass="w-[124px]" />
-        </div>
-        <TrackInfo class="w-[360px] shrink-0" />
+        <Transport class="flex-col" />
+        <TrackInfo size="lg" class="min-w-[360px] flex-1" />
       </div>
       <div class="relative h-[52px] overflow-hidden rounded bg-wave">
         <WaveformOverview />
       </div>
 
       <div class="flex items-center gap-3">
-        <Transport />
         <LoopControls />
+        <div class="flex shrink-0 gap-1">
+          <TempoSteppers stepperClass="w-[104px]" />
+        </div>
       </div>
       <div class="flex items-center gap-3">
         <div class={segment} role="group" aria-label="Hot cues or beatgrid">
