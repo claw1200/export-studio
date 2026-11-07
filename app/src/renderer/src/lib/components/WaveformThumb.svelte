@@ -4,7 +4,7 @@
   import type { Cue, Track } from '$lib/types'
   import { drawAnalysisRgb, drawStackedBands } from '$lib/waveform/analysis'
   import { setupCanvas } from '$lib/waveform/canvas'
-  import { drawThumbMarks } from '$lib/waveform/thumbMarks'
+  import { drawCueMarks } from '$lib/waveform/cueMarks'
   import WaveformMarks from './WaveformMarks.svelte'
 
   let { track, wave, cues }: { track: Track; wave: BrowserWave | null; cues: Cue[] } = $props()
@@ -42,7 +42,7 @@
     else if (wave.heights && wave.colors)
       drawAnalysisRgb(ctx, wave.heights, wave.colors, 0, wave.rgbLength, canvas.width, canvas.height, 'bottom')
     else if (wave.bands) drawStackedBands(ctx, wave.bands, canvas.width, canvas.height)
-    if (!live) drawThumbMarks(ctx, cues, span, width, height, window.devicePixelRatio || 1)
+    if (!live) drawCueMarks(ctx, cues, span, width, height, window.devicePixelRatio || 1)
   }
 
   function secondsAt(e: PointerEvent): number {

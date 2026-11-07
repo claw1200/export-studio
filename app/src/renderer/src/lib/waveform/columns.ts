@@ -47,63 +47,97 @@ export function stridePeak(data: Uint8Array, src: number, index: number, stride:
   return peak
 }
 
+const BYTE_MAX = 255
+
+/** A waveform byte as a level from 0 to 1. */
+export function byteLevel(byte: number): number {
+  return byte / BYTE_MAX
+}
+
 /*
- * The readers below run for every pixel column of every frame the deck draws, so they take plain
- * arguments and return numbers: no closure per call and no object per column, which would
- * otherwise be thousands of short-lived allocations a frame and steady garbage collection.
+ * Reading a pixel column that covers entries `start`–`end`. A column narrower than one entry shows
+ * the entry under its middle; a wider one shows the peak of the entries it touches.
  *
- * A pixel column covers entries `start`–`end`. Narrower than one entry, it holds the entry under its
- * middle; wider, it takes the peak of the entries it touches.
+ * These run for every pixel column of every deck frame, so they take and return plain numbers:
+ * an object or closure per column would be thousands of allocations a frame.
  */
 
-/** One band's byte at logical entry `i`, reading every `stride` entries as one. */
-function bandByte(data: Uint8Array, src: number, i: number, stride: number, band: number): number {
-  return stride <= 1 ? data[i * 3 + band] : stridePeak(data, src, i, stride, band)
+function coversNoEntries(count: number, start: number, end: number): boolean {
+  return !(end > start) || end <= 0 || start >= count
+}
+
+function isWithinOneEntry(start: number, end: number): boolean {
+  return end - start <= 1
+}
+
+/** The fractional entry under the column's middle, kept inside the data. */
+function entryUnderMiddle(count: number, start: number, end: number): number {
+  return Math.min(count - 1, Math.max(0, (start + end) / 2))
+}
+
+function firstTouchedEntry(start: number): number {
+  return Math.max(0, Math.floor(start))
+}
+
+function pastLastTouchedEntry(count: number, end: number): number {
+  return Math.min(count, Math.ceil(end))
+}
+
+/** Slopes down toward the next entry. A rise stays flat until the entry boundary. */
+function fallToward(current: number, next: number, fraction: number): number {
+  return next >= current ? current : current + (next - current) * fraction
+}
+
+/** Interleaved low/mid/high band bytes, read every `stride` raw entries as one. */
+export interface BandSource {
+  data: Uint8Array
+  /** Entries in `data`. */
+  rawCount: number
+  stride: number
+  /** Entries after `stride`; what `start` and `end` index. */
+  count: number
+}
+
+export function bandSource(data: Uint8Array, stride: number): BandSource {
+  const rawCount = data.length / 3
+  return { data, rawCount, stride, count: logicalCount(rawCount, stride) }
+}
+
+function bandByte(source: BandSource, band: number, entry: number): number {
+  const { data, rawCount, stride } = source
+  return stride <= 1 ? data[entry * 3 + band] : stridePeak(data, rawCount, entry, stride, band)
 }
 
 /**
- * One band's level, 0 to 1, for the pixel column covering logical entries `start`–`end` of
- * interleaved low/mid/high `data` (`src` entries, `count` after `stride`), or NaN outside the data.
- * With `lerpDown`, a column narrower than an entry slopes down toward the next entry; a rise stays
- * flat until the entry boundary.
+ * One band's level, 0 to 1, for the column covering `start`–`end`, or NaN outside the data.
+ * With `fall`, a column narrower than an entry slopes down toward the next one.
  */
-export function readBandLevel(
-  data: Uint8Array,
-  src: number,
-  count: number,
-  stride: number,
-  band: number,
-  start: number,
-  end: number,
-  lerpDown: boolean
-): number {
-  if (!(end > start) || end <= 0 || start >= count) return NaN
-  if (end - start <= 1) {
-    const at = Math.min(count - 1, Math.max(0, (start + end) / 2))
-    const index = at | 0
-    const current = bandByte(data, src, index, stride, band) / 255
-    if (!lerpDown) return current
-    const next = bandByte(data, src, Math.min(count - 1, index + 1), stride, band) / 255
-    return next >= current ? current : current + (next - current) * (at - index)
+export function readBandLevel(source: BandSource, band: number, start: number, end: number, fall: boolean): number {
+  const { count } = source
+  if (coversNoEntries(count, start, end)) return NaN
+  if (isWithinOneEntry(start, end)) {
+    const at = entryUnderMiddle(count, start, end)
+    const entry = at | 0
+    const current = byteLevel(bandByte(source, band, entry))
+    if (!fall) return current
+    const next = byteLevel(bandByte(source, band, Math.min(count - 1, entry + 1)))
+    return fallToward(current, next, at - entry)
   }
-  const to = Math.min(count, Math.ceil(end))
+  const to = pastLastTouchedEntry(count, end)
   let peak = 0
-  for (let i = Math.max(0, Math.floor(start)); i < to; i++) {
-    const value = bandByte(data, src, i, stride, band)
-    if (value > peak) peak = value
-  }
-  return peak / 255
+  for (let entry = firstTouchedEntry(start); entry < to; entry++) peak = Math.max(peak, bandByte(source, band, entry))
+  return byteLevel(peak)
 }
 
-/** The tallest of entries `start`–`end` (the first, on a tie), or -1 outside the data. */
+/** The tallest entry the column covering `start`–`end` touches (the first, on a tie), or -1 outside the data. */
 export function rgbPeakIndex(heights: Uint8Array, count: number, start: number, end: number): number {
-  if (!(end > start) || end <= 0 || start >= count) return -1
-  if (end - start <= 1) return Math.min(count - 1, Math.max(0, (start + end) / 2)) | 0
-  const from = Math.max(0, Math.floor(start))
-  const to = Math.min(count, Math.ceil(end))
-  let peakIndex = from
-  for (let i = from + 1; i < to; i++) if (heights[i] > heights[peakIndex]) peakIndex = i
-  return peakIndex
+  if (coversNoEntries(count, start, end)) return -1
+  if (isWithinOneEntry(start, end)) return entryUnderMiddle(count, start, end) | 0
+  const from = firstTouchedEntry(start)
+  const to = pastLastTouchedEntry(count, end)
+  let tallest = from
+  for (let entry = from + 1; entry < to; entry++) if (heights[entry] > heights[tallest]) tallest = entry
+  return tallest
 }
 
 /** Fills the columns as shapes, one per run of the same colour. */

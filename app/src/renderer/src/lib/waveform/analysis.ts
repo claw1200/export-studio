@@ -1,9 +1,10 @@
 /** Drawing rekordbox-style analysis data: an RGB waveform, and 3-band waveforms. */
 import { BANDS_LOW_TO_HIGH } from './colors'
 import {
+  bandSource,
+  byteLevel,
   columns,
   fitColumns,
-  logicalCount,
   paintColumns,
   packColor,
   pixelGrid,
@@ -41,7 +42,7 @@ export function drawAnalysisRgb(
       color[x] = -1
       continue
     }
-    amp[x] = Math.max(1, Math.round((heights[peak] / 255) * reach))
+    amp[x] = Math.max(1, Math.round(byteLevel(heights[peak]) * reach))
     color[x] = packColor(colors, peak)
   }
   paintColumns(ctx, pw, ph, anchor, (x) => {
@@ -65,25 +66,23 @@ export function drawAnalysisBands(
   stride = 1,
   fallBlocks = 0
 ): void {
-  const prepared = fallBlocks >= 1 ? bandFall(bands, stride, fallBlocks) : null
-  const data = prepared ?? bands
-  const drawStride = prepared ? 1 : stride
-  const src = data.length / 3
-  const n = logicalCount(src, drawStride)
+  // The fallen bands are worked out at `stride` already, so they are read entry by entry.
+  const fallen = fallBlocks >= 1 ? bandFall(bands, stride, fallBlocks) : null
+  const source = fallen ? bandSource(fallen, 1) : bandSource(bands, stride)
   const grid = pixelGrid(from, to, pw)
-  if (!grid || n < 1) return
+  if (!grid || source.count < 1) return
   fitColumns(pw)
   const { amp, color } = columns
   const { per, first } = grid
   const reach = anchor === 'center' ? ph / 2 : ph
-  const lerpDown = prepared != null
   for (const layer of BANDS_LOW_TO_HIGH) {
     const fill = layer.color
     for (let x = 0; x < pw; x++) {
       const start = (first + x) * per
-      const level = readBandLevel(data, src, n, drawStride, layer.band, start, start + per, lerpDown)
-      amp[x] = Number.isNaN(level) ? NaN : level * reach
-      color[x] = Number.isNaN(level) ? -1 : 1
+      const level = readBandLevel(source, layer.band, start, start + per, fallen != null)
+      const empty = Number.isNaN(level)
+      amp[x] = empty ? NaN : level * reach
+      color[x] = empty ? -1 : 1
     }
     paintColumns(ctx, pw, ph, anchor, () => fill, true)
   }
