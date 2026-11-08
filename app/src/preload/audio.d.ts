@@ -2,7 +2,10 @@
 export type DeckCommand =
   | { op: 'load'; deck: number; trackId: string; request: number }
   | { op: 'unload'; deck: number }
-  | { op: 'play'; deck: number }
+  /** A deck synced with a playing deck starts on its beat, unless `unsynced`, as a CUE hold plays. */
+  | { op: 'play'; deck: number; unsynced?: boolean }
+  /** Line a playing deck up with its synced partner, if that is playing too. */
+  | { op: 'align'; deck: number }
   | { op: 'pause'; deck: number }
   | { op: 'seek'; deck: number; ms: number }
   /**
@@ -33,6 +36,10 @@ export type DeckCommand =
   | { op: 'deckLow'; deck: number; gain: number | null }
   /** Start several decks in the same instant, so the gap between their playheads holds. */
   | { op: 'playTogether'; decks: number[] }
+  /** The deck's beats in ms into the file, each with the tempo from it on. Empty clears it. */
+  | { op: 'beatgrid'; deck: number; timesMs: number[]; bpms: number[] }
+  /** `follower` keeps `master`'s tempo and starts on its beat; null turns sync off. */
+  | { op: 'sync'; link: { master: number; follower: number } | null }
 
 /** One deck as the engine last reported it. Frames are at `sampleRate`. */
 export interface DeckTick {

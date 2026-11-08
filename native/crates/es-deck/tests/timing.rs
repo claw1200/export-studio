@@ -3,6 +3,7 @@
 mod common;
 
 use common::*;
+use es_deck::FADE_FRAMES;
 
 const BURST_EVERY: u32 = RATE / 2;
 const BURST_LEN: u32 = 480;
@@ -237,5 +238,24 @@ fn nudging_one_deck_onto_another_lines_them_up_exactly() {
     assert_eq!(
         b, a,
         "deck B landed exactly level with deck A, with no time lost to the jump"
+    );
+}
+
+#[test]
+fn a_paused_deck_moved_twice_plays_from_the_second_move() {
+    let rig = Rig::new();
+    rig.load(&ramp("t-moved-twice", RATE * 4));
+    // Both moves queue before the decode thread reaches the first.
+    rig.engine.seek(0, 1000.0);
+    rig.engine.seek(0, 2000.0);
+    rig.engine.play(0);
+    let out = rig.pull(4096);
+    // Past the fade-in, where the frame plays at full level.
+    let past_fade = first_audible(&out) + usize::from(FADE_FRAMES) * 2;
+    let heard = value(out[past_fade * 2]);
+    let expected = (i64::from(RATE) * 2 + past_fade as i64 - first_audible(&out) as i64) % 30_000;
+    assert!(
+        (heard - expected).abs() <= 1,
+        "playing from 2 s, not 1 s: heard {heard}, expected {expected}"
     );
 }

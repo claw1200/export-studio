@@ -1,5 +1,5 @@
 import { untrack } from 'svelte'
-import { bpmAt, fractionalBeatIndex } from './beat'
+import { bpmAt } from './beat'
 import {
   bassLevel,
   bassSwap,
@@ -11,12 +11,10 @@ import {
   type BassSwap
 } from './crossfade'
 import type { MixPrefs } from './mix/prefs.svelte'
-import { beatOffset, matchTempo, stepTempo } from './mix/sync'
+import { stepTempo } from './mix/sync'
+import { Deck } from './deck/deck.svelte'
 import { Player } from './player.svelte'
 import { getSetting, setSetting } from './settings'
-
-/** A follower this close to the master's beat, in seconds, is left where it is. */
-const ALIGNED_SECONDS = 0.001
 
 /** The BPM of the music under the playhead, at the file's own speed. */
 export function ownBpm(player: Player): number {
@@ -28,12 +26,12 @@ export function playingBpm(player: Player): number {
   return ownBpm(player) * player.tempo.rate
 }
 
-/** Where the playhead is in beats: along the grid, or counted from the start at the track's BPM. */
-function beatAt(player: Player): number | null {
+/** The beats sync goes by: the grid, or without one a beat from the start at the track's BPM. */
+function syncGrid(player: Player): { timesMs: number[]; bpms: number[] } {
   const grid = player.displayGrid
-  if (grid?.times.length) return fractionalBeatIndex(grid, player.position * 1000)
-  const bpm = ownBpm(player)
-  return bpm > 0 ? (player.position * bpm) / 60 : null
+  if (grid?.times.length) return { timesMs: grid.times, bpms: grid.bpms }
+  const bpm = player.track?.bpm ?? 0
+  return bpm > 0 ? { timesMs: [0], bpms: [bpm] } : { timesMs: [], bpms: [] }
 }
 
 function storedCrossfader(): number {
@@ -47,9 +45,10 @@ function storedCrossfader(): number {
  * playheads are; stop pauses both and puts each back where it started, ready to hear the same
  * transition again.
  *
- * One deck is the master. With sync on, the other follows it: its tempo is kept on the master's
- * (at half or double time when that is nearer its own speed), and play lines its beats up with
- * the master's before starting.
+ * One deck is the master. With sync on, the other follows it: the engine keeps its tempo on the
+ * master's (at half or double time when that is nearer its own speed), and a deck started while
+ * the other plays lands on the other's beat. The engine does both because only it knows where
+ * both playheads are at the same instant.
  */
 export class Mixer {
   /** 0 is all deck A, 1 all deck B. Kept between sessions. */
@@ -73,6 +72,7 @@ export class Mixer {
   ) {
     this.master = $state.raw(a)
     this.apply()
+    this.shareLink()
   }
 
   /** The deck that is not the master. */
@@ -93,7 +93,7 @@ export class Mixer {
   setMaster(player: Player): void {
     if (player !== this.a && player !== this.b) return
     this.master = player
-    this.follow()
+    this.shareLink()
   }
 
   /**
@@ -113,44 +113,24 @@ export class Mixer {
 
   /**
    * Turning sync on matches the follower's tempo to the master's and snaps it onto the master's
-   * nearest beat, playing or not: it moves by under half a beat, so it stays where it was in its
-   * track to within a beat.
+   * nearest beat when both are playing or both paused: it moves by under half a beat, so it stays
+   * where it was in its track to within a beat.
    */
   setSynced(on: boolean): void {
     this.synced = on && this.canSync
-    if (!this.synced) return
-    this.follow()
-    this.alignBeats()
+    this.shareLink()
   }
 
-  /**
-   * Keeps the follower's tempo on the master's. Run it from an effect: it reads both playheads, so
-   * a tempo change along either beatgrid is followed as the decks play through it.
-   */
-  follow(): void {
-    if (!this.synced) return
-    const follower = this.follower
-    const match = matchTempo(playingBpm(this.master), ownBpm(follower))
-    if (!match) return
-    const rate = untrack(() => follower.tempo.rate)
-    if (Math.abs(rate - match.rate) > 1e-6) follower.tempo.setRate(match.rate)
+  private shareLink(): void {
+    Deck.setSync(this.synced ? { master: this.master.deck, follower: this.follower.deck } : null)
   }
 
-  /**
-   * Moves the follower by under half a beat so its beats land on the master's. It is a nudge from
-   * wherever the engine's playhead is, so the time the command takes to arrive does not count,
-   * and while playing the engine keeps time through it.
-   */
-  private alignBeats(): void {
-    const master = this.master
-    const follower = this.follower
-    const match = matchTempo(playingBpm(master), ownBpm(follower))
-    const masterBeat = beatAt(master)
-    const ownBeat = beatAt(follower)
-    const bpm = ownBpm(follower)
-    if (!match || masterBeat == null || ownBeat == null || !(bpm > 0)) return
-    const seconds = (beatOffset(masterBeat, ownBeat, match.beatsPerMasterBeat) * 60) / bpm
-    if (Math.abs(seconds) >= ALIGNED_SECONDS) follower.nudge(-seconds)
+  /** Gives the engine each deck's beats. Run it from an effect: it reads both grids. */
+  shareBeatgrids(): void {
+    for (const player of [this.a, this.b]) {
+      const { timesMs, bpms } = syncGrid(player)
+      player.deck.setBeatgrid(timesMs, bpms)
+    }
   }
 
   /** Moves a deck's tempo by `step` BPM. The follower's is the master's while synced. */
@@ -158,14 +138,12 @@ export class Mixer {
     if (this.following(player)) return
     const rate = stepTempo(playingBpm(player), ownBpm(player), step)
     if (rate != null) player.tempo.setRate(rate)
-    this.follow()
   }
 
   /** Back to the file's own speed. */
   resetTempo(player: Player): void {
     if (this.following(player)) return
     player.tempo.setRate(1)
-    this.follow()
   }
 
   stepKey(player: Player, step: number): void {
@@ -212,11 +190,8 @@ export class Mixer {
     if (!this.ready) return
     this.starts = [this.a.position, this.b.position]
     this.apply()
-    if (this.synced) {
-      this.follow()
-      this.alignBeats()
-    }
-    // `playTogether` skips an empty deck, so one track alone plays too.
+    // `playTogether` skips an empty deck, so one track alone plays too. The engine lines a synced
+    // follower up first.
     Player.playTogether([this.a, this.b])
   }
 
@@ -235,23 +210,14 @@ export class Mixer {
   }
 
   /**
-   * One deck's own play/pause, leaving the other as it is. A synced follower lines its beats up
-   * with the master as it starts, so it can be dropped in over a playing master. Starting a deck
-   * while both are stopped forgets where the last play-both began, so stop does not jump back to it.
+   * One deck's own play/pause, leaving the other as it is. While synced, the engine starts it on
+   * the other deck's beat, so it can be dropped in over the other. Starting a deck while both are
+   * stopped forgets where the last play-both began, so stop does not jump back to it.
    */
   toggleDeck(player: Player): void {
     if (player !== this.a && player !== this.b) return
-    // Play while a cue is held latches the hold, as on a CDJ.
-    if (player.cueHeld || player.playing) {
-      player.toggle()
-      return
-    }
-    if (!this.playing) this.starts = null
-    if (this.following(player)) {
-      this.follow()
-      this.alignBeats()
-    }
-    player.play()
+    if (!player.cueHeld && !this.playing) this.starts = null
+    player.toggle()
   }
 
   /**

@@ -84,10 +84,24 @@ export class Deck {
     this.send({ op: 'unload', deck: this.index })
   }
 
-  play(): void {
+  /** A deck synced with a playing one starts on its beat, unless `synced` is off. */
+  play({ synced = true }: { synced?: boolean } = {}): void {
     if (!this.beginPlay()) return
-    this.send({ op: 'play', deck: this.index })
+    this.send({ op: 'play', deck: this.index, unsynced: !synced })
     this.startFrames()
+  }
+
+  align(): void {
+    if (this.ready) this.send({ op: 'align', deck: this.index })
+  }
+
+  setBeatgrid(timesMs: number[], bpms: number[]): void {
+    this.send({ op: 'beatgrid', deck: this.index, timesMs, bpms })
+  }
+
+  static setSync(link: { master: Deck; follower: Deck } | null): void {
+    const decks = link && { master: link.master.index, follower: link.follower.index }
+    window.audio.send({ op: 'sync', link: decks })
   }
 
   /**

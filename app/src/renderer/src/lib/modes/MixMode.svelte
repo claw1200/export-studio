@@ -45,8 +45,10 @@
       if (decks.mixMaster === mixer.master) decks.mixMaster = null
     }
   })
-  // Keeps the follower on the master's tempo as either deck plays through tempo changes.
-  $effect(() => mixer.follow())
+  // The engine syncs by the grids, so it hears of every change to them.
+  $effect(() => mixer.shareBeatgrids())
+  // The engine outlives this view: leaving it must not leave the decks synced.
+  $effect(() => () => mixer.setSynced(false))
   // The deck that alone is heard becomes the master.
   $effect(() => mixer.followSound())
   // A deck losing its track cannot be synced to.
