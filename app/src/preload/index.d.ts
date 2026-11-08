@@ -1,6 +1,7 @@
 import type { AnalysisJob, AnalysisProgress, MenuCommand } from './analysis'
 import type { AudioApi } from './audio'
 import type { EngineCallArgs } from './engine'
+import type { Update } from '../shared/updates'
 
 export interface Api {
   platform: string
@@ -25,6 +26,8 @@ export interface Api {
   loadSettings(): { exists: boolean; values: Record<string, string> }
   writeSetting(key: string, value: string): void
   replaceSettings(values: Record<string, string>): void
+  /** The newest GitHub release on this build's channel, if newer than the running version. */
+  checkForUpdate(): Promise<Update | null>
 }
 
 declare global {

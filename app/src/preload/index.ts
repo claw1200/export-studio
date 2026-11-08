@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AudioApi, DeckEvent, Tick } from './audio'
 import type { AnalysisJob, AnalysisProgress, MenuCommand } from './analysis'
 import type { EngineCallArgs } from './engine'
+import type { Update } from '../shared/updates'
 
 type CallResult = { ok: true; result: unknown } | { ok: false; error: { message: string; type: string } }
 
@@ -72,6 +73,10 @@ const api = {
 
   replaceSettings(values: Record<string, string>): void {
     ipcRenderer.send('settings:replace', values)
+  },
+
+  checkForUpdate(): Promise<Update | null> {
+    return ipcRenderer.invoke('updates:check')
   }
 }
 
