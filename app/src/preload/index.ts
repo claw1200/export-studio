@@ -75,6 +75,10 @@ const api = {
     ipcRenderer.send('settings:replace', values)
   },
 
+  resetSettings(): void {
+    ipcRenderer.send('settings:reset')
+  },
+
   checkForUpdate(): Promise<Update | null> {
     return ipcRenderer.invoke('updates:check')
   }

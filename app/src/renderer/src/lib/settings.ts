@@ -40,3 +40,9 @@ export function setSetting(key: string, value: string): void {
   store.set(key, value)
   window.api.writeSetting(key, value)
 }
+
+/** Clears every preference and quits, so the next launch starts on the defaults. */
+export function resetSettings(): void {
+  store.clear()
+  window.api.resetSettings()
+}

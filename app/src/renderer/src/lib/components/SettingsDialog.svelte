@@ -26,7 +26,7 @@
   import { accent, DEFAULT_ACCENT } from '$lib/accent.svelte'
   import { BPM_RANGES, MAX_CONCURRENCY } from '$lib/analysis.svelte'
   import { ROW_HEIGHT_MAX, ROW_HEIGHT_MIN, ROW_HEIGHT_STEP } from '$lib/browserColumns'
-  import { backupDate, INTERVAL_CHOICES, KEEP_CHOICES } from '$lib/backups.svelte'
+  import { backupDate, DEFAULT_BACKUP_SETTINGS, INTERVAL_CHOICES, KEEP_CHOICES } from '$lib/backups.svelte'
   import {
     BIT_DEPTHS,
     BITRATES,
@@ -39,8 +39,10 @@
     SAMPLE_RATES
   } from '$lib/convertPresets'
   import { loadPresets, savePresets } from '$lib/convertPresetStore'
+  import { api } from '$lib/api'
   import { getApp } from '$lib/context'
   import { suspendModal } from '$lib/modal'
+  import { resetSettings } from '$lib/settings'
   import { PLAYERS } from '$lib/hardware/players'
   import { formatSize } from '$lib/format'
   import { ACTION_IDS, ACTIONS, chordFromEvent, chordLabel, type ActionGroup, type ActionId } from '$lib/keymap'
@@ -125,6 +127,18 @@
   let section = $state<SettingsSection>(initialSection)
   let recording = $state<ActionId | null>(null)
   let confirming = $state.raw<{ kind: 'restore' | 'delete'; backup: Backup } | null>(null)
+  let confirmingFactoryReset = $state(false)
+
+  async function factoryReset(): Promise<void> {
+    const { auto, keep, interval } = backups.settings
+    const backupsChanged =
+      auto !== DEFAULT_BACKUP_SETTINGS.auto ||
+      keep !== DEFAULT_BACKUP_SETTINGS.keep ||
+      interval !== DEFAULT_BACKUP_SETTINGS.interval
+    // Straight to the engine: backups.setSettings also re-lists every backup, which only slows the quit.
+    if (backupsChanged) await api.setBackupSettings(DEFAULT_BACKUP_SETTINGS).catch(() => {})
+    resetSettings()
+  }
 
   void backups.refresh()
 
@@ -309,7 +323,7 @@
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Browser</h3>
             {@render choice(
               'Track style',
-              'Standard shows one line per track, with artwork filling the column. Alternative shows the whole cover and puts the artist under the title instead of in its own column.',
+              'Standard shows one line per track. Alternative combines the title and artist in a single line.',
               TRACK_STYLES,
               library.browserTrackStyle,
               (id) => library.setBrowserTrackStyle(id as BrowserTrackStyle)
@@ -459,6 +473,26 @@
               </div>
             </div>
           </div>
+
+          <section class="mt-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Reset</h3>
+            <div class="flex items-start gap-3 rounded-md px-2 py-2">
+              <span class="min-w-0 flex-1">
+                <span class="block text-[12.5px] font-medium">Factory settings</span>
+                <span class="mt-0.5 block text-[11px] leading-snug text-faint">
+                  Put every setting, shortcut and layout back to how it was on first launch. Your rekordbox library and
+                  backups are not touched.
+                </span>
+              </span>
+              <button
+                class="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-danger/50 px-3 text-[12px] font-medium text-danger hover:bg-danger/10"
+                onclick={() => (confirmingFactoryReset = true)}
+              >
+                <RotateCcw class="size-3.5" />
+                Reset…
+              </button>
+            </div>
+          </section>
         {:else if section === 'database'}
           {@const rekordboxOpen = !!library.info?.rekordboxRunning}
           <section class="mb-5">
@@ -785,6 +819,17 @@
       onclose={() => (confirming = null)}
     />
   {/if}
+{/if}
+
+{#if confirmingFactoryReset}
+  <ConfirmDialog
+    title="Restart to reset settings"
+    message="Export Studio needs to restart to reset every setting, shortcut, column and layout. Quit now, then open it again to start on the defaults. Your rekordbox library and backups are kept."
+    confirmLabel="Quit"
+    danger
+    onconfirm={() => void factoryReset()}
+    onclose={() => (confirmingFactoryReset = false)}
+  />
 {/if}
 
 {#snippet toggle(label: string, description: string, on: boolean, flip: () => void)}
