@@ -39,6 +39,11 @@ export interface NativeEngine {
   load(deck: number, path: string, request: number): void
   unload(deck: number): void
   play(deck: number): void
+  playUnsynced(deck: number): void
+  align(deck: number): void
+  setBeatgrid(deck: number, timesMs: number[], bpms: number[]): void
+  setSync(master: number, follower: number): void
+  clearSync(): void
   pause(deck: number): void
   seek(deck: number, ms: number): void
   stopAt(deck: number, ms: number): void

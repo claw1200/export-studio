@@ -290,10 +290,12 @@ export class Player {
     this.deck.pause()
   }
 
-  /** Play while a cue is held makes the hold stick, as on a CDJ. */
+  /** Play while a cue is held makes the hold stick, as on a CDJ, and only then syncs it. */
   toggle(): void {
-    if (this.holding) this.holding = { ...this.holding, latched: true }
-    else if (this.playing) this.pause()
+    if (this.holding) {
+      this.holding = { ...this.holding, latched: true }
+      this.deck.align()
+    } else if (this.playing) this.pause()
     else this.play()
   }
 
@@ -373,7 +375,7 @@ export class Player {
     this.takeSpeakers()
     this.holding = { key, at, latched: false }
     if (this.position !== at) this.seek(at)
-    this.deck.play()
+    this.deck.play({ synced: false })
   }
 
   private endHold(key: HoldKey): void {

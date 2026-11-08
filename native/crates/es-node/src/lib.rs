@@ -167,6 +167,45 @@ impl AudioEngine {
         }
     }
 
+    /// Starts the deck where it is, synced or not: what holding CUE does.
+    #[napi]
+    pub fn play_unsynced(&self, deck: u32) {
+        if let Some(engine) = self.engine() {
+            engine.play_unsynced(deck_index(deck));
+        }
+    }
+
+    /// Lines a playing deck up with its synced partner, if that is playing too.
+    #[napi]
+    pub fn align(&self, deck: u32) {
+        if let Some(engine) = self.engine() {
+            engine.align(deck_index(deck));
+        }
+    }
+
+    /// The deck's beats in ms into the file, each with the tempo from it on. Empty clears it.
+    #[napi]
+    pub fn set_beatgrid(&self, deck: u32, times_ms: Vec<f64>, bpms: Vec<f64>) {
+        if let Some(engine) = self.engine() {
+            engine.set_beatgrid(deck_index(deck), &times_ms, &bpms);
+        }
+    }
+
+    /// `follower` keeps `master`'s tempo and starts on its beat.
+    #[napi]
+    pub fn set_sync(&self, master: u32, follower: u32) {
+        if let Some(engine) = self.engine() {
+            engine.set_sync(Some((deck_index(master), deck_index(follower))));
+        }
+    }
+
+    #[napi]
+    pub fn clear_sync(&self) {
+        if let Some(engine) = self.engine() {
+            engine.set_sync(None);
+        }
+    }
+
     #[napi]
     pub fn pause(&self, deck: u32) {
         if let Some(engine) = self.engine() {

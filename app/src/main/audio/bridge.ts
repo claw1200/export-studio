@@ -91,7 +91,11 @@ export class AudioBridge {
         engine.unload(command.deck)
         break
       case 'play':
-        engine.play(command.deck)
+        if (command.unsynced) engine.playUnsynced(command.deck)
+        else engine.play(command.deck)
+        break
+      case 'align':
+        engine.align(command.deck)
         break
       case 'pause':
         engine.pause(command.deck)
@@ -143,6 +147,13 @@ export class AudioBridge {
         break
       case 'playTogether':
         engine.playTogether(command.decks)
+        break
+      case 'beatgrid':
+        engine.setBeatgrid(command.deck, command.timesMs, command.bpms)
+        break
+      case 'sync':
+        if (command.link) engine.setSync(command.link.master, command.link.follower)
+        else engine.clearSync()
         break
     }
     this.startTicker()

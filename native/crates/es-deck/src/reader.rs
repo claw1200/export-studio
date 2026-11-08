@@ -9,7 +9,7 @@ use std::sync::Arc;
 use rtrb::Consumer;
 
 use crate::block::{Block, BLOCK_FRAMES};
-use crate::clock::DeckClock;
+use crate::clock::{DeckClock, KeepTime};
 use crate::fade::{Ramp, FADE_FRAMES};
 use crate::tempo::{Mode, Stretcher, Varispeed, POSITIONS};
 
@@ -171,15 +171,18 @@ impl DeckReader {
         }
     }
 
-    /// Adds this deck's audio to `out` (interleaved stereo).
-    pub fn mix_into(&mut self, out: &mut [f32]) {
+    /// Adds this deck's audio to `out` (interleaved stereo). `start` is how many frames the
+    /// output had played before this buffer.
+    pub fn mix_into(&mut self, out: &mut [f32], start: u64) {
         if self.stretcher.is_none() {
             self.stretcher = self.stretchers.pop().ok();
         }
         let target = self.clock.generation();
         let sounding = self.clock.sounding();
         if !sounding && self.ramp.is_silent() {
-            self.adopt(target);
+            self.adopt(target, start);
+            // Leaves room in the ring for the decode thread to queue where a paused deck now is.
+            self.feed.drop_stale();
             return;
         }
 
@@ -203,7 +206,7 @@ impl DeckReader {
         let mut done = 0;
         while done < frames {
             if self.generation != target && self.ramp.is_silent() {
-                self.adopt(target);
+                self.adopt(target, start + done as u64);
             }
             if self.switching && self.ramp.is_silent() {
                 self.switch_path();
@@ -220,7 +223,7 @@ impl DeckReader {
             let Some((left, right, at)) = self.next_frame(!changing, rate) else {
                 if self.ramp.is_silent() {
                     if changing {
-                        self.adopt(target);
+                        self.adopt(target, start + done as u64);
                         continue;
                     }
                     break;
@@ -295,8 +298,6 @@ impl DeckReader {
         }
     }
 
-    /// Takes `generation` as the one being heard, and picks how to play it. Only called with
-    /// the ramp at zero.
     /// Skips as much of the new audio as time went by while it was awaited, so a move that keeps
     /// time lands where it would have had it been instant. What has not been decoded yet is
     /// skipped as it arrives.
@@ -306,6 +307,10 @@ impl DeckReader {
                 return;
             }
             self.owed -= 1.0;
+        }
+        // Paid only once there is audio to play: until then the wait is still adding to the debt.
+        if self.feed.available() == 0 {
+            return;
         }
         self.owed = 0.0;
         self.catching_up = false;
@@ -341,15 +346,24 @@ impl DeckReader {
         }
     }
 
-    fn adopt(&mut self, generation: u32) {
+    /// Takes `generation` as the one being heard, and picks how to play it. Only called with
+    /// the ramp at zero. `now` is the output frame it is taken up on.
+    fn adopt(&mut self, generation: u32, now: u64) {
         if generation == self.generation && self.feed.generation == generation {
             return;
         }
         self.switching = false;
         // Only a move that keeps time carries what went by while it was being made.
-        self.catching_up = self.clock.take_keep_time();
-        if !self.catching_up {
-            self.owed = 0.0;
+        match self.clock.take_keep_time() {
+            KeepTime::No => {
+                self.catching_up = false;
+                self.owed = 0.0;
+            }
+            KeepTime::FromMove => self.catching_up = true,
+            KeepTime::Since(frames) => {
+                self.catching_up = true;
+                self.owed = now.saturating_sub(frames) as f64 * self.clock.tempo();
+            }
         }
         self.generation = generation;
         self.feed.adopt(generation);

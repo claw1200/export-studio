@@ -23,7 +23,11 @@ pub(crate) enum Command {
     },
     /// Transport changes are already in the clock; this only wakes the thread.
     Wake,
-    Seek(u64),
+    /// Move to `frame`, for the move that bumped the clock to `generation`.
+    Seek {
+        frame: u64,
+        generation: u32,
+    },
     /// The clock is already scrubbing under a new generation; start the read head where it is.
     ScrubBegin,
     /// The pointer is at `frame` (fractional, device rate); `at_ms` is the input event's time.
@@ -160,7 +164,7 @@ impl Worker {
     fn handle(&mut self, command: Command) -> bool {
         match command {
             Command::Load { request, path } => self.load(request, &path),
-            Command::Seek(frame) => self.seek(frame),
+            Command::Seek { frame, generation } => self.seek(frame, generation),
             Command::ScrubBegin => self.scrub_begin(),
             Command::ScrubTo { frame, at_ms } => {
                 let now = self.now_ms();
@@ -238,7 +242,12 @@ impl Worker {
         self.clock.set_end_of_stream(false);
     }
 
-    fn seek(&mut self, frame: u64) {
+    fn seek(&mut self, frame: u64, generation: u32) {
+        // A newer move is already queued behind this one. Its audio must never carry the newer
+        // generation, or the callback would play it as current; with its own, it is dropped.
+        if generation != self.clock.generation() {
+            return;
+        }
         self.scrub = None;
         let Some(streamer) = self.streamer.as_mut() else {
             return;
@@ -246,10 +255,12 @@ impl Worker {
         match streamer.seek(frame) {
             Ok(landed) => {
                 self.clock.set_end_of_stream(false);
-                self.clock.set_position(landed);
+                if landed != frame && self.clock.generation() == generation {
+                    self.clock.set_position(landed);
+                }
                 // The control side bumped the generation when it moved the position, so the
                 // callback stopped trusting the ring at that instant. Adopt it, don't bump again.
-                self.generation = self.clock.generation();
+                self.generation = generation;
             }
             Err(e) => self.error(self.clock.load_id(), e.to_string()),
         }

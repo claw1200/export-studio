@@ -38,8 +38,19 @@ pub struct DeckClock {
     key_shift: AtomicI32,
     /// The generation whose audio is queued deep enough to start without running dry.
     ready_generation: AtomicU32,
-    /// The pending move keeps time: the deck lands where it would be had the move been instant.
-    keep_time: AtomicBool,
+    /// The pending move's [`KeepTime`], encoded: 0 none, 1 from the move, `n + 2` since frame `n`.
+    keep_time: AtomicU64,
+}
+
+/// Whether a move keeps time: the deck lands where it would be had the move been instant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeepTime {
+    No,
+    /// From when the callback first sees the move.
+    FromMove,
+    /// From this many frames into the output, as a [`Timeline`](crate::sync::Timeline) counts
+    /// them: the move was worked out from that moment.
+    Since(u64),
 }
 
 /// One deck at one instant.
@@ -265,14 +276,22 @@ impl DeckClock {
         self.master_tempo.store(on, Ordering::Release);
     }
 
-    /// Marks the next move as one that keeps time.
-    pub fn set_keep_time(&self, on: bool) {
-        self.keep_time.store(on, Ordering::Release);
+    pub fn set_keep_time(&self, keep: KeepTime) {
+        let encoded = match keep {
+            KeepTime::No => 0,
+            KeepTime::FromMove => 1,
+            KeepTime::Since(frames) => frames.saturating_add(2),
+        };
+        self.keep_time.store(encoded, Ordering::Release);
     }
 
-    /// Whether the move just taken up keeps time, clearing the mark.
-    pub fn take_keep_time(&self) -> bool {
-        self.keep_time.swap(false, Ordering::AcqRel)
+    /// How the move just taken up keeps time, clearing the mark.
+    pub fn take_keep_time(&self) -> KeepTime {
+        match self.keep_time.swap(0, Ordering::AcqRel) {
+            0 => KeepTime::No,
+            1 => KeepTime::FromMove,
+            n => KeepTime::Since(n - 2),
+        }
     }
 
     /// The decode thread has queued enough of `generation` to start playing it.
