@@ -1,6 +1,6 @@
 <script module lang="ts">
   export type SettingsSection =
-    'general' | 'display' | 'mix' | 'analysis' | 'convert' | 'database' | 'keyboard' | 'developer'
+    'general' | 'display' | 'mix' | 'analysis' | 'convert' | 'database' | 'keyboard' | 'developer' | 'about'
 </script>
 
 <script lang="ts">
@@ -11,7 +11,9 @@
     Database,
     DatabaseBackup,
     FileAudio,
+    ExternalLink,
     FolderOpen,
+    Info,
     Keyboard,
     LoaderCircle,
     Monitor,
@@ -19,6 +21,7 @@
     RotateCcw,
     Search,
     SlidersHorizontal,
+    Star,
     Trash2,
     Wrench,
     X
@@ -50,6 +53,8 @@
   import type { CuePlacement } from '$lib/deck/prefs.svelte'
   import type { Backup, BackupProgress, BackupReason, ConvertFormat, ConvertPreset } from '$lib/types'
   import type { GridMode } from '../../../../preload/analysis'
+  import { REPO_URL, type Update } from '../../../../shared/updates'
+  import appIcon from '../../../../../resources/icon.png'
   import ConfirmDialog from './ConfirmDialog.svelte'
   import MixCurvePreview from './mix/MixCurvePreview.svelte'
   import {
@@ -78,6 +83,7 @@
     { id: 'keyboard', label: 'Keyboard shortcuts', icon: Keyboard },
     { id: 'developer', label: 'Developer options', icon: Wrench }
   ]
+  const ABOUT = { id: 'about', label: 'About', icon: Info } as const
   const REASONS: Record<BackupReason, string> = {
     manual: 'Manual',
     'before-edit': 'Before editing',
@@ -125,6 +131,15 @@
 
   // svelte-ignore state_referenced_locally
   let section = $state<SettingsSection>(initialSection)
+  const sectionLabel = $derived([...SECTIONS, ABOUT].find((s) => s.id === section)?.label)
+
+  let update = $state<Update | null | 'checking'>(null)
+  let checkedForUpdate = $state(false)
+  async function checkForUpdate(): Promise<void> {
+    update = 'checking'
+    update = await window.api.checkForUpdate()
+    checkedForUpdate = true
+  }
   let recording = $state<ActionId | null>(null)
   let confirming = $state.raw<{ kind: 'restore' | 'delete'; backup: Backup } | null>(null)
   let confirmingFactoryReset = $state(false)
@@ -224,26 +239,16 @@
     <nav class="flex w-48 shrink-0 flex-col gap-0.5 border-r border-line-soft bg-bg/50 p-3">
       <div class="px-2 pt-1 pb-3 text-[13px] font-semibold">Settings</div>
       {#each SECTIONS as s (s.id)}
-        <button
-          class={[
-            'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px]',
-            section === s.id ? 'bg-raised text-fg' : 'text-muted hover:bg-hover hover:text-fg'
-          ]}
-          aria-current={section === s.id ? 'page' : undefined}
-          onclick={() => {
-            section = s.id
-            recording = null
-          }}
-        >
-          <s.icon class="size-3.5" />
-          {s.label}
-        </button>
+        {@render navItem(s)}
       {/each}
+      <div class="mt-auto border-t border-line-soft pt-2">
+        {@render navItem(ABOUT)}
+      </div>
     </nav>
 
     <div class="flex min-w-0 flex-1 flex-col">
       <header class="flex h-12 shrink-0 items-center gap-3 border-b border-line-soft px-5">
-        <h2 class="text-[13px] font-semibold">{SECTIONS.find((s) => s.id === section)?.label}</h2>
+        <h2 class="text-[13px] font-semibold">{sectionLabel}</h2>
         {#if section === 'keyboard'}
           <div class="relative ml-auto w-56">
             <Search class="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-faint" />
@@ -269,7 +274,69 @@
       </header>
 
       <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        {#if section === 'developer'}
+        {#if section === 'about'}
+          <div class="flex flex-col items-center px-2 pt-8 text-center">
+            <img src={appIcon} alt="" class="size-20" />
+            <h3 class="mt-3 text-[16px] font-semibold">Export Studio</h3>
+            <p class="mt-0.5 text-[12px] text-muted">A modern library browser for rekordbox</p>
+            <p class="mt-3 font-mono text-[11.5px] text-faint tabular-nums">
+              Version {window.api.version} · Electron {window.api.electronVersion}
+            </p>
+
+            <div class="mt-5 flex h-7 items-center gap-2 text-[12px]">
+              {#if update === 'checking'}
+                <span class="flex items-center gap-1.5 text-muted" role="status">
+                  <LoaderCircle class="size-3.5 animate-spin text-accent" />
+                  Checking for updates…
+                </span>
+              {:else if update}
+                <a
+                  class="flex h-7 items-center gap-1.5 rounded-md bg-accent px-3 font-medium text-bg hover:bg-accent/90"
+                  href={update.url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Download version {update.version}
+                  <ExternalLink class="size-3.5" />
+                </a>
+              {:else}
+                {#if checkedForUpdate}
+                  <span class="text-muted">No newer version found.</span>
+                {/if}
+                <button
+                  class="flex h-7 items-center gap-1.5 rounded-md px-2 text-muted hover:bg-hover hover:text-fg"
+                  onclick={() => void checkForUpdate()}
+                >
+                  <RotateCcw class="size-3.5" />
+                  {checkedForUpdate ? 'Check again' : 'Check for updates'}
+                </button>
+              {/if}
+            </div>
+
+            <div
+              class="mt-6 flex w-full max-w-sm items-center gap-3 rounded-lg border border-line-soft bg-bg/50 p-3 text-left"
+            >
+              <Star class="size-5 shrink-0 text-accent" />
+              <p class="min-w-0 flex-1 text-[11.5px] leading-snug text-muted">
+                Find Export Studio useful? A star on GitHub helps other DJs find it.
+              </p>
+              <a
+                class="flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 text-[12px] font-medium text-bg hover:bg-accent/90"
+                href={REPO_URL}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <Star class="size-3.5" />
+                Star
+              </a>
+            </div>
+
+            <div class="mt-4 flex gap-1 text-[12px]">
+              {@render externalLink('Release notes', `${REPO_URL}/releases`)}
+              {@render externalLink('Report a problem', `${REPO_URL}/issues`)}
+            </div>
+          </div>
+        {:else if section === 'developer'}
           <div class="flex items-center gap-3 rounded-md px-2 py-2">
             <span class="min-w-0 flex-1">
               <span class="block text-[12.5px] font-medium">Accent color</span>
@@ -639,7 +706,7 @@
             )}
             {@render choice(
               'BPM range',
-              'The tempo is always picked inside this range, so half- and double-tempo readings land where you expect.',
+              'The tempo during track analysis is always picked inside this range.',
               RANGES,
               `${s.minBpm}-${s.maxBpm}`,
               (id) => {
@@ -831,6 +898,35 @@
     onclose={() => (confirmingFactoryReset = false)}
   />
 {/if}
+
+{#snippet navItem(s: { id: SettingsSection; label: string; icon: typeof Keyboard })}
+  <button
+    class={[
+      'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px]',
+      section === s.id ? 'bg-raised text-fg' : 'text-muted hover:bg-hover hover:text-fg'
+    ]}
+    aria-current={section === s.id ? 'page' : undefined}
+    onclick={() => {
+      section = s.id
+      recording = null
+    }}
+  >
+    <s.icon class="size-3.5" />
+    {s.label}
+  </button>
+{/snippet}
+
+{#snippet externalLink(label: string, href: string)}
+  <a
+    class="flex h-7 items-center gap-1.5 rounded-md px-2 text-muted hover:bg-hover hover:text-fg"
+    {href}
+    target="_blank"
+    rel="noreferrer"
+  >
+    {label}
+    <ExternalLink class="size-3" />
+  </a>
+{/snippet}
 
 {#snippet toggle(label: string, description: string, on: boolean, flip: () => void)}
   <button

@@ -92,6 +92,9 @@ app.whenReady().then(() => {
     }
   })
   ipcMain.handle('shell:showItem', (_e, path: string) => shell.showItemInFolder(path))
+  ipcMain.on('app:version', (event) => {
+    event.returnValue = app.getVersion()
+  })
   ipcMain.on('app:music', (event) => {
     event.returnValue = app.getPath('music').replaceAll('\\', '/')
   })

@@ -7,6 +7,8 @@ export interface Api {
   platform: string
   /** The operating system's Music folder. */
   musicDirectory: string
+  version: string
+  electronVersion: string
   call<T = unknown>(...args: EngineCallArgs): Promise<T>
   onEvent(listener: (event: string, data: unknown) => void): () => void
   showItemInFolder(path: string): Promise<void>
