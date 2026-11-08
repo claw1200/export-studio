@@ -125,7 +125,7 @@ export class Library {
   importArtwork = $state(getSetting('importArtwork') !== '0')
   hideStreaming = $state(getSetting('hideStreaming') !== '0')
   hidePresetTracks = $state(storedHidePresetTracks())
-  doubleClickToLoad = $state(getSetting('doubleClickToLoad') === '1')
+  doubleClickToLoad = $state(getSetting('doubleClickToLoad') !== '0')
   browserTrackStyle = $state<BrowserTrackStyle>(storedTrackStyle())
   browserRowHeight = $state(readRowHeight(getSetting(BROWSER_ROW_HEIGHT_KEY)))
   hardwareGreen = $state(storedPlayer('hardwareGreen', DEFAULT_GREEN))

@@ -32,7 +32,7 @@ export const KEY_HIGHLIGHTS: { id: KeyHighlightId; label: string }[] = [
 ]
 
 export const DEFAULT_CURVE_ID: CurveId = 'normal'
-export const DEFAULT_SWAP_TIMING_ID: SwapTimingId = 'late'
+export const DEFAULT_SWAP_TIMING_ID: SwapTimingId = 'centre'
 export const DEFAULT_KEY_HIGHLIGHT_ID: KeyHighlightId = 'adjacent'
 
 function stored<T extends string>(key: string, ids: { id: T }[], fallback: T): T {

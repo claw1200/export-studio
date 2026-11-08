@@ -36,7 +36,7 @@ const DEFAULTS: AnalysisSettings = {
   highPrecision: true,
   roundBpm: true,
   key: true,
-  concurrency: 2
+  concurrency: 3
 }
 
 function load(): AnalysisSettings {
