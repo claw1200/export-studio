@@ -8,7 +8,7 @@ type WaveformChange = { kind: 'mode' } | { kind: 'quality'; wasOff: boolean }
 
 /** How every deck's waveforms are drawn, kept between sessions. */
 export class WaveformPrefs {
-  mode = $state<WaveformMode>((getSetting('waveformMode') as WaveformMode) || 'rgb')
+  mode = $state<WaveformMode>((getSetting('waveformMode') as WaveformMode) || '3band')
   /** Detail of the engine's own waveform, 0 to 100; 0 draws rekordbox's analysis instead. */
   quality = $state(storedPercent('waveQuality', 30))
   /** How far the 3-band levels fall after a peak, 0 to 100 blocks. */

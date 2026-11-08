@@ -32,14 +32,15 @@ export const COLUMNS: Column[] = [
     id: 'compat',
     name: 'Hardware',
     label: 'Hardware',
-    width: 104,
+    // Just wide enough for the heading and its sort arrow.
+    width: 84,
     min: 24,
     max: 180,
     fit: 0.8,
     align: 'center',
     sort: 'compat'
   },
-  { id: 'wave', name: 'Waveform', label: 'Waveform', width: 148, min: 80, max: 480, sort: 'cueCount' },
+  { id: 'wave', name: 'Waveform', label: 'Waveform', width: 184, min: 80, max: 480, sort: 'cueCount' },
   {
     id: 'cue',
     name: 'CUE',

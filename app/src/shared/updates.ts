@@ -1,4 +1,6 @@
-export const RELEASES_URL = 'https://api.github.com/repos/claw1200/export-studio/releases?per_page=100'
+export const REPO = 'claw1200/export-studio'
+export const REPO_URL = `https://github.com/${REPO}`
+export const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases?per_page=100`
 
 /** The fields used from GitHub's list-releases response. */
 export interface Release {

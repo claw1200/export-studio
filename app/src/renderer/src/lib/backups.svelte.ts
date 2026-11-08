@@ -14,6 +14,9 @@ export const INTERVAL_CHOICES = [
   { hours: 48, label: '2d' }
 ] as const
 
+/** Matches the engine's defaults in es-backup. */
+export const DEFAULT_BACKUP_SETTINGS: BackupSettings = { auto: true, keep: 10, interval: 12 }
+
 export function backupDate(backup: Backup): string {
   return new Date(backup.created * 1000).toLocaleString([], {
     dateStyle: 'medium',
@@ -24,7 +27,7 @@ export function backupDate(backup: Backup): string {
 /** Backups of the rekordbox library, made and restored by the engine. */
 export class Backups {
   list = $state.raw<Backup[]>([])
-  settings = $state<BackupSettings>({ auto: true, keep: 10, interval: 12 })
+  settings = $state<BackupSettings>({ ...DEFAULT_BACKUP_SETTINGS })
   progress = $state.raw<BackupProgress | null>(null)
   busy = $state<'backup' | 'restore' | null>(null)
   error = $state<string | null>(null)

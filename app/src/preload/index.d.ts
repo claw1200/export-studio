@@ -7,6 +7,8 @@ export interface Api {
   platform: string
   /** The operating system's Music folder. */
   musicDirectory: string
+  version: string
+  electronVersion: string
   call<T = unknown>(...args: EngineCallArgs): Promise<T>
   onEvent(listener: (event: string, data: unknown) => void): () => void
   showItemInFolder(path: string): Promise<void>
@@ -26,6 +28,8 @@ export interface Api {
   loadSettings(): { exists: boolean; values: Record<string, string> }
   writeSetting(key: string, value: string): void
   replaceSettings(values: Record<string, string>): void
+  /** Clears every preference and quits the app. */
+  resetSettings(): void
   /** The newest GitHub release on this build's channel, if newer than the running version. */
   checkForUpdate(): Promise<Update | null>
 }

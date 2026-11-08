@@ -9,6 +9,8 @@ type CallResult = { ok: true; result: unknown } | { ok: false; error: { message:
 const api = {
   platform: process.platform,
   musicDirectory: ipcRenderer.sendSync('app:music') as string,
+  version: ipcRenderer.sendSync('app:version') as string,
+  electronVersion: process.versions.electron,
 
   async call<T = unknown>(...args: EngineCallArgs): Promise<T> {
     const [method, params] = args
@@ -73,6 +75,10 @@ const api = {
 
   replaceSettings(values: Record<string, string>): void {
     ipcRenderer.send('settings:replace', values)
+  },
+
+  resetSettings(): void {
+    ipcRenderer.send('settings:reset')
   },
 
   checkForUpdate(): Promise<Update | null> {

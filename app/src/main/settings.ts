@@ -1,4 +1,4 @@
-import { app, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 
@@ -71,16 +71,15 @@ export function registerSettings(): void {
   ipcMain.on('settings:replace', (_event, next: unknown) => {
     values = bagFrom(next)
     dirty = true
-    if (pending) {
-      clearTimeout(pending)
-      pending = null
-    }
-    try {
-      writeNow()
-      dirty = false
-    } catch (err) {
-      console.error('[settings] failed to write', err)
-    }
+    flushSettings()
+  })
+  // Every store reads its preferences once at startup, so the defaults only take hold on the next launch.
+  ipcMain.on('settings:reset', () => {
+    values = Object.create(null)
+    dirty = true
+    flushSettings()
+    for (const win of BrowserWindow.getAllWindows()) win.hide()
+    app.quit()
   })
 }
 

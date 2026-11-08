@@ -1,6 +1,6 @@
 <script module lang="ts">
   export type SettingsSection =
-    'general' | 'display' | 'mix' | 'analysis' | 'convert' | 'database' | 'keyboard' | 'developer'
+    'general' | 'display' | 'mix' | 'analysis' | 'convert' | 'database' | 'keyboard' | 'developer' | 'about'
 </script>
 
 <script lang="ts">
@@ -11,7 +11,9 @@
     Database,
     DatabaseBackup,
     FileAudio,
+    ExternalLink,
     FolderOpen,
+    Info,
     Keyboard,
     LoaderCircle,
     Monitor,
@@ -19,6 +21,7 @@
     RotateCcw,
     Search,
     SlidersHorizontal,
+    Star,
     Trash2,
     Wrench,
     X
@@ -26,7 +29,7 @@
   import { accent, DEFAULT_ACCENT } from '$lib/accent.svelte'
   import { BPM_RANGES, MAX_CONCURRENCY } from '$lib/analysis.svelte'
   import { ROW_HEIGHT_MAX, ROW_HEIGHT_MIN, ROW_HEIGHT_STEP } from '$lib/browserColumns'
-  import { backupDate, INTERVAL_CHOICES, KEEP_CHOICES } from '$lib/backups.svelte'
+  import { backupDate, DEFAULT_BACKUP_SETTINGS, INTERVAL_CHOICES, KEEP_CHOICES } from '$lib/backups.svelte'
   import {
     BIT_DEPTHS,
     BITRATES,
@@ -39,15 +42,27 @@
     SAMPLE_RATES
   } from '$lib/convertPresets'
   import { loadPresets, savePresets } from '$lib/convertPresetStore'
+  import { api } from '$lib/api'
   import { getApp } from '$lib/context'
   import { suspendModal } from '$lib/modal'
+  import { resetSettings } from '$lib/settings'
   import { PLAYERS } from '$lib/hardware/players'
   import { formatSize } from '$lib/format'
-  import { ACTION_IDS, ACTIONS, chordFromEvent, chordLabel, type ActionGroup, type ActionId } from '$lib/keymap'
+  import {
+    ACTION_IDS,
+    ACTIONS,
+    chordFromEvent,
+    chordKeys,
+    chordLabel,
+    type ActionGroup,
+    type ActionId
+  } from '$lib/keymap'
   import type { BrowserTrackStyle } from '$lib/library.svelte'
   import type { CuePlacement } from '$lib/deck/prefs.svelte'
   import type { Backup, BackupProgress, BackupReason, ConvertFormat, ConvertPreset } from '$lib/types'
   import type { GridMode } from '../../../../preload/analysis'
+  import { REPO_URL, type Update } from '../../../../shared/updates'
+  import appIcon from '../../../../../resources/icon.png'
   import ConfirmDialog from './ConfirmDialog.svelte'
   import MixCurvePreview from './mix/MixCurvePreview.svelte'
   import {
@@ -76,6 +91,7 @@
     { id: 'keyboard', label: 'Keyboard shortcuts', icon: Keyboard },
     { id: 'developer', label: 'Developer options', icon: Wrench }
   ]
+  const ABOUT = { id: 'about', label: 'About', icon: Info } as const
   const REASONS: Record<BackupReason, string> = {
     manual: 'Manual',
     'before-edit': 'Before editing',
@@ -123,8 +139,29 @@
 
   // svelte-ignore state_referenced_locally
   let section = $state<SettingsSection>(initialSection)
+  const sectionLabel = $derived([...SECTIONS, ABOUT].find((s) => s.id === section)?.label)
+
+  let update = $state<Update | null | 'checking'>(null)
+  let checkedForUpdate = $state(false)
+  async function checkForUpdate(): Promise<void> {
+    update = 'checking'
+    update = await window.api.checkForUpdate()
+    checkedForUpdate = true
+  }
   let recording = $state<ActionId | null>(null)
   let confirming = $state.raw<{ kind: 'restore' | 'delete'; backup: Backup } | null>(null)
+  let confirmingFactoryReset = $state(false)
+
+  async function factoryReset(): Promise<void> {
+    const { auto, keep, interval } = backups.settings
+    const backupsChanged =
+      auto !== DEFAULT_BACKUP_SETTINGS.auto ||
+      keep !== DEFAULT_BACKUP_SETTINGS.keep ||
+      interval !== DEFAULT_BACKUP_SETTINGS.interval
+    // Straight to the engine: backups.setSettings also re-lists every backup, which only slows the quit.
+    if (backupsChanged) await api.setBackupSettings(DEFAULT_BACKUP_SETTINGS).catch(() => {})
+    resetSettings()
+  }
 
   void backups.refresh()
 
@@ -210,26 +247,16 @@
     <nav class="flex w-48 shrink-0 flex-col gap-0.5 border-r border-line-soft bg-bg/50 p-3">
       <div class="px-2 pt-1 pb-3 text-[13px] font-semibold">Settings</div>
       {#each SECTIONS as s (s.id)}
-        <button
-          class={[
-            'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px]',
-            section === s.id ? 'bg-raised text-fg' : 'text-muted hover:bg-hover hover:text-fg'
-          ]}
-          aria-current={section === s.id ? 'page' : undefined}
-          onclick={() => {
-            section = s.id
-            recording = null
-          }}
-        >
-          <s.icon class="size-3.5" />
-          {s.label}
-        </button>
+        {@render navItem(s)}
       {/each}
+      <div class="mt-auto border-t border-line-soft pt-2">
+        {@render navItem(ABOUT)}
+      </div>
     </nav>
 
     <div class="flex min-w-0 flex-1 flex-col">
       <header class="flex h-12 shrink-0 items-center gap-3 border-b border-line-soft px-5">
-        <h2 class="text-[13px] font-semibold">{SECTIONS.find((s) => s.id === section)?.label}</h2>
+        <h2 class="text-[13px] font-semibold">{sectionLabel}</h2>
         {#if section === 'keyboard'}
           <div class="relative ml-auto w-56">
             <Search class="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-faint" />
@@ -255,7 +282,69 @@
       </header>
 
       <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        {#if section === 'developer'}
+        {#if section === 'about'}
+          <div class="flex flex-col items-center px-2 pt-8 text-center">
+            <img src={appIcon} alt="" class="size-20" />
+            <h3 class="mt-3 text-[16px] font-semibold">Export Studio</h3>
+            <p class="mt-0.5 text-[12px] text-muted">A modern library browser for rekordbox</p>
+            <p class="mt-3 font-mono text-[11.5px] text-faint tabular-nums">
+              Version {window.api.version} · Electron {window.api.electronVersion}
+            </p>
+
+            <div class="mt-5 flex h-7 items-center gap-2 text-[12px]">
+              {#if update === 'checking'}
+                <span class="flex items-center gap-1.5 text-muted" role="status">
+                  <LoaderCircle class="size-3.5 animate-spin text-accent" />
+                  Checking for updates…
+                </span>
+              {:else if update}
+                <a
+                  class="flex h-7 items-center gap-1.5 rounded-md bg-accent px-3 font-medium text-bg hover:bg-accent/90"
+                  href={update.url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Download version {update.version}
+                  <ExternalLink class="size-3.5" />
+                </a>
+              {:else}
+                {#if checkedForUpdate}
+                  <span class="text-muted">No newer version found.</span>
+                {/if}
+                <button
+                  class="flex h-7 items-center gap-1.5 rounded-md px-2 text-muted hover:bg-hover hover:text-fg"
+                  onclick={() => void checkForUpdate()}
+                >
+                  <RotateCcw class="size-3.5" />
+                  {checkedForUpdate ? 'Check again' : 'Check for updates'}
+                </button>
+              {/if}
+            </div>
+
+            <div
+              class="mt-6 flex w-full max-w-sm items-center gap-3 rounded-lg border border-line-soft bg-bg/50 p-3 text-left"
+            >
+              <Star class="size-5 shrink-0 text-accent" />
+              <p class="min-w-0 flex-1 text-[11.5px] leading-snug text-muted">
+                Find Export Studio useful? A star on GitHub helps other DJs find it.
+              </p>
+              <a
+                class="flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 text-[12px] font-medium text-bg hover:bg-accent/90"
+                href={REPO_URL}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <Star class="size-3.5" />
+                Star
+              </a>
+            </div>
+
+            <div class="mt-4 flex gap-1 text-[12px]">
+              {@render externalLink('Release notes', `${REPO_URL}/releases`)}
+              {@render externalLink('Report a problem', `${REPO_URL}/issues`)}
+            </div>
+          </div>
+        {:else if section === 'developer'}
           <div class="flex items-center gap-3 rounded-md px-2 py-2">
             <span class="min-w-0 flex-1">
               <span class="block text-[12.5px] font-medium">Accent color</span>
@@ -309,7 +398,7 @@
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Browser</h3>
             {@render choice(
               'Track style',
-              'Standard shows one line per track, with artwork filling the column. Alternative shows the whole cover and puts the artist under the title instead of in its own column.',
+              'Standard shows one line per track. Alternative combines the title and artist in a single line.',
               TRACK_STYLES,
               library.browserTrackStyle,
               (id) => library.setBrowserTrackStyle(id as BrowserTrackStyle)
@@ -459,6 +548,26 @@
               </div>
             </div>
           </div>
+
+          <section class="mt-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Reset</h3>
+            <div class="flex items-start gap-3 rounded-md px-2 py-2">
+              <span class="min-w-0 flex-1">
+                <span class="block text-[12.5px] font-medium">Factory settings</span>
+                <span class="mt-0.5 block text-[11px] leading-snug text-faint">
+                  Put every setting, shortcut and layout back to how it was on first launch. Your rekordbox library and
+                  backups are not touched.
+                </span>
+              </span>
+              <button
+                class="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-danger/50 px-3 text-[12px] font-medium text-danger hover:bg-danger/10"
+                onclick={() => (confirmingFactoryReset = true)}
+              >
+                <RotateCcw class="size-3.5" />
+                Reset…
+              </button>
+            </div>
+          </section>
         {:else if section === 'database'}
           {@const rekordboxOpen = !!library.info?.rekordboxRunning}
           <section class="mb-5">
@@ -605,7 +714,7 @@
             )}
             {@render choice(
               'BPM range',
-              'The tempo is always picked inside this range, so half- and double-tempo readings land where you expect.',
+              'The tempo during track analysis is always picked inside this range.',
               RANGES,
               `${s.minBpm}-${s.maxBpm}`,
               (id) => {
@@ -787,6 +896,46 @@
   {/if}
 {/if}
 
+{#if confirmingFactoryReset}
+  <ConfirmDialog
+    title="Restart to reset settings"
+    message="Export Studio needs to restart to reset every setting, shortcut, column and layout. Quit now, then open it again to start on the defaults. Your rekordbox library and backups are kept."
+    confirmLabel="Quit"
+    danger
+    onconfirm={() => void factoryReset()}
+    onclose={() => (confirmingFactoryReset = false)}
+  />
+{/if}
+
+{#snippet navItem(s: { id: SettingsSection; label: string; icon: typeof Keyboard })}
+  <button
+    class={[
+      'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px]',
+      section === s.id ? 'bg-raised text-fg' : 'text-muted hover:bg-hover hover:text-fg'
+    ]}
+    aria-current={section === s.id ? 'page' : undefined}
+    onclick={() => {
+      section = s.id
+      recording = null
+    }}
+  >
+    <s.icon class="size-3.5" />
+    {s.label}
+  </button>
+{/snippet}
+
+{#snippet externalLink(label: string, href: string)}
+  <a
+    class="flex h-7 items-center gap-1.5 rounded-md px-2 text-muted hover:bg-hover hover:text-fg"
+    {href}
+    target="_blank"
+    rel="noreferrer"
+  >
+    {label}
+    <ExternalLink class="size-3" />
+  </a>
+{/snippet}
+
 {#snippet toggle(label: string, description: string, on: boolean, flip: () => void)}
   <button
     class="flex w-full items-start gap-3 rounded-md px-2 py-2 text-left hover:bg-hover"
@@ -872,13 +1021,23 @@
       {/if}
     </span>
     <div class="flex flex-wrap items-center justify-end gap-1">
-      {#each chords as chord (chord)}
-        <span
-          class="group/chip relative flex h-6 items-center rounded border border-line bg-bg px-1.5 font-mono text-[11px] text-fg"
-        >
-          {chordLabel(chord)}
+      {#each chords as chord, i (chord)}
+        {#if i > 0}
+          <span class="px-0.5 text-[11px] text-faint">or</span>
+        {/if}
+        <span class="group/chip flex items-center gap-1 rounded-md py-0.5 pl-1 hover:bg-hover">
+          {#each chordKeys(chord) as key, k (k)}
+            {#if k > 0}
+              <span class="text-[11px] text-faint" aria-hidden="true">+</span>
+            {/if}
+            <kbd
+              class="grid h-6 min-w-6 place-items-center rounded-md border border-b-2 border-line bg-bg px-1.5 font-sans text-[12px] font-medium text-fg"
+            >
+              {key}
+            </kbd>
+          {/each}
           <button
-            class="ml-1 hidden size-4 place-items-center rounded text-faint group-hover/chip:grid hover:bg-hover hover:text-fg focus-visible:grid"
+            class="invisible grid size-5 place-items-center rounded text-faint group-hover/chip:visible hover:bg-raised hover:text-fg focus-visible:visible"
             onclick={() => keybinds.removeChord(id, chord)}
             aria-label="Remove {chordLabel(chord)} from {spec.label}"
             title="Remove"
@@ -889,12 +1048,12 @@
       {/each}
       {#if recording === id}
         <span
-          class="flex h-6 animate-pulse items-center rounded border border-accent/70 px-1.5 text-[11px] text-accent"
+          class="flex h-7 animate-pulse items-center rounded-md border border-accent/70 px-2 text-[12px] text-accent"
         >
           Press keys…
         </span>
       {:else if !chords.length}
-        <span class="px-1 text-[11px] text-faint">Not set</span>
+        <span class="px-1 text-[12px] text-faint">Not set</span>
       {/if}
     </div>
     <div class="flex w-14 shrink-0 justify-end gap-0.5">
