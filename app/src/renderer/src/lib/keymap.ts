@@ -224,11 +224,15 @@ function keyLabel(code: string): string {
   return code
 }
 
-export function chordLabel(chord: string): string {
+/** Each key of `chord` as printed on the keyboard, modifiers first. */
+export function chordKeys(chord: string): string[] {
   const { modifiers, code } = splitChord(chord)
   const mods = MODIFIER_ORDER.filter((m) => modifiers.includes(m)).map((m) => MODIFIER_LABELS[m] ?? m)
-  const key = keyLabel(code)
-  return isMac ? mods.join('') + key : [...mods, key].join('+')
+  return [...mods, keyLabel(code)]
+}
+
+export function chordLabel(chord: string): string {
+  return chordKeys(chord).join(isMac ? '' : '+')
 }
 
 /** " (⌘Z)" for the end of a title, or nothing when the action is unbound. */

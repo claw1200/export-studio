@@ -48,7 +48,15 @@
   import { resetSettings } from '$lib/settings'
   import { PLAYERS } from '$lib/hardware/players'
   import { formatSize } from '$lib/format'
-  import { ACTION_IDS, ACTIONS, chordFromEvent, chordLabel, type ActionGroup, type ActionId } from '$lib/keymap'
+  import {
+    ACTION_IDS,
+    ACTIONS,
+    chordFromEvent,
+    chordKeys,
+    chordLabel,
+    type ActionGroup,
+    type ActionId
+  } from '$lib/keymap'
   import type { BrowserTrackStyle } from '$lib/library.svelte'
   import type { CuePlacement } from '$lib/deck/prefs.svelte'
   import type { Backup, BackupProgress, BackupReason, ConvertFormat, ConvertPreset } from '$lib/types'
@@ -1013,13 +1021,23 @@
       {/if}
     </span>
     <div class="flex flex-wrap items-center justify-end gap-1">
-      {#each chords as chord (chord)}
-        <span
-          class="group/chip relative flex h-6 items-center rounded border border-line bg-bg px-1.5 font-mono text-[11px] text-fg"
-        >
-          {chordLabel(chord)}
+      {#each chords as chord, i (chord)}
+        {#if i > 0}
+          <span class="px-0.5 text-[11px] text-faint">or</span>
+        {/if}
+        <span class="group/chip flex items-center gap-1 rounded-md py-0.5 pl-1 hover:bg-hover">
+          {#each chordKeys(chord) as key, k (k)}
+            {#if k > 0}
+              <span class="text-[11px] text-faint" aria-hidden="true">+</span>
+            {/if}
+            <kbd
+              class="grid h-6 min-w-6 place-items-center rounded-md border border-b-2 border-line bg-bg px-1.5 font-sans text-[12px] font-medium text-fg"
+            >
+              {key}
+            </kbd>
+          {/each}
           <button
-            class="ml-1 hidden size-4 place-items-center rounded text-faint group-hover/chip:grid hover:bg-hover hover:text-fg focus-visible:grid"
+            class="invisible grid size-5 place-items-center rounded text-faint group-hover/chip:visible hover:bg-raised hover:text-fg focus-visible:visible"
             onclick={() => keybinds.removeChord(id, chord)}
             aria-label="Remove {chordLabel(chord)} from {spec.label}"
             title="Remove"
@@ -1030,12 +1048,12 @@
       {/each}
       {#if recording === id}
         <span
-          class="flex h-6 animate-pulse items-center rounded border border-accent/70 px-1.5 text-[11px] text-accent"
+          class="flex h-7 animate-pulse items-center rounded-md border border-accent/70 px-2 text-[12px] text-accent"
         >
           Press keys…
         </span>
       {:else if !chords.length}
-        <span class="px-1 text-[11px] text-faint">Not set</span>
+        <span class="px-1 text-[12px] text-faint">Not set</span>
       {/if}
     </div>
     <div class="flex w-14 shrink-0 justify-end gap-0.5">
