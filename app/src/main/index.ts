@@ -9,6 +9,7 @@ import { buildMenu, registerFiles } from './files'
 import { handleMediaProtocol, registerMediaScheme } from './media'
 import { ffmpegBinary, Library, usbExport } from './library'
 import { flushSettings, loadSettings, registerSettings } from './settings'
+import { registerUpdates } from './updates'
 import type { EngineCallArgs } from '../preload/engine'
 
 const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'aac', 'mp4', 'flac', 'wav', 'aif', 'aiff', 'ogg', 'alac']
@@ -79,6 +80,7 @@ app.whenReady().then(() => {
   registerFiles()
   loadSettings()
   registerSettings()
+  registerUpdates()
 
   ipcMain.handle('engine:call', async (_e, ...args: EngineCallArgs) => {
     try {

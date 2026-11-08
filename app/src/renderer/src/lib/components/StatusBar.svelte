@@ -1,11 +1,25 @@
 <script lang="ts">
-  import { AlertTriangle, CircleAlert, Info, LoaderCircle, X } from '@lucide/svelte'
+  import { AlertTriangle, CircleAlert, CircleArrowUp, Info, LoaderCircle, X } from '@lucide/svelte'
   import type { NoticeLevel } from '$lib/library.svelte'
   import { getApp } from '$lib/context'
   import { formatSize, formatTotal } from '$lib/format'
+  import type { Update } from '../../../../shared/updates'
+
+  const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
   const { library, decks, analysis, backups } = getApp()
   const player = $derived(decks.focused)
+
+  let update = $state<Update | null>(null)
+
+  $effect(() => {
+    const check = (): void => void window.api.checkForUpdate().then((found) => (update = found))
+    check()
+    const timer = setInterval(check, UPDATE_CHECK_INTERVAL_MS)
+    return () => clearInterval(timer)
+  })
+
+  const showingProgress = $derived(analysis.running || !!backups.progress || !!library.convertProgress)
 
   const totals = $derived.by(() => {
     let duration = 0
@@ -119,10 +133,20 @@
     </span>
   {/if}
 
-  <span
-    class="truncate {analysis.running || backups.progress || library.convertProgress ? '' : 'ml-auto'}"
-    title={library.info?.dbPath}
-  >
+  {#if update}
+    <a
+      class={['flex items-center gap-1 text-accent hover:underline', !showingProgress && 'ml-auto']}
+      href={update.url}
+      target="_blank"
+      rel="noreferrer"
+      title="Open the release page to download version {update.version}"
+    >
+      <CircleArrowUp class="size-3" />
+      Update to {update.version}
+    </a>
+  {/if}
+
+  <span class={['truncate', !showingProgress && !update && 'ml-auto']} title={library.info?.dbPath}>
     {library.info?.rekordboxRunning ? 'rekordbox is running' : 'rekordbox is closed'}
     {#if library.info}
       · {library.writable ? 'editing' : 'read-only'}
