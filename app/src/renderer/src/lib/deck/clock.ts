@@ -6,6 +6,9 @@
  * the next report are eased away rather than jumped.
  */
 
+/** A loop's in and out points, in seconds. */
+export type LoopRange = readonly [start: number, end: number]
+
 /** A deck as the engine last reported it. */
 export interface Anchor {
   frames: number
@@ -18,7 +21,7 @@ export interface Anchor {
   /** Playback speed against real time. */
   rate: number
   /** An active loop in seconds, which playback wraps inside. */
-  loop: readonly [number, number] | null
+  loop: LoopRange | null
 }
 
 export const NO_ANCHOR: Anchor = {
@@ -31,25 +34,51 @@ export const NO_ANCHOR: Anchor = {
   loop: null
 }
 
+function positiveModulo(n: number, divisor: number): number {
+  return ((n % divisor) + divisor) % divisor
+}
+
+function loopLength([start, end]: LoopRange): number {
+  return end - start
+}
+
+function isInside(seconds: number, [start, end]: LoopRange): boolean {
+  return seconds >= start && seconds < end
+}
+
+function intoLoop(seconds: number, loop: LoopRange): number {
+  const [start] = loop
+  return start + positiveModulo(seconds - start, loopLength(loop))
+}
+
 /**
  * `seconds` folded back into `loop` once it passes the out point, as the engine does.
  * A playhead that has not reached the loop is left alone.
  */
-export function wrap(seconds: number, loop: readonly [number, number] | null): number {
-  if (!loop) return seconds
-  const [start, end] = loop
-  const length = end - start
-  if (!(length > 0) || seconds < end) return seconds
-  return start + ((seconds - start) % length)
+export function wrap(seconds: number, loop: LoopRange | null): number {
+  if (!loop || !(loopLength(loop) > 0) || seconds < loop[1]) return seconds
+  return intoLoop(seconds, loop)
+}
+
+/** The engine lets a playhead already past the out point play on, so only one before it wraps. */
+function playOn(from: number, seconds: number, loop: LoopRange | null): number {
+  const to = from + seconds
+  return loop && from < loop[1] ? wrap(to, loop) : to
+}
+
+function shortestWayRound(from: number, to: number, loop: LoopRange): number {
+  const length = loopLength(loop)
+  const forwards = positiveModulo(to - from, length)
+  return forwards > length / 2 ? forwards - length : forwards
 }
 
 /** Seconds into the track at `now`. Never runs backwards from the anchor, except round a loop. */
 export function extrapolate(anchor: Anchor, now: number): number {
   if (anchor.sampleRate <= 0) return 0
-  const base = anchor.frames / anchor.sampleRate
-  if (!anchor.playing) return base
-  const ahead = base + (Math.max(0, now - anchor.at) / 1000) * anchor.rate
-  return anchor.loop && base < anchor.loop[1] ? wrap(ahead, anchor.loop) : ahead
+  const reported = anchor.frames / anchor.sampleRate
+  if (!anchor.playing) return reported
+  const elapsedSeconds = (Math.max(0, now - anchor.at) / 1000) * anchor.rate
+  return playOn(reported, elapsedSeconds, anchor.loop)
 }
 
 /** A correction larger than this is a seek or a load rather than drift, and is taken at once. */
@@ -67,12 +96,14 @@ export function follow(
   target: number,
   sinceMs: number,
   advanceSeconds: number,
-  loop: readonly [number, number] | null = null
+  loop: LoopRange | null = null
 ): number {
-  const predicted = loop && shown < loop[1] ? wrap(shown + advanceSeconds, loop) : shown + advanceSeconds
-  const gap = target - predicted
+  const predicted = playOn(shown, advanceSeconds, loop)
+  const bothInLoop = loop !== null && isInside(predicted, loop) && isInside(target, loop)
+  const gap = bothInLoop ? shortestWayRound(predicted, target, loop) : target - predicted
   if (Math.abs(gap) > SNAP_SECONDS || sinceMs <= 0) return target
-  return predicted + gap * (1 - Math.exp(-sinceMs / EASE_MS))
+  const eased = predicted + gap * (1 - Math.exp(-sinceMs / EASE_MS))
+  return bothInLoop ? intoLoop(eased, loop) : eased
 }
 
 /** An anchor standing still at `seconds`: what a drag or a paused seek shows. */

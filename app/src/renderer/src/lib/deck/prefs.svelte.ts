@@ -8,7 +8,6 @@ export type CuePlacement = 'playhead' | 'cuePoint'
 export class DeckPrefs {
   quantise = $state(storedFlag('quantise', true))
   cuePlacement = $state<CuePlacement>(getSetting('cuePlacement') === 'playhead' ? 'playhead' : 'cuePoint')
-  /** Draw the playhead exactly where the engine puts it, skipping the easing of small corrections. */
   snapPlayhead = $state(storedFlag('snapPlayhead'))
   readonly waveform = new WaveformPrefs()
 

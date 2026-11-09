@@ -1,6 +1,6 @@
 import type { DeckEvent, DeckTick, Tick } from '../../../../preload/audio'
 import { MAX_KEY_SHIFT } from '../../../../shared/engine'
-import { type Anchor, extrapolate, follow, NO_ANCHOR, pinned } from './clock'
+import { type Anchor, extrapolate, follow, type LoopRange, NO_ANCHOR, pinned } from './clock'
 
 /** Longer than this without an animation frame and ticks set the position directly. */
 const FRAME_STALL_MS = 100
@@ -259,7 +259,7 @@ export class Deck {
     this.anchor = { ...pinned(this.anchor, seconds, performance.now()), playing: this.playing && !this.scrubbing }
   }
 
-  private activeLoop(): [number, number] | null {
+  private activeLoop(): LoopRange | null {
     return this.loop?.active ? [this.loop.start, this.loop.end] : null
   }
 
