@@ -275,6 +275,10 @@ export class Player {
     this.deck.stopAt(this.insideFile(seconds))
   }
 
+  returnToCue(): void {
+    this.stopAt(this.cuePoint)
+  }
+
   setGain(linearGain: number): void {
     this.deck.setGain(linearGain)
   }

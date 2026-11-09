@@ -8,13 +8,10 @@
 
   let {
     class: className,
-    onplay,
     playTitle
   }: {
     /** Lays the buttons out, as `flex-col` to stack cue under play. */
     class?: ClassValue
-    /** Replaces the player's own play/pause, as the mixer does to keep a follower in sync. */
-    onplay?: () => void
     playTitle?: string
   } = $props()
 
@@ -36,7 +33,7 @@
   <PlayButton
     playing={player.playing}
     disabled={!player.playable}
-    onclick={() => (onplay ? onplay() : player.toggle())}
+    onclick={() => player.toggle()}
     label={player.playing ? `Pause ${name}` : `Play ${name}`}
     title={(player.playing ? `Pause ${name}` : (playTitle ?? `Play ${name}`)) + shortcut('deck.playPause')}
   />

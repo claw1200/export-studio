@@ -13,9 +13,9 @@
   import type { ModeProps } from './types'
 
   /**
-   * Two decks either side of a crossfader, to hear how a transition will sound. Put each deck's
-   * playhead where the mix should start, press play to start both at once, and fade across.
-   * Stop puts both back, ready to try it again.
+   * Two decks either side of a crossfader, to hear how a transition will sound. Set each deck's
+   * cue where the mix should start, press play to start both at once, and fade across. Stop
+   * returns both to their cues, ready to try it again.
    */
   let { players, actions, inspectorOpen }: ModeProps = $props()
 
@@ -26,15 +26,14 @@
 
   const playShortcut = $derived(keybinds.bindings['mix.playBoth'][0])
   const playTitle = $derived(
-    (mixer.playing ? 'Stop both decks and go back to where they started' : 'Play both decks together') +
+    (mixer.playing ? 'Stop both decks and return them to their cue points' : 'Play both decks together') +
       (playShortcut ? ` (${chordLabel(playShortcut)})` : '')
   )
 
   // Every deck shortcut works here as in edit mode, bar track prep: on deck A as it is, on deck
   // B with Shift added.
-  const mixKeys = (player: Player): ReturnType<typeof playKeys> => playKeys(player, () => mixer.toggleDeck(player))
-  $effect(() => keybinds.register(mixKeys(a)))
-  $effect(() => keybinds.register(mixKeys(b), 'shift'))
+  $effect(() => keybinds.register(playKeys(a)))
+  $effect(() => keybinds.register(playKeys(b), 'shift'))
   $effect(() => keybinds.register({ 'mix.playBoth': () => mixer.toggle() }))
   $effect(() => mixer.applyPrefs())
   // The browser highlights keys that mix with the master deck while mix mode is shown.
