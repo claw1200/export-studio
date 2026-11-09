@@ -64,7 +64,7 @@
           style:background={cueColor(cue)}
           title={cue.comment || undefined}
           {@attach hold(
-            () => player.hotCueDown(kind, !playOnly),
+            () => (playOnly ? player.hotCueDown(kind) : player.hotCueDownOrStore(kind)),
             () => player.hotCueUp(kind)
           )}
         >

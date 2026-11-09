@@ -3,7 +3,8 @@
  * state and returns the action to carry out, which keeps the CDJ semantics testable on their own.
  */
 import { firstIndexAtOrAfter, nearestBeat } from '../beat'
-import type { Beatgrid } from '../types'
+import type { Beatgrid, Cue } from '../types'
+import type { LoopRange, Seconds } from './clock'
 
 /** How close to the cue point still counts as being on it, in seconds. */
 export const CUE_TOLERANCE = 0.001
@@ -33,29 +34,31 @@ export function pressCue(state: TransportState, here: number): CueAction {
   return { kind: 'hold', at: state.cuePoint }
 }
 
-export interface HotCueTarget {
-  start: number
-  /** Seconds, for a saved loop. */
-  end: number | null
+/** `end` is set for a loop. */
+export interface CueRange {
+  start: Seconds
+  end: Seconds | null
+}
+
+export function cueRange(cue: Cue): CueRange {
+  return { start: cue.start / 1000, end: cue.end == null ? null : cue.end / 1000 }
+}
+
+export function loopOf({ start, end }: CueRange): LoopRange | null {
+  return end != null && end > start ? [start, end] : null
 }
 
 export type HotCueAction =
   /** Playing: jump and keep playing (entering the loop, for a loop cue). */
-  | { kind: 'jump'; at: number; loop: [number, number] | null }
+  | { kind: 'jump'; at: number; loop: LoopRange | null }
   /** Paused: play from the cue while held, then return to it. It becomes the cue point. */
-  | { kind: 'hold'; at: number; loop: [number, number] | null }
+  | { kind: 'hold'; at: number; loop: LoopRange | null }
 
-export function pressHotCue(state: TransportState, cue: HotCueTarget): HotCueAction {
-  const loop: [number, number] | null = cue.end != null && cue.end > cue.start ? [cue.start, cue.end] : null
+export function pressHotCue(state: TransportState, cue: CueRange): HotCueAction {
+  const loop = loopOf(cue)
   return state.playing && !state.scrubbing
     ? { kind: 'jump', at: cue.start, loop }
     : { kind: 'hold', at: cue.start, loop }
-}
-
-/** A new memory or hot cue, in seconds. `end` is set for a loop. */
-export interface CueRange {
-  start: number
-  end: number | null
 }
 
 /**

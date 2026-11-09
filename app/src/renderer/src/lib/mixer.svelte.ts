@@ -179,17 +179,17 @@ export class Mixer {
 
   private applyFader(): void {
     const [a, b] = crossfade(this.crossfader, this.prefs.curve)
-    this.a.setGain(a)
-    this.b.setGain(b)
+    this.a.deck.setGain(a)
+    this.b.deck.setGain(b)
     if (this.swapBass) {
       this.swap = bassSwap(this.swap, this.crossfader, this.prefs.swapRange)
       this.lowKnobs = [1 - this.swap.share, this.swap.share]
-      this.a.setIsolatorLow(bassLevel(this.lowKnobs[0]))
-      this.b.setIsolatorLow(bassLevel(this.lowKnobs[1]))
+      this.a.deck.setIsolatorLow(bassLevel(this.lowKnobs[0]))
+      this.b.deck.setIsolatorLow(bassLevel(this.lowKnobs[1]))
     } else {
       this.lowKnobs = [1, 1]
-      this.a.bypassIsolator()
-      this.b.bypassIsolator()
+      this.a.deck.bypassIsolator()
+      this.b.deck.bypassIsolator()
     }
   }
 }

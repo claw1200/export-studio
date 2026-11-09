@@ -22,7 +22,7 @@
 
   function open(track: Track): void {
     clearTimeout(previewTimer)
-    player.load(track, true)
+    void player.loadAndPlay(track)
   }
 </script>
 

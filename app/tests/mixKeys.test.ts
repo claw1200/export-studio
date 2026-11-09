@@ -74,10 +74,10 @@ describe('playKeys', () => {
     const { player, calls } = fakePlayer()
     const hot = playKeys(player)['cue.hot1'] as { down: () => void }
     hot.down()
-    assert.deepEqual(calls, ['hotCueDown(1,false)'])
+    assert.deepEqual(calls, ['hotCueDown(1)'])
     calls.length = 0
     ;(deckKeys(player)['cue.hot1'] as { down: () => void }).down()
-    assert.deepEqual(calls, ['hotCueDown(1,true)'])
+    assert.deepEqual(calls, ['hotCueDownOrStore(1)'])
   })
 
   it('takes the play/pause it is given', () => {

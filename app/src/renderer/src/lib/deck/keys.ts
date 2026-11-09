@@ -25,7 +25,7 @@ export function playKeys(player: Player, playPause: () => void = () => player.to
     'deck.seekForward': () => player.seek(player.position + 2),
     'deck.seekBackFar': () => player.seek(player.position - 10),
     'deck.seekForwardFar': () => player.seek(player.position + 10),
-    ...hotCueKeys(player, false),
+    ...hotCueKeys(player, (kind) => player.hotCueDown(kind)),
     'cue.previousMemory': () => player.callMemoryCue(-1),
     'cue.nextMemory': () => player.callMemoryCue(1)
   }
@@ -35,18 +35,17 @@ export function playKeys(player: Player, playPause: () => void = () => player.to
 export function deckKeys(player: Player): DeckHandlers {
   return {
     ...playKeys(player),
-    ...hotCueKeys(player, true),
+    ...hotCueKeys(player, (kind) => player.hotCueDownOrStore(kind)),
     'cue.addMemory': () => void player.addMemoryCue(),
     'cue.deleteAtPlayhead': () => void player.deleteCueAtPlayhead()
   }
 }
 
-/** With `create`, an empty slot stores a hot cue; without, it does nothing. */
-function hotCueKeys(player: Player, create: boolean): DeckHandlers {
+function hotCueKeys(player: Player, down: (kind: number) => void): DeckHandlers {
   return Object.fromEntries(
-    HOT_CUE_ACTIONS.map((id, i) => [
-      id,
-      { down: () => player.hotCueDown(HOT_CUE_KINDS[i], create), up: () => player.hotCueUp(HOT_CUE_KINDS[i]) }
-    ])
+    HOT_CUE_ACTIONS.map((id, i) => {
+      const kind = HOT_CUE_KINDS[i]
+      return [id, { down: () => down(kind), up: () => player.hotCueUp(kind) }]
+    })
   )
 }

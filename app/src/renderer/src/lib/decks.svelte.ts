@@ -49,7 +49,7 @@ export class Decks {
     const slot = this.players.length
     if (slot >= AUDITION_SLOT) throw new Error(`No engine deck is free for “${key}”; raise ENGINE_DECKS`)
     const player = new Player(slot, this.prefs)
-    player.onDeckPlay = () => this.audition.stop()
+    player.onTakeSpeakers = () => this.audition.stop()
     player.onFileChecked((id, missing) => {
       for (const listener of this.fileListeners) listener(id, missing)
     })
