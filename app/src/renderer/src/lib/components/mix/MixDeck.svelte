@@ -16,15 +16,13 @@
   let {
     player,
     mixer,
-    label,
     focused,
     onfocus,
     onedit
   }: {
-    /** Fixed for the component's life: key the deck on it to swap. */
+    // Fixed for the component's life: key the deck on it to swap.
     player: Player
     mixer: Mixer
-    label: string
     focused: boolean
     onfocus: () => void
     onedit: (track: Track) => void
@@ -33,7 +31,8 @@
   // svelte-ignore state_referenced_locally
   setPlayer(player)
   // svelte-ignore state_referenced_locally
-  setDeckInfo({ label, shifted: player === mixer.b })
+  const label = mixer.label(player)
+  setDeckInfo({ label, shifted: label === 'B' })
 
   const track = $derived(player.track)
   const isMaster = $derived(mixer.master === player)

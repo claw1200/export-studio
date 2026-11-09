@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { isDeviceTrack } from '$lib/trackIds'
+  import { DEVICE_TRACKS_READ_ONLY, isDeviceTrack } from '$lib/trackIds'
   import { Music, FolderSearch, Repeat, AlertTriangle, X, Pencil } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import { api, artworkUrl } from '$lib/api'
@@ -99,7 +99,7 @@
       <button
         class="flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium text-accent hover:bg-accent-soft disabled:pointer-events-none disabled:opacity-40"
         disabled={!canEditSelection}
-        title={canEditSelection ? undefined : 'USB tracks are read-only; sync to change them'}
+        title={canEditSelection ? undefined : DEVICE_TRACKS_READ_ONLY}
         onclick={() => onedit(library.selectedTracks.filter((item) => item.collected !== false))}
       >
         <Pencil class="size-3" />

@@ -56,11 +56,10 @@
   }
 </script>
 
-{#snippet deck(player: Player, label: string)}
+{#snippet deck(player: Player)}
   <MixDeck
     {player}
     {mixer}
-    {label}
     focused={decks.focused === player}
     onfocus={() => decks.focus(player)}
     onedit={actions.openInEdit}
@@ -68,7 +67,7 @@
 {/snippet}
 
 <div class="flex shrink-0 gap-2 border-b border-line-soft bg-bg p-2">
-  {@render deck(a, 'A')}
+  {@render deck(a)}
   <div
     class="flex w-48 shrink-0 flex-col items-center justify-center gap-3 rounded-lg border border-line-soft bg-surface px-4 py-3"
   >
@@ -113,6 +112,6 @@
       <EqKnob label="B" value={mixer.lowKnobs[1]} active={mixer.swapBass} />
     </div>
   </div>
-  {@render deck(b, 'B')}
+  {@render deck(b)}
 </div>
 <LibraryBrowser {actions} {inspectorOpen} onactivate={load} settingsPrefix="mix." />

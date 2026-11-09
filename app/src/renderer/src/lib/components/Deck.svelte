@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { isDeviceTrack } from '$lib/trackIds'
   import { getApp } from '$lib/context'
   import { setDeckInfo, setPlayer } from '$lib/deck/context'
   import { deckKeys } from '$lib/deck/keys'
   import { useShortcut } from '$lib/deck/shortcut'
   import type { Player } from '$lib/player.svelte'
+  import { DEVICE_TRACKS_READ_ONLY, isDeviceTrack } from '$lib/trackIds'
   import WaveformOverview from './WaveformOverview.svelte'
   import TempoFader from './TempoFader.svelte'
   import WaveformToolbar from './deck/WaveformToolbar.svelte'
@@ -18,7 +18,7 @@
   import DeckShell from './deck/DeckShell.svelte'
   import { segmentGroup, segmentButton } from './deck/segment'
 
-  /** The player this deck shows. Fixed for the component's life: key the deck on it to swap. */
+  // Fixed for the component's life: key the deck on it to swap.
   let { player }: { player: Player } = $props()
 
   const { library, decks, keybinds } = getApp()
@@ -26,50 +26,55 @@
   setPlayer(player)
   setDeckInfo({ label: null, shifted: false })
   const shortcut = useShortcut()
-  /** Only the focused deck answers the keyboard, so several decks never fight over a key. */
-  const focused = $derived(decks.focused === player)
+  // svelte-ignore state_referenced_locally
+  const grid = player.grid
+  const ownsKeyboard = $derived(decks.focused === player)
 
-  const editingGrid = $derived(player.grid.editing)
+  const editingGrid = $derived(grid.editing)
   const deviceTrack = $derived(isDeviceTrack(player.track?.id))
-  const gridEditable = $derived(library.writable && player.grid.canEdit && !deviceTrack)
+  const gridEditable = $derived(library.writable && grid.canEdit && !deviceTrack)
 
   $effect(() => {
-    if (editingGrid && !gridEditable) player.grid.cancel()
+    if (editingGrid && !gridEditable) grid.cancel()
   })
 
   async function saveGrid(): Promise<void> {
-    await player.grid.save()
+    await grid.save()
     const saved = player.track
-    if (saved && !player.grid.editing) library.setTrackBpm(saved.id, saved.bpm)
+    if (saved && !grid.editing) library.setTrackBpm(saved.id, saved.bpm)
+  }
+
+  function beginGridEdit(): void {
+    if (!editingGrid && gridEditable) grid.begin()
   }
 
   function toggleGridEdit(): void {
     if (editingGrid) void saveGrid()
-    else if (gridEditable) player.grid.begin()
+    else beginGridEdit()
   }
 
   $effect(() => {
-    if (!focused) return undefined
+    if (!ownsKeyboard) return undefined
     return keybinds.register({ ...deckKeys(player), 'deck.gridEdit': toggleGridEdit })
   })
 
   $effect(() => {
-    if (!focused || !editingGrid) return undefined
+    if (!ownsKeyboard || !editingGrid) return undefined
     return keybinds.register({
-      'grid.addFlag': () => player.grid.addFlagAtPlayhead(),
-      'grid.previousFlag': () => player.grid.jumpToFlag(-1),
-      'grid.nextFlag': () => player.grid.jumpToFlag(1),
-      'grid.undo': () => player.grid.undo(),
-      'grid.redo': () => player.grid.redo()
+      'grid.addFlag': () => grid.addFlagAtPlayhead(),
+      'grid.previousFlag': () => grid.jumpToFlag(-1),
+      'grid.nextFlag': () => grid.jumpToFlag(1),
+      'grid.undo': () => grid.undo(),
+      'grid.redo': () => grid.redo()
     })
   })
 
   const gridTitle = $derived(
     (deviceTrack
-      ? 'USB tracks are read-only; sync to change them'
+      ? DEVICE_TRACKS_READ_ONLY
       : !library.writable
         ? 'Unlock editing to change the beatgrid'
-        : player.grid.canEdit
+        : grid.canEdit
           ? 'Edit the beatgrid'
           : 'This track has no beatgrid') + shortcut('deck.gridEdit')
   )
@@ -77,9 +82,9 @@
 
 <svelte:window
   onkeydown={(e) => {
-    if (!focused || e.key !== 'Escape' || e.defaultPrevented) return
-    if (player.grid.selectedFlagId != null) player.grid.select(null)
-    else if (editingGrid && !player.editing) player.grid.cancel()
+    if (!ownsKeyboard || e.key !== 'Escape' || e.defaultPrevented) return
+    if (grid.selectedFlagId != null) grid.select(null)
+    else if (editingGrid && !player.editing) grid.cancel()
   }}
 />
 
@@ -122,14 +127,16 @@
             class={segmentButton(!editingGrid, 'accent')}
             aria-pressed={!editingGrid}
             title={editingGrid ? 'Save the beatgrid and go back to the hot cues' : 'Hot cues'}
-            onclick={() => editingGrid && void saveGrid()}>CUES</button
+            onclick={() => {
+              if (editingGrid) void saveGrid()
+            }}>CUES</button
           >
           <button
             class={segmentButton(editingGrid, 'accent')}
             disabled={!editingGrid && !gridEditable}
             aria-pressed={editingGrid}
             title={editingGrid ? 'Editing the beatgrid' : gridTitle}
-            onclick={() => !editingGrid && toggleGridEdit()}>GRID</button
+            onclick={beginGridEdit}>GRID</button
           >
         </div>
         <div class="flex min-w-0 flex-1 justify-center">

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { isDeviceTrack } from '$lib/trackIds'
+  import { DEVICE_TRACKS_READ_ONLY, isDeviceTrack } from '$lib/trackIds'
   import { LoaderCircle, AlertTriangle } from '@lucide/svelte'
   import { browserPreviews } from '$lib/browserPreview.svelte'
   import { setApp } from '$lib/context'
@@ -120,7 +120,7 @@
 
   function edit(tracks: Track[]): void {
     if (tracks.some((track) => isDeviceTrack(track.id))) {
-      library.notify('Device tracks are read-only; sync to change them')
+      library.notify(DEVICE_TRACKS_READ_ONLY)
       return
     }
     whenCollectionWritable(tracks, 'Unlock editing to change track info', (rows) => {

@@ -29,7 +29,7 @@ import type {
   View,
   Volume
 } from './types'
-import { isDeviceTrack, isLooseFile } from './trackIds'
+import { DEVICE_TRACKS_READ_ONLY, isDeviceTrack, isLooseFile } from './trackIds'
 
 export const TRACK_DRAG_TYPE = 'application/x-exportstudio-tracks'
 export const PLAYLIST_TREE_DRAG_TYPE = 'application/x-exportstudio-playlist-tree'
@@ -786,7 +786,7 @@ export class Library {
 
   async removeFromPlaylist(playlistId: string, ids: string[]): Promise<void> {
     if (ids.some(isDeviceTrack)) {
-      this.notify('Device tracks are read-only; sync to change them')
+      this.notify(DEVICE_TRACKS_READ_ONLY)
       return
     }
     const result = await this.edit(() => api.removeFromPlaylist(playlistId, ids))
@@ -799,7 +799,7 @@ export class Library {
   /** Move tracks so they sit just before `beforeId`, or at the end when it is null. */
   async moveInPlaylist(playlistId: string, ids: string[], beforeId: string | null): Promise<void> {
     if (ids.some(isDeviceTrack)) {
-      this.notify('Device tracks are read-only; sync to change them')
+      this.notify(DEVICE_TRACKS_READ_ONLY)
       return
     }
     if (!(this.source.type === 'playlist' && this.source.id === playlistId && this.sourceIds)) return
@@ -817,7 +817,7 @@ export class Library {
 
   async createPlaylist(parentId = 'root', folder = false, trackIds: string[] = []): Promise<string | null> {
     if (trackIds.some(isDeviceTrack)) {
-      this.notify('Device tracks are read-only; sync to change them')
+      this.notify(DEVICE_TRACKS_READ_ONLY)
       return null
     }
     const name = folder ? 'New folder' : 'New playlist'
@@ -856,7 +856,7 @@ export class Library {
 
   async setTag(tagId: string, ids: string[], on: boolean): Promise<void> {
     if (ids.some(isDeviceTrack)) {
-      this.notify('Device tracks are read-only; sync to change them')
+      this.notify(DEVICE_TRACKS_READ_ONLY)
       return
     }
     const result = await this.edit(() => (on ? api.addTag(tagId, ids) : api.removeTag(tagId, ids)))
