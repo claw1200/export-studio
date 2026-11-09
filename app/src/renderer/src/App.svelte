@@ -43,7 +43,7 @@
   }
 
   library.onImported((tracks) => analysis.afterImport(tracks))
-  library.onRemoved((ids) => decks.eject((id) => ids.includes(id)))
+  library.onRemoved((ids) => decks.ejectWhere((id) => ids.includes(id)))
   analysis.onFinished((track) => {
     if (!track) return
     browserPreviews.forget([track.id])

@@ -62,7 +62,7 @@
     if (library.syncing || ejectingId) return
     ejectingId = volume.id
     if (trackOnVolume(audition.trackId, volume.id)) audition.stop()
-    decks.eject((id) => trackOnVolume(id, volume.id))
+    decks.ejectWhere((id) => trackOnVolume(id, volume.id))
     try {
       await library.ejectDevice(volume.id)
     } catch (e) {

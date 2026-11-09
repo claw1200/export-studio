@@ -8,6 +8,7 @@ import { TrackSession } from './deck/session.svelte'
 import { WaveformDisplay } from './deck/display.svelte'
 import type { CuePlacement, DeckPrefs } from './deck/prefs.svelte'
 import { TempoControl } from './deck/tempo.svelte'
+import { Listeners } from './listeners'
 import {
   beatLoop,
   CUE_TOLERANCE,
@@ -58,7 +59,7 @@ export class Player {
   previewAt = $state<Seconds | null>(null)
   private holding = $state.raw<(Hold & { key: HoldButton }) | null>(null)
   private previewOwner: string | null = null
-  private fileListeners = new Set<(id: string, missing: boolean) => void>()
+  private fileChecked = new Listeners<[id: string, missing: boolean]>()
 
   constructor(
     engineDeck: number,
@@ -74,7 +75,7 @@ export class Player {
     this.deck.onLoadSettled = () => {
       const id = this.track?.id
       const missing = this.fileMissing
-      if (id && missing !== null) for (const listener of this.fileListeners) listener(id, missing)
+      if (id && missing !== null) this.fileChecked.notify(id, missing)
     }
     api.onEvent((event) => {
       if (event !== 'library.locked') return
@@ -149,8 +150,7 @@ export class Player {
   }
 
   onFileChecked(listener: (id: string, missing: boolean) => void): () => void {
-    this.fileListeners.add(listener)
-    return () => this.fileListeners.delete(listener)
+    return this.fileChecked.add(listener)
   }
 
   get playable(): boolean {
