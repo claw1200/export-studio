@@ -1,5 +1,4 @@
-/** Buttons joined by one outline, so a group reads as one control without dividers. */
-export const segment = 'flex h-6 shrink-0 divide-x divide-line overflow-hidden rounded border border-line'
+export const segmentGroup = 'flex h-6 shrink-0 divide-x divide-line overflow-hidden rounded border border-line'
 
 type Tone = 'cue' | 'accent' | 'solid' | 'flag'
 

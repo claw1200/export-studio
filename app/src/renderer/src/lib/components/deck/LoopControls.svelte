@@ -1,7 +1,8 @@
 <script lang="ts">
   import { getPlayer } from '$lib/deck/context'
   import { useShortcut } from '$lib/deck/shortcut'
-  import { segment, segmentButton } from './segment'
+  import { BEAT_LOOP_BEATS } from '$lib/deck/transport'
+  import { segmentButton, segmentGroup } from './segment'
 
   let { showBeatLoop = true }: { showBeatLoop?: boolean } = $props()
 
@@ -11,7 +12,7 @@
 </script>
 
 <div class="flex items-center gap-1.5">
-  <div class={segment} role="group" aria-label="Loop">
+  <div class={segmentGroup} role="group" aria-label="Loop">
     <button
       class={segmentButton()}
       disabled={!player.playable}
@@ -38,12 +39,12 @@
   </div>
 
   {#if showBeatLoop}
-    <div class={segment} role="group" aria-label="Beat loop">
+    <div class={segmentGroup} role="group" aria-label="Beat loop">
       <button
         class={segmentButton()}
         disabled={!player.playable}
-        onclick={() => player.beatLoop(4)}
-        title="4-beat loop{shortcut('deck.beatLoop')}">4 BEAT</button
+        onclick={() => player.beatLoop(BEAT_LOOP_BEATS)}
+        title="{BEAT_LOOP_BEATS}-beat loop{shortcut('deck.beatLoop')}">{BEAT_LOOP_BEATS} BEAT</button
       >
       <button
         class={segmentButton()}

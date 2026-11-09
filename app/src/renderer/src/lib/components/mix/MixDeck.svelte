@@ -11,7 +11,7 @@
   import TempoSteppers from '../deck/TempoSteppers.svelte'
   import TrackInfo from '../deck/TrackInfo.svelte'
   import Transport from '../deck/Transport.svelte'
-  import { segment, segmentButton } from '../deck/segment'
+  import { segmentGroup, segmentButton } from '../deck/segment'
 
   let {
     player,
@@ -81,7 +81,7 @@
     <LoopControls showBeatLoop={false} />
 
     <div class="ml-auto flex items-center gap-2">
-      <div class={segment}>
+      <div class={segmentGroup}>
         <button
           class={segmentButton(isMaster, 'solid')}
           disabled={!track}
@@ -91,7 +91,7 @@
         >
       </div>
       <TempoSteppers />
-      <div class={segment}>
+      <div class={segmentGroup}>
         <button
           class={segmentButton(masterTempo, 'accent')}
           disabled={!track}

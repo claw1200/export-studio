@@ -15,7 +15,7 @@
   import LoopControls from './deck/LoopControls.svelte'
   import TempoSteppers from './deck/TempoSteppers.svelte'
   import DeckShell from './deck/DeckShell.svelte'
-  import { segment, segmentButton } from './deck/segment'
+  import { segmentGroup, segmentButton } from './deck/segment'
 
   /** The player this deck shows. Fixed for the component's life: key the deck on it to swap. */
   let { player }: { player: Player } = $props()
@@ -116,7 +116,7 @@
         </div>
       </div>
       <div class="flex items-center gap-3">
-        <div class={segment} role="group" aria-label="Hot cues or beatgrid">
+        <div class={segmentGroup} role="group" aria-label="Hot cues or beatgrid">
           <button
             class={segmentButton(!editingGrid, 'accent')}
             aria-pressed={!editingGrid}

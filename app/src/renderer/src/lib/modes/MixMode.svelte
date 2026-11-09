@@ -74,7 +74,7 @@
   >
     <PlayButton
       size="lg"
-      stop
+      stopsInsteadOfPausing
       playing={mixer.playing}
       disabled={!mixer.playable && !mixer.playing}
       onclick={() => mixer.toggle()}

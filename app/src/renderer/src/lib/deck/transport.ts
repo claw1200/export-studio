@@ -6,6 +6,7 @@ import type { DeckLoop } from './deck.svelte'
 
 export const CUE_TOLERANCE: Seconds = 0.001
 export const SHORTEST_LOOP: Seconds = 0.01
+export const BEAT_LOOP_BEATS = 4
 const ON_BEAT_TOLERANCE_MS = 0.5
 
 export interface TransportState {

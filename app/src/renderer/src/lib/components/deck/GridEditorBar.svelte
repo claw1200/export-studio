@@ -14,7 +14,7 @@
   import { useShortcut } from '$lib/deck/shortcut'
   import { varies } from '$lib/tempo-map'
   import BpmField from '../BpmField.svelte'
-  import { segment, segmentButton } from './segment'
+  import { segmentGroup, segmentButton } from './segment'
 
   let { onsave }: { onsave: () => void } = $props()
 
@@ -68,18 +68,18 @@
     >
   {/if}
 
-  <div class={segment} role="group" aria-label="Move this section">
+  <div class={segmentGroup} role="group" aria-label="Move this section">
     {@render tool('←', 'Shift this section left by 1 ms (Shift: 10 ms)', (e) => grid.nudge(e.shiftKey ? -10 : -1))}
     {@render tool('→', 'Shift this section right by 1 ms (Shift: 10 ms)', (e) => grid.nudge(e.shiftKey ? 10 : 1))}
     {@render tool('SET', 'Move the nearest beat to the playhead and make it the downbeat', () =>
       grid.setDownbeatHere()
     )}
   </div>
-  <div class={segment} role="group" aria-label="Scale this section's tempo">
+  <div class={segmentGroup} role="group" aria-label="Scale this section's tempo">
     {@render tool('/2', "Halve this section's BPM", () => grid.halve())}
     {@render tool('×2', "Double this section's BPM", () => grid.double())}
   </div>
-  <div class={segment} role="group" aria-label="Tempo flags">
+  <div class={segmentGroup} role="group" aria-label="Tempo flags">
     {@render tool(
       FlagTriangleRight,
       'Add a tempo flag on the beat nearest the playhead' + shortcut('grid.addFlag'),
@@ -89,7 +89,7 @@
     {@render tool(ChevronLeft, 'Previous tempo flag' + shortcut('grid.previousFlag'), () => grid.jumpToFlag(-1))}
     {@render tool(ChevronRight, 'Next tempo flag' + shortcut('grid.nextFlag'), () => grid.jumpToFlag(1))}
   </div>
-  <div class={segment}>
+  <div class={segmentGroup}>
     <button
       class={segmentButton(grid.link, 'accent')}
       onclick={() => grid.setLink(!grid.link)}
@@ -104,7 +104,7 @@
       {/if}
     </button>
   </div>
-  <div class={segment} role="group" aria-label="History">
+  <div class={segmentGroup} role="group" aria-label="History">
     {@render tool(Undo2, 'Undo' + shortcut('grid.undo'), () => grid.undo(), { disabled: !grid.canUndo })}
     {@render tool(Redo2, 'Redo' + shortcut('grid.redo'), () => grid.redo(), { disabled: !grid.canRedo })}
   </div>

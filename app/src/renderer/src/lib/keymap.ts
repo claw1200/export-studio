@@ -1,3 +1,4 @@
+import { BEAT_LOOP_BEATS } from './deck/transport'
 import { HOT_CUE_LETTERS } from './format'
 
 export type ActionGroup = 'Playback' | 'Cues' | 'Beatgrid' | 'Library' | 'App'
@@ -42,7 +43,7 @@ export const ACTIONS = {
   'deck.loopIn': { label: 'Loop in', group: 'Playback', fields: 'controls' },
   'deck.loopOut': { label: 'Loop out', group: 'Playback', fields: 'controls' },
   'deck.reloopExit': { label: 'Reloop / exit', group: 'Playback', fields: 'controls' },
-  'deck.beatLoop': { label: '4-beat loop', group: 'Playback', fields: 'controls' },
+  'deck.beatLoop': { label: `${BEAT_LOOP_BEATS}-beat loop`, group: 'Playback', fields: 'controls' },
   'deck.loopHalve': { label: 'Halve loop', group: 'Playback', fields: 'controls' },
   'deck.loopDouble': { label: 'Double loop', group: 'Playback', fields: 'controls' },
   'deck.quantise': { label: 'Toggle quantise', group: 'Playback', fields: 'controls' },

@@ -2,17 +2,9 @@
   import { Pencil, Plus, X } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import type { ClassValue } from 'svelte/elements'
-  import { getPlayer } from '$lib/deck/context'
+  import { getPlayer, onNearestBeat } from '$lib/deck/context'
   import { hold } from '$lib/deck/hold'
-  import {
-    cueColor,
-    formatClock,
-    HOT_CUE_KINDS,
-    HOT_CUE_LETTERS,
-    HOT_CUE_PICKER,
-    hotCueLetter,
-    hotCuePaletteColor
-  } from '$lib/format'
+  import { cueColor, formatClock, HOT_CUE_KINDS, HOT_CUE_PICKER, hotCueLetter, hotCuePaletteColor } from '$lib/format'
   import type { Cue } from '$lib/types'
 
   let { playOnly = false, class: className }: { playOnly?: boolean; class?: ClassValue } = $props()
@@ -21,14 +13,8 @@
   const player = getPlayer()
 
   const hotCues = $derived.by(() => {
-    const bySlot = new Map(
-      (player.detail?.cues ?? []).filter((c) => c.kind === 'hot').map((c) => [hotCueLetter(c.slot), c])
-    )
-    return [...HOT_CUE_LETTERS].map((letter, i) => ({
-      letter,
-      kind: HOT_CUE_KINDS[i],
-      cue: bySlot.get(letter) ?? null
-    }))
+    const bySlot = new Map((player.detail?.cues ?? []).filter((c) => c.kind === 'hot').map((c) => [c.slot, c]))
+    return HOT_CUE_KINDS.map((kind) => ({ letter: hotCueLetter(kind), kind, cue: bySlot.get(kind) ?? null }))
   })
   const editable = $derived(
     !playOnly && library.writable && !!player.detail && !player.grid.editing && !player.track?.id.startsWith('usb:')
@@ -151,7 +137,7 @@
         disabled={player.editing}
         onclick={() => player.setHotCue(kind)}
         aria-label="Set hot cue {letter} at the {placementLabel}"
-        title="Set hot cue {letter} at the {placementLabel}{player.quantise ? ', on the nearest beat' : ''}"
+        title="Set hot cue {letter} at the {placementLabel}{onNearestBeat(player.quantise)}"
       >
         {letter}
         <Plus class="ml-auto size-3 opacity-0 group-hover:opacity-100" />

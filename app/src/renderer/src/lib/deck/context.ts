@@ -19,3 +19,7 @@ export const [getDeckInfo, setDeckInfo] = createContext<DeckInfo>()
 export function deckName({ label }: DeckInfo): string {
   return label ? `deck ${label}` : 'the deck'
 }
+
+export function onNearestBeat(quantise: boolean): string {
+  return quantise ? ', on the nearest beat' : ''
+}

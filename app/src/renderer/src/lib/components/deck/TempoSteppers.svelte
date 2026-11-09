@@ -12,6 +12,7 @@
   const track = $derived(player.track)
   const bpm = $derived(player.trackBpmAtPlayhead)
   const key = $derived(heardKey(track?.key ?? '', tempo))
+  const atTrackTempo = $derived(tempo.rate === 1)
   const signed = (n: number): string => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '')
 
   function stepBpm(step: number): void {
@@ -24,10 +25,10 @@
   class={stepperClass}
   name="BPM"
   value={track && bpm ? formatBpm(bpm * tempo.rate) : '—'}
-  valueClass={tempo.rate !== 1 ? 'text-accent' : 'text-fg'}
+  valueClass={atTrackTempo ? 'text-fg' : 'text-accent'}
   title={tempo.lockedToMaster
     ? 'Following the master deck'
-    : tempo.rate === 1
+    : atTrackTempo
       ? 'At the track’s own tempo'
       : `${formatBpm(bpm)} BPM at the track’s own tempo. Click to go back to it.`}
   disabled={!track || tempo.lockedToMaster || !(bpm > 0)}
