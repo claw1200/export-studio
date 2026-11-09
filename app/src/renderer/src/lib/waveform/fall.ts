@@ -4,6 +4,7 @@
  * cached per track, so every deck on screen keeps its own.
  */
 import { createSubscriber } from 'svelte/reactivity'
+import { Listeners } from '../listeners'
 import { logicalCount, stridePeak } from './columns'
 import { fallSlice } from './dsp'
 import { poolSize, runJob } from './pool'
@@ -115,11 +116,8 @@ function fallSync(src: Uint8Array, blocks: number): Uint8Array {
 /** Tracks whose falling blocks are kept: every deck on screen, with room to switch back. */
 const SLOTS = 4
 
-const listeners = new Set<() => void>()
-const subscribe = createSubscriber((update) => {
-  listeners.add(update)
-  return () => listeners.delete(update)
-})
+const fallComputed = new Listeners<[]>()
+const subscribe = createSubscriber((update) => fallComputed.add(update))
 
 /**
  * One track's falling blocks: the latest result, and the job working out a new one. Each track
@@ -194,7 +192,7 @@ class FallSlot {
       if (!data || token !== this.generation) return
       this.ready = { ...job, data }
       this.job = null
-      for (const listener of listeners) listener()
+      fallComputed.notify()
     })()
   }
 }

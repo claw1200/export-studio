@@ -10,6 +10,7 @@ import { verdictForTrack } from './hardware/compatibility'
 import { DEFAULT_GREEN, playerById } from './hardware/players'
 import { isRekordboxPresetTrack } from './library/factory'
 import { loadViews, looseTrack, matchesTrack, pathKey, saveViews, type FileEntry } from './library/views'
+import { Listeners } from './listeners'
 import { getSetting, setSetting } from './settings'
 import type {
   ConvertMode,
@@ -137,9 +138,9 @@ export class Library {
   /** The row a drag of `dragging` was started on: what a deck loads when they are dropped on it. */
   dragAnchor: string | null = null
   private noticeTimer: ReturnType<typeof setTimeout> | undefined
-  private trackListeners = new Set<(tracks: Track[]) => void>()
-  private importListeners = new Set<(tracks: Track[]) => void>()
-  private removeListeners = new Set<(ids: string[]) => void>()
+  private tracksUpdated = new Listeners<[tracks: Track[]]>()
+  private imported = new Listeners<[tracks: Track[]]>()
+  private removed = new Listeners<[ids: string[]]>()
 
   viewById = $derived(new Map(this.views.map((view) => [view.id, view])))
   sourceView = $derived(this.source.type === 'view' ? (this.viewById.get(this.source.id) ?? null) : null)
@@ -497,18 +498,15 @@ export class Library {
   }
 
   onTracksUpdated(listener: (tracks: Track[]) => void): () => void {
-    this.trackListeners.add(listener)
-    return () => this.trackListeners.delete(listener)
+    return this.tracksUpdated.add(listener)
   }
 
   onImported(listener: (tracks: Track[]) => void): () => void {
-    this.importListeners.add(listener)
-    return () => this.importListeners.delete(listener)
+    return this.imported.add(listener)
   }
 
   onRemoved(listener: (ids: string[]) => void): () => void {
-    this.removeListeners.add(listener)
-    return () => this.removeListeners.delete(listener)
+    return this.removed.add(listener)
   }
 
   /** Apply rows from outside an edit, such as finished analysis. */
@@ -559,7 +557,7 @@ export class Library {
     if (!rows.length) return
     const fresh = new Map(rows.map((r) => [r.id, r]))
     this.tracks = this.tracks.map((t) => fresh.get(t.id) ?? t)
-    for (const listener of this.trackListeners) listener(rows)
+    this.tracksUpdated.notify(rows)
     if (!this.sourceLoading) void this.fillFileGaps()
   }
 
@@ -666,7 +664,7 @@ export class Library {
       }
       void this.fillFileGaps()
       this.notify(this.importSummary(result, playlistId), result.failed.length ? 'warning' : 'info')
-      if (result.tracks.length) for (const listener of this.importListeners) listener(result.tracks)
+      if (result.tracks.length) this.imported.notify(result.tracks)
       return result
     } finally {
       this.importing = false
@@ -715,7 +713,7 @@ export class Library {
     if (this.sourceIds) this.sourceIds = this.sourceIds.filter((id) => !gone.has(id))
     this.selection = new Set([...this.selection].filter((id) => !gone.has(id)))
     if (this.selectedId && gone.has(this.selectedId)) this.selectedId = null
-    for (const listener of this.removeListeners) listener(result.removed)
+    this.removed.notify(result.removed)
     await this.refreshMembers()
     void this.fillFileGaps()
     const count = gone.size === 1 ? 'one track' : `${gone.size} tracks`

@@ -1,3 +1,4 @@
+import { Listeners } from '../listeners'
 import { getSetting, setSetting } from '../settings'
 import type { WaveformMode } from '../waveform/data'
 import { storedPercent } from './stored'
@@ -15,12 +16,10 @@ export class WaveformPrefs {
   fallBlocks = $state(storedPercent('fallBlocks', 40))
   zoom = $state(Number(getSetting('waveformZoom')) || 1)
 
-  private listeners = new Set<(change: WaveformChange) => void>()
+  private changed = new Listeners<[change: WaveformChange]>()
 
-  /** Called when the mode or quality changes. Returns the unsubscribe. */
   subscribe(listener: (change: WaveformChange) => void): () => void {
-    this.listeners.add(listener)
-    return () => this.listeners.delete(listener)
+    return this.changed.add(listener)
   }
 
   setMode(mode: WaveformMode): void {
@@ -52,7 +51,7 @@ export class WaveformPrefs {
   }
 
   private emit(change: WaveformChange): void {
-    for (const listener of this.listeners) listener(change)
+    this.changed.notify(change)
   }
 }
 
