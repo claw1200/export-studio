@@ -12,7 +12,6 @@
   import type { Component } from 'svelte'
   import { getPlayer } from '$lib/deck/context'
   import { useShortcut } from '$lib/deck/shortcut'
-  import { ownBpm } from '$lib/mixer.svelte'
   import { varies } from '$lib/tempo-map'
   import BpmField from '../BpmField.svelte'
   import { segment, segmentButton } from './segment'
@@ -26,7 +25,7 @@
   const section = $derived(grid.map?.flags[grid.sectionAtPlayhead])
   const sectionVaries = $derived(!!section && varies(section))
   const sectionRamps = $derived(!!section && grid.sectionAtPlayhead > 0 && section.rampBeats > 0)
-  const sectionBpm = $derived(section && !sectionVaries ? section.bpm : ownBpm(player))
+  const sectionBpm = $derived(section && !sectionVaries ? section.bpm : player.bpmUnderPlayhead)
 </script>
 
 {#snippet tool(

@@ -92,11 +92,7 @@
           onclick={() => mixer.setMaster(player)}>MASTER</button
         >
       </div>
-      <TempoSteppers
-        lockedBy={following ? `Following deck ${mixer.master === mixer.a ? 'A' : 'B'}` : null}
-        onstepbpm={(step) => mixer.stepBpm(player, step)}
-        onresetbpm={() => mixer.resetTempo(player)}
-      />
+      <TempoSteppers lockedBy={following ? `Following deck ${mixer.label(mixer.master)}` : null} />
       <div class={segment}>
         <button
           class={segmentButton(masterTempo, 'accent')}
@@ -105,7 +101,7 @@
           title={masterTempo
             ? 'Master tempo on: the key holds when the tempo moves'
             : 'Master tempo off: the key moves with the tempo'}
-          onclick={() => mixer.toggleMasterTempo(player)}>MT</button
+          onclick={() => player.tempo.setMasterTempo(!masterTempo)}>MT</button
         >
       </div>
     </div>

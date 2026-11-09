@@ -46,10 +46,13 @@ export class TempoControl {
     this.deck.setTempo(1)
   }
 
-  /** `remember` keeps it as the default for decks made later; a mix deck's own switch does not. */
-  setMasterTempo(on: boolean, remember = true): void {
+  setMasterTempo(on: boolean): void {
     this.deck.setMasterTempo(on)
-    if (remember) storeFlag('masterTempo', on)
+  }
+
+  setMasterTempoAndDefault(on: boolean): void {
+    this.setMasterTempo(on)
+    storeFlag('masterTempo', on)
   }
 
   /** Plays at `rate` times the file's speed, outside the fader's range: what sync and BPM steps set. */

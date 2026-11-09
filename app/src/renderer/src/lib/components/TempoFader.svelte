@@ -132,7 +132,7 @@
             ? 'border-transparent bg-accent-soft text-accent'
             : 'border-line-soft text-faint hover:bg-hover hover:text-muted'
         ]}
-        onclick={() => tempo.setMasterTempo(!tempo.masterTempo)}
+        onclick={() => tempo.setMasterTempoAndDefault(!tempo.masterTempo)}
         aria-pressed={tempo.masterTempo}
         aria-label="Master tempo"
         title={tempo.masterTempo
