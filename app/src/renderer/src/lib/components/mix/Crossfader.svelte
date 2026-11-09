@@ -1,10 +1,13 @@
 <script lang="ts">
+  import { FADER_CENTRE } from '$lib/crossfade'
   import type { Mixer } from '$lib/mixer.svelte'
 
   /** A horizontal fader from A to B. Drag the cap or the track, or scroll over it; double-click centres it. */
   let { mixer }: { mixer: Mixer } = $props()
 
   const KEY_STEP = 0.05
+
+  const offCentrePercent = $derived(Math.round((mixer.crossfader - FADER_CENTRE) * 200))
 
   let track = $state<HTMLDivElement>()
   let dragging = $state(false)
@@ -30,7 +33,12 @@
   function end(): void {
     if (!dragging) return
     dragging = false
-    mixer.commitCrossfader()
+    mixer.saveCrossfader()
+  }
+
+  function setAndSave(position: number): void {
+    mixer.setCrossfader(position)
+    mixer.saveCrossfader()
   }
 
   function onkeydown(e: KeyboardEvent): void {
@@ -39,15 +47,13 @@
     if (!step && to == null) return
     e.preventDefault()
     e.stopPropagation()
-    mixer.setCrossfader(to ?? mixer.crossfader + step)
-    mixer.commitCrossfader()
+    setAndSave(to ?? mixer.crossfader + step)
   }
 
   /** Fader travel per pixel of scroll: a typical mouse-wheel notch (~100px) moves it a tenth. */
   const WHEEL_PER_PX = 0.001
-  /** The position is saved this long after scrolling stops rather than on every wheel event. */
-  const WHEEL_COMMIT_MS = 300
-  let wheelCommit: ReturnType<typeof setTimeout> | undefined
+  const WHEEL_SAVE_DELAY_MS = 300
+  let wheelSave: ReturnType<typeof setTimeout> | undefined
   /**
    * Where scrolling has taken the fader before the centre snap. Small trackpad deltas would
    * otherwise each land inside the snap and be pulled back, so the fader could never leave centre.
@@ -60,21 +66,20 @@
     const px = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? delta * 16 : delta
     wheelRaw = Math.min(1, Math.max(0, (wheelRaw ?? mixer.crossfader) + px * WHEEL_PER_PX))
     mixer.setCrossfader(wheelRaw)
-    clearTimeout(wheelCommit)
-    wheelCommit = setTimeout(() => {
+    clearTimeout(wheelSave)
+    wheelSave = setTimeout(() => {
       wheelRaw = null
-      mixer.commitCrossfader()
-    }, WHEEL_COMMIT_MS)
+      mixer.saveCrossfader()
+    }, WHEEL_SAVE_DELAY_MS)
   }
 
   function centre(): void {
-    mixer.setCrossfader(0.5)
-    mixer.commitCrossfader()
+    setAndSave(FADER_CENTRE)
   }
 </script>
 
 <div class="flex w-full items-center gap-2 text-[11px] font-semibold text-faint">
-  <span class={mixer.crossfader <= 0.5 ? 'text-fg' : undefined}>A</span>
+  <span class={mixer.crossfader <= FADER_CENTRE ? 'text-fg' : undefined}>A</span>
   <div
     bind:this={track}
     class="relative h-8 flex-1 cursor-pointer touch-none outline-none focus-visible:ring-1 focus-visible:ring-accent/60"
@@ -84,11 +89,9 @@
     aria-valuemin={0}
     aria-valuemax={100}
     aria-valuenow={Math.round(mixer.crossfader * 100)}
-    aria-valuetext={mixer.crossfader === 0.5
+    aria-valuetext={offCentrePercent === 0
       ? 'Centre'
-      : mixer.crossfader < 0.5
-        ? `${Math.round((0.5 - mixer.crossfader) * 200)}% towards A`
-        : `${Math.round((mixer.crossfader - 0.5) * 200)}% towards B`}
+      : `${Math.abs(offCentrePercent)}% towards ${offCentrePercent < 0 ? 'A' : 'B'}`}
     title="Drag or scroll to fade between the decks. Double-click to centre."
     {onpointerdown}
     {onpointermove}
@@ -110,5 +113,5 @@
       <div class="mx-auto mt-[11px] h-px w-2 bg-bg"></div>
     </div>
   </div>
-  <span class={mixer.crossfader >= 0.5 ? 'text-fg' : undefined}>B</span>
+  <span class={mixer.crossfader >= FADER_CENTRE ? 'text-fg' : undefined}>B</span>
 </div>

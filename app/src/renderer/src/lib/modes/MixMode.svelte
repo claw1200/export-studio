@@ -13,9 +13,9 @@
   import type { ModeProps } from './types'
 
   /**
-   * Two decks either side of a crossfader, to hear how a transition will sound. Put each deck's
-   * playhead where the mix should start, press play to start both at once, and fade across.
-   * Stop puts both back, ready to try it again.
+   * Two decks either side of a crossfader, to hear how a transition will sound. Set each deck's
+   * cue where the mix should start, press play to start both at once, and fade across. Stop
+   * returns both to their cues, ready to try it again.
    */
   let { players, actions, inspectorOpen }: ModeProps = $props()
 
@@ -26,18 +26,16 @@
 
   const playShortcut = $derived(keybinds.bindings['mix.playBoth'][0])
   const playTitle = $derived(
-    (mixer.playing ? 'Stop both decks and go back to where they started' : 'Play both decks together') +
+    (mixer.playing ? 'Stop both decks and return them to their cue points' : 'Play both decks together') +
       (playShortcut ? ` (${chordLabel(playShortcut)})` : '')
   )
 
   // Every deck shortcut works here as in edit mode, bar track prep: on deck A as it is, on deck
-  // B with Shift added. A deck's own play lines a synced follower up with the master.
-  const mixKeys = (player: Player): ReturnType<typeof playKeys> => playKeys(player, () => mixer.toggleDeck(player))
-  $effect(() => keybinds.register(mixKeys(a)))
-  $effect(() => keybinds.register(mixKeys(b), 'shift'))
+  // B with Shift added.
+  $effect(() => keybinds.register(playKeys(a)))
+  $effect(() => keybinds.register(playKeys(b), 'shift'))
   $effect(() => keybinds.register({ 'mix.playBoth': () => mixer.toggle() }))
-  // A change in settings to the crossfader curve or the bass swap applies straight away.
-  $effect(() => mixer.retune())
+  $effect(() => mixer.applyPrefs())
   // The browser highlights keys that mix with the master deck while mix mode is shown.
   $effect(() => {
     decks.mixMaster = mixer.master
@@ -45,24 +43,22 @@
       if (decks.mixMaster === mixer.master) decks.mixMaster = null
     }
   })
-  // The engine syncs by the grids, so it hears of every change to them.
   $effect(() => mixer.shareBeatgrids())
   // The engine outlives this view: leaving it must not leave the decks synced.
   $effect(() => () => mixer.setSynced(false))
-  // The deck that alone is heard becomes the master.
-  $effect(() => mixer.followSound())
-  // A deck losing its track cannot be synced to.
+  $effect(() => mixer.makeSoleAudibleDeckMaster())
   $effect(() => {
     if (mixer.synced && !mixer.canSync) mixer.setSynced(false)
   })
 
-  const masterLabel = $derived(mixer.master === a ? 'A' : 'B')
+  const masterLabel = $derived(mixer.label(mixer.master))
+  const followerLabel = $derived(mixer.label(mixer.follower))
   const syncTitle = $derived(
     !mixer.canSync
       ? 'Load a track with a tempo on both decks to sync them'
       : mixer.synced
-        ? `Deck ${mixer.master === a ? 'B' : 'A'} follows deck ${masterLabel}. Click to stop syncing.`
-        : `Sync deck ${mixer.master === a ? 'B' : 'A'} to deck ${masterLabel}: match its tempo and line up the beats`
+        ? `Deck ${followerLabel} follows deck ${masterLabel}. Click to stop syncing.`
+        : `Sync deck ${followerLabel} to deck ${masterLabel}: match its tempo and line up the beats`
   )
 
   /** Loads onto the focused deck, then moves the focus to the other deck if it is still empty. */
@@ -94,7 +90,7 @@
       size="lg"
       stop
       playing={mixer.playing}
-      disabled={!mixer.ready && !mixer.playing}
+      disabled={!mixer.playable && !mixer.playing}
       onclick={() => mixer.toggle()}
       label={mixer.playing ? 'Stop' : 'Play'}
       title={playTitle}
@@ -127,8 +123,8 @@
       onclick={() => mixer.setSwapBass(!mixer.swapBass)}>SWAP BASS</button
     >
     <div class="flex w-full justify-around">
-      <EqKnob label="A" value={mixer.lows[0]} active={mixer.swapBass} />
-      <EqKnob label="B" value={mixer.lows[1]} active={mixer.swapBass} />
+      <EqKnob label="A" value={mixer.lowKnobs[0]} active={mixer.swapBass} />
+      <EqKnob label="B" value={mixer.lowKnobs[1]} active={mixer.swapBass} />
     </div>
   </div>
   {@render deck(b, 'B')}

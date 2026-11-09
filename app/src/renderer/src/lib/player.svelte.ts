@@ -175,6 +175,11 @@ export class Player {
     return this.grid.grid
   }
 
+  /** At the file's own speed, before the tempo. */
+  get bpmUnderPlayhead(): number {
+    return bpmAt(this.position, this.displayGrid, this.track?.bpm ?? 0)
+  }
+
   get displayCues(): Cue[] {
     return this.grid.cues
   }
@@ -268,6 +273,10 @@ export class Player {
   stopAt(seconds: number): void {
     if (!this.track) return
     this.deck.stopAt(this.insideFile(seconds))
+  }
+
+  returnToCue(): void {
+    this.stopAt(this.cuePoint)
   }
 
   setGain(linearGain: number): void {
@@ -537,7 +546,7 @@ export class Player {
 
   private cueHitTolerance(): number {
     if (!this.quantise) return CUE_HIT_TOLERANCE
-    const bpm = bpmAt(this.position, this.displayGrid, this.track?.bpm ?? 0)
+    const bpm = this.bpmUnderPlayhead
     return bpm > 0 ? 30 / bpm : CUE_HIT_TOLERANCE
   }
 

@@ -35,7 +35,7 @@ pub use tempo::{MAX_TEMPO, MIN_TEMPO};
 use clock::{DeckClock, KeepTime};
 use reader::DeckReader;
 use smooth::Smoothed;
-use sync::{BeatSync, Grid, Timeline};
+use sync::{BeatSync, Grid, Moment, Timeline};
 use tempo::Stretcher;
 
 #[derive(Debug, thiserror::Error)]
@@ -354,9 +354,9 @@ impl Engine {
     }
 
     /// Moves the playhead. Fractional milliseconds, because a cue point is a place in the music
-    /// and rounding it to a whole millisecond moves it.
+    /// and rounding it to a whole millisecond moves it. See [`jump`](Self::jump) for a synced deck.
     pub fn seek(&self, deck: DeckId, ms: f64) {
-        self.seek_frames(deck, self.to_frames(ms));
+        self.jump(deck, self.to_frames(ms));
     }
 
     /// Moves the playhead by `delta_ms` from wherever it is when this arrives, not from where a
@@ -440,9 +440,24 @@ impl Engine {
         if !clock.scrubbing() {
             return;
         }
-        self.seek_frames(deck, clock.scrub_target());
+        self.jump(deck, clock.scrub_target());
         handle.send(deck::Command::Wake);
         self.settle();
+    }
+
+    /// Moves the playhead to `frame`, unless the deck is playing synced with a playing partner:
+    /// then it lands on the partner's beat nearest `frame`, so a jump pressed a little early or late
+    /// keeps the two in time. A paused deck goes exactly where it is sent, which leaves CUE alone.
+    fn jump(&self, deck: DeckId, frame: u64) {
+        let playing = self.deck(deck).is_some_and(|d| d.clock().playing());
+        let moment = self.timeline.read();
+        match playing
+            .then(|| self.on_partner_beat(deck, frame, &moment))
+            .flatten()
+        {
+            Some(target) => self.move_to(deck, target, KeepTime::Since(moment.frames)),
+            None => self.seek_frames(deck, frame),
+        }
     }
 
     pub fn seek_frames(&self, deck: DeckId, frame: u64) {
@@ -486,7 +501,7 @@ impl Engine {
         }
         let at = clock.position();
         if at >= to || at < from {
-            self.seek_frames(deck, from);
+            self.jump(deck, from);
         } else if to < at + RING_REACH {
             // The ring may already hold audio past the out point: requeue from here.
             self.seek_frames(deck, at);
@@ -506,7 +521,7 @@ impl Engine {
         clock.set_looping(on);
         let at = clock.position();
         if on {
-            self.seek_frames(deck, from);
+            self.jump(deck, from);
         } else if at < to && to < at + RING_REACH {
             // The ring may already hold the jump back to the in point: requeue from here.
             self.seek_frames(deck, at);
@@ -643,42 +658,40 @@ impl Engine {
     /// is taken from one callback, and the deck pays back the time since then once its new audio
     /// arrives, so it lands in phase however long the move takes.
     fn join_partner(&self, deck: DeckId) {
-        let moment = self.timeline.read();
-        let target = {
-            let mut sync = lock(&self.sync);
-            let Some(partner) = sync.partner(deck) else {
-                return;
-            };
-            let (Some(own), Some(other)) = (self.deck(deck), self.deck(partner)) else {
-                return;
-            };
-            let (own, other) = (own.clock(), other.clock());
-            if !own.loaded() || !other.loaded() || !other.playing() || other.scrubbing() {
-                return;
-            }
-            sync.follow_tempo(&self.clocks());
-            // A paused deck may have moved since the callback last ran.
-            let own_at = if own.playing() {
-                moment.positions[deck]
-            } else {
-                own.position()
-            };
-            let target = sync.phase_target(deck, own_at as f64, moment.positions[partner] as f64);
-            // Moving a playing deck dips its sound, which is only worth it to fix an audible gap.
-            // One about to start is always moved, to skip what its partner plays meanwhile.
-            let in_time = target.is_some_and(|t| (t - own_at as f64).abs() < self.aligned_frames());
-            if own.playing() && in_time {
-                return;
-            }
-            target
+        let Some(own) = self.deck(deck).map(deck::DeckHandle::clock) else {
+            return;
         };
-        if let Some(target) = target {
-            self.move_to(
-                deck,
-                target.round().max(0.0) as u64,
-                KeepTime::Since(moment.frames),
-            );
+        let moment = self.timeline.read();
+        // A paused deck may have moved since the callback last ran.
+        let own_at = if own.playing() {
+            moment.positions[deck]
+        } else {
+            own.position()
+        };
+        let Some(target) = self.on_partner_beat(deck, own_at, &moment) else {
+            return;
+        };
+        // Moving a playing deck dips its sound, which is only worth it to fix an audible gap.
+        // One about to start is always moved, to skip what its partner plays meanwhile.
+        let in_time = (target.abs_diff(own_at) as f64) < self.aligned_frames();
+        if own.playing() && in_time {
+            return;
         }
+        self.move_to(deck, target, KeepTime::Since(moment.frames));
+    }
+
+    /// The frame nearest `own_at` on the beat of `deck`'s synced partner, as `moment` has it. None
+    /// unless both are loaded and the partner is playing, not scrubbed.
+    fn on_partner_beat(&self, deck: DeckId, own_at: u64, moment: &Moment) -> Option<u64> {
+        let mut sync = lock(&self.sync);
+        let partner = sync.partner(deck)?;
+        let (own, other) = (self.deck(deck)?.clock(), self.deck(partner)?.clock());
+        if !own.loaded() || !other.loaded() || !other.playing() || other.scrubbing() {
+            return None;
+        }
+        sync.follow_tempo(&self.clocks());
+        let target = sync.phase_target(deck, own_at as f64, moment.positions[partner] as f64)?;
+        Some(target.round().max(0.0) as u64)
     }
 
     /// Off by less than this a playing deck counts as on the beat: half a millisecond.

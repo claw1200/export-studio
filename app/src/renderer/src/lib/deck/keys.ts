@@ -8,11 +8,11 @@ type DeckHandlers = Partial<Record<ActionId, ActionHandler>>
 /**
  * What a deck does while it is being played: transport, cue, loops, seeking, quantise and calling
  * cues the track already has. Nothing here changes the track's stored cues or beatgrid, so it is
- * all mix mode allows. `playPause` replaces the deck's own play/pause.
+ * all mix mode allows.
  */
-export function playKeys(player: Player, playPause: () => void = () => player.toggle()): DeckHandlers {
+export function playKeys(player: Player): DeckHandlers {
   return {
-    'deck.playPause': playPause,
+    'deck.playPause': () => player.toggle(),
     'deck.cue': { down: () => player.cueDown(), up: () => player.cueUp() },
     'deck.loopIn': () => player.setLoopIn(),
     'deck.loopOut': () => player.setLoopOut(),

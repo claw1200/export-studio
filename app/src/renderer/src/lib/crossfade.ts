@@ -1,3 +1,4 @@
+export const FADER_CENTRE = 0.5
 /** How close to the middle snaps to it, so the centre is easy to find by hand. */
 export const CENTRE_SNAP = 0.02
 
@@ -27,7 +28,7 @@ export function crossfade(position: number, curve = DEFAULT_CURVE): [a: number, 
 /** A dragged position, clamped and pulled onto the centre when it is close. */
 export function faderPosition(position: number): number {
   const x = Math.min(1, Math.max(0, position))
-  return Math.abs(x - 0.5) < CENTRE_SNAP ? 0.5 : x
+  return Math.abs(x - FADER_CENTRE) < CENTRE_SNAP ? FADER_CENTRE : x
 }
 
 /**

@@ -76,10 +76,7 @@
   <TrackInfo class="px-3 pt-2.5" />
 
   <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 pt-2">
-    <Transport
-      onplay={() => mixer.toggleDeck(player)}
-      playTitle="Play deck {label} on its own{following ? ', in time with the master' : ''}"
-    />
+    <Transport playTitle="Play deck {label} on its own{following ? ', in time with the master' : ''}" />
     <LoopControls showBeatLoop={false} />
 
     <div class="ml-auto flex items-center gap-2">
@@ -92,11 +89,7 @@
           onclick={() => mixer.setMaster(player)}>MASTER</button
         >
       </div>
-      <TempoSteppers
-        lockedBy={following ? `Following deck ${mixer.master === mixer.a ? 'A' : 'B'}` : null}
-        onstepbpm={(step) => mixer.stepBpm(player, step)}
-        onresetbpm={() => mixer.resetTempo(player)}
-      />
+      <TempoSteppers />
       <div class={segment}>
         <button
           class={segmentButton(masterTempo, 'accent')}
@@ -105,7 +98,7 @@
           title={masterTempo
             ? 'Master tempo on: the key holds when the tempo moves'
             : 'Master tempo off: the key moves with the tempo'}
-          onclick={() => mixer.toggleMasterTempo(player)}>MT</button
+          onclick={() => player.tempo.setMasterTempo(!masterTempo)}>MT</button
         >
       </div>
     </div>

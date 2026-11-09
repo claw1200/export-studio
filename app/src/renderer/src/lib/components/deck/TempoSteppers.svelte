@@ -3,31 +3,19 @@
   import { formatBpm, keyColor } from '$lib/format'
   import { heardKey } from '$lib/mix/harmonic'
   import { stepTempo } from '$lib/mix/sync'
-  import { ownBpm } from '$lib/mixer.svelte'
   import Stepper from './Stepper.svelte'
 
-  let {
-    stepperClass,
-    lockedBy = null,
-    onstepbpm,
-    onresetbpm
-  }: {
-    stepperClass?: string
-    /** Why the tempo cannot be moved here, as when following the master. */
-    lockedBy?: string | null
-    onstepbpm?: (step: number) => void
-    onresetbpm?: () => void
-  } = $props()
+  let { stepperClass }: { stepperClass?: string } = $props()
 
   const player = getPlayer()
   const tempo = player.tempo
   const track = $derived(player.track)
-  const bpm = $derived(ownBpm(player))
+  const bpm = $derived(player.bpmUnderPlayhead)
   const key = $derived(heardKey(track?.key ?? '', tempo))
   const signed = (n: number): string => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '')
 
   function stepBpm(step: number): void {
-    const rate = stepTempo(bpm * tempo.rate, bpm, step)
+    const rate = stepTempo(tempo.rate, bpm, step)
     if (rate != null) tempo.setRate(rate)
   }
 </script>
@@ -37,13 +25,14 @@
   name="BPM"
   value={track && bpm ? formatBpm(bpm * tempo.rate) : '—'}
   valueClass={tempo.rate !== 1 ? 'text-accent' : 'text-fg'}
-  title={lockedBy ??
-    (tempo.rate === 1
+  title={tempo.lockedToMaster
+    ? 'Following the master deck'
+    : tempo.rate === 1
       ? 'At the track’s own tempo'
-      : `${formatBpm(bpm)} BPM at the track’s own tempo. Click to go back to it.`)}
-  disabled={!track || !!lockedBy || !(bpm > 0)}
-  onstep={onstepbpm ?? stepBpm}
-  onreset={onresetbpm ?? (() => tempo.setRate(1))}
+      : `${formatBpm(bpm)} BPM at the track’s own tempo. Click to go back to it.`}
+  disabled={!track || tempo.lockedToMaster || !(bpm > 0)}
+  onstep={stepBpm}
+  onreset={() => tempo.reset()}
 />
 <Stepper
   class={stepperClass}

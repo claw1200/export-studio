@@ -44,7 +44,7 @@ function stored<T extends string>(key: string, ids: { id: T }[], fallback: T): T
 export class MixPrefs {
   curveId = $state<CurveId>(stored('mix.curve', CURVES, DEFAULT_CURVE_ID))
   swapTimingId = $state<SwapTimingId>(stored('mix.swapTiming', SWAP_TIMINGS, DEFAULT_SWAP_TIMING_ID))
-  /** The deck that alone has sound becomes the master. See `Mixer.followSound`. */
+  /** The deck that alone has sound becomes the master. See `Mixer.makeSoleAudibleDeckMaster`. */
   autoMaster = $state(getSetting('mix.autoMaster') !== 'false')
   keyHighlightId = $state<KeyHighlightId>(stored('mix.keyHighlight', KEY_HIGHLIGHTS, DEFAULT_KEY_HIGHLIGHT_ID))
 
