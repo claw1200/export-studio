@@ -73,10 +73,7 @@
   <TrackInfo class="px-3 pt-2.5" />
 
   <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 pt-2">
-    <Transport
-      onplay={() => mixer.toggleDeck(player)}
-      playTitle="Play deck {label} on its own{following ? ', in time with the master' : ''}"
-    />
+    <Transport playTitle="Play deck {label} on its own{following ? ', in time with the master' : ''}" />
     <LoopControls showBeatLoop={false} />
 
     <div class="ml-auto flex items-center gap-2">

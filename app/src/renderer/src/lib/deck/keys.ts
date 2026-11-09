@@ -6,9 +6,9 @@ import { BEAT_LOOP_BEATS } from './transport'
 
 type DeckHandlers = Partial<Record<ActionId, ActionHandler>>
 
-export function playOnlyKeys(player: Player, playPause: () => void = () => player.toggle()): DeckHandlers {
+export function playOnlyKeys(player: Player): DeckHandlers {
   return {
-    'deck.playPause': playPause,
+    'deck.playPause': () => player.toggle(),
     'deck.cue': { down: () => player.cueDown(), up: () => player.cueUp() },
     'deck.loopIn': () => player.setLoopIn(),
     'deck.loopOut': () => player.setLoopOut(),

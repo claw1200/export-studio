@@ -22,14 +22,12 @@
 
   const playShortcut = $derived(keybinds.bindings['mix.playBoth'][0])
   const playTitle = $derived(
-    (mixer.playing ? 'Stop both decks and go back to where they started' : 'Play both decks together') +
+    (mixer.playing ? 'Stop both decks and return them to their cue points' : 'Play both decks together') +
       (playShortcut ? ` (${chordLabel(playShortcut)})` : '')
   )
 
-  const mixKeys = (player: Player): ReturnType<typeof playOnlyKeys> =>
-    playOnlyKeys(player, () => mixer.toggleDeck(player))
-  $effect(() => keybinds.register(mixKeys(a)))
-  $effect(() => keybinds.register(mixKeys(b), 'shift'))
+  $effect(() => keybinds.register(playOnlyKeys(a)))
+  $effect(() => keybinds.register(playOnlyKeys(b), 'shift'))
   $effect(() => keybinds.register({ 'mix.playBoth': () => mixer.toggle() }))
   $effect(() => {
     decks.mixMaster = mixer.master

@@ -8,11 +8,9 @@
 
   let {
     class: className,
-    onplay,
     playTitle
   }: {
     class?: ClassValue
-    onplay?: () => void
     playTitle?: string
   } = $props()
 
@@ -35,7 +33,7 @@
   <PlayButton
     playing={player.playing}
     disabled={!player.playable}
-    onclick={() => (onplay ? onplay() : player.toggle())}
+    onclick={() => player.toggle()}
     label={playLabel}
     title={(player.playing ? playLabel : (playTitle ?? playLabel)) + shortcut('deck.playPause')}
   />

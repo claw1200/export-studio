@@ -10,7 +10,6 @@ import {
   startBassSwap,
   type BassSwap
 } from './crossfade'
-import type { Seconds } from './deck/clock'
 import { Deck } from './deck/deck.svelte'
 import type { MixPrefs } from './mix/prefs.svelte'
 import { Player } from './player.svelte'
@@ -39,7 +38,6 @@ export class Mixer {
   lowKnobs = $state.raw<[a: number, b: number]>([1, 1])
 
   private readonly players: readonly [Player, Player]
-  private playBothStartedFrom: [Seconds, Seconds] | null = null
   private swap: BassSwap = startBassSwap(this.crossfader)
 
   constructor(
@@ -131,29 +129,17 @@ export class Mixer {
 
   play(): void {
     if (!this.playable) return
-    this.playBothStartedFrom = [this.a.position, this.b.position]
     this.applyFader()
     Player.playTogether(this.players)
   }
 
   stop(): void {
-    const startedFrom = this.playBothStartedFrom
-    this.playBothStartedFrom = null
-    for (const [i, player] of this.players.entries()) {
-      if (startedFrom) player.stopAt(startedFrom[i])
-      else player.pause()
-    }
+    for (const player of this.players) player.returnToCue()
   }
 
   toggle(): void {
     if (this.playing) this.stop()
     else this.play()
-  }
-
-  toggleDeck(player: Player): void {
-    const startingFromSilence = !this.playing && !player.cueHeld
-    if (startingFromSilence) this.playBothStartedFrom = null
-    player.toggle()
   }
 
   private applyPrefs(): void {

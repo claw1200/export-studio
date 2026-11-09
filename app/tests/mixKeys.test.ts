@@ -80,11 +80,9 @@ describe('playOnlyKeys', () => {
     assert.deepEqual(calls, ['hotCueDownOrStore(1)'])
   })
 
-  it('takes the play/pause it is given', () => {
+  it('plays and pauses the deck itself', () => {
     const { player, calls } = fakePlayer()
-    let played = false
-    ;(playOnlyKeys(player, () => (played = true))['deck.playPause'] as () => void)()
-    assert.equal(played, true)
-    assert.deepEqual(calls, [])
+    ;(playOnlyKeys(player)['deck.playPause'] as () => void)()
+    assert.deepEqual(calls, ['toggle()'])
   })
 })

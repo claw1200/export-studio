@@ -268,6 +268,10 @@ export class Player {
     this.deck.stopAt(this.insideFile(seconds))
   }
 
+  returnToCue(): void {
+    this.stopAt(this.cuePoint)
+  }
+
   private takeSpeakers(): void {
     this.pausedForPreview = false
     this.onTakeSpeakers?.()
