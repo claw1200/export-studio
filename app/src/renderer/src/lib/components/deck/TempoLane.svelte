@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { nearestBeatIndex } from '$lib/beat'
+  import { BEATS_PER_BAR, nearestBeatIndex } from '$lib/beat'
   import { getPlayer } from '$lib/deck/context'
   import { formatBeatLength, formatBpm, formatClock } from '$lib/format'
   import {
@@ -22,9 +22,12 @@
   const DRAG_THRESHOLD_PX = 3
   const RAMP_HANDLE_HIT_PX = 6
   const SNAP_LOOKAHEAD_MS = 2000
+  const RAMP_HANDLE_RADIUS = 5
+  const MIN_TEMPO_PAD_BPM = 4
+  const TEMPO_PAD_FRACTION = 0.2
 
-  type Target = { kind: 'flag' | 'ramp'; j: number }
-  type FlagShape = { j: number; left: number; right: number; rampX: number | null }
+  type Target = { kind: 'flag' | 'ramp'; flagIndex: number }
+  type FlagShape = { flagIndex: number; left: number; right: number; rampX: number | null }
 
   let width = $state(0)
   let height = $state(0)
@@ -39,28 +42,29 @@
   const localX = (e: MouseEvent): number => e.clientX - (e.currentTarget as HTMLElement).getBoundingClientRect().left
   const nearest = (values: number[], target: number): number =>
     values.reduce((best, value) => (Math.abs(value - target) < Math.abs(best - target) ? value : best))
-  const isHovered = (kind: Target['kind'], j: number): boolean => hover?.kind === kind && hover.j === j
+  const isHovered = (kind: Target['kind'], flagIndex: number): boolean =>
+    hover?.kind === kind && hover.flagIndex === flagIndex
 
-  function flagLabel(map: TempoMap, j: number): string {
-    const flag = map.flags[j]
+  function flagLabel(map: TempoMap, flagIndex: number): string {
+    const flag = map.flags[flagIndex]
     const bpm = formatBpm(flag.bpm)
     if (varies(flag)) return `~${bpm}`
-    if (j === 0 || !flag.rampBeats) return bpm
-    return `${flag.bpm >= endBpm(map.flags[j - 1]) ? '↗' : '↘'} ${bpm}`
+    if (flagIndex === 0 || !flag.rampBeats) return bpm
+    return `${flag.bpm >= endBpm(map.flags[flagIndex - 1]) ? '↗' : '↘'} ${bpm}`
   }
 
-  function describe(map: TempoMap, target: Target | null): string {
+  function describeTarget(map: TempoMap, target: Target | null): string {
     if (!target) return 'Double-click to add a tempo flag on the nearest beat'
     if (target.kind === 'ramp') return 'Drag to set the ramp length in bars (Shift: single beats)'
-    const { j } = target
-    const flag = map.flags[j]
+    const { flagIndex } = target
+    const flag = map.flags[flagIndex]
     const tempo = varies(flag)
       ? `Tempo varies around ${formatBpm(flag.bpm)} BPM (rekordbox analysis)`
-      : j > 0 && flag.rampBeats
-        ? `${formatBpm(endBpm(map.flags[j - 1]))} → ${formatBpm(flag.bpm)} BPM over ${formatBeatLength(flag.rampBeats)}`
+      : flagIndex > 0 && flag.rampBeats
+        ? `${formatBpm(endBpm(map.flags[flagIndex - 1]))} → ${formatBpm(flag.bpm)} BPM over ${formatBeatLength(flag.rampBeats)}`
         : `${formatBpm(flag.bpm)} BPM`
-    const drag = j === 0 ? 'drag to move the first section' : 'drag to move it (Alt: off the grid)'
-    return `${tempo}, from ${formatClock(flag.startMs)}. Click for options, ${drag}.`
+    const dragHint = flagIndex === 0 ? 'drag to move the first section' : 'drag to move it (Alt: off the grid)'
+    return `${tempo}, from ${formatClock(flag.startMs)}. Click for options, ${dragHint}.`
   }
 
   function paint(canvas: HTMLCanvasElement): void {
@@ -80,7 +84,7 @@
     const bpms = map.flags.map((flag) => flag.bpm)
     const lo = Math.min(...bpms)
     const hi = Math.max(...bpms)
-    const pad = Math.max(4, (hi - lo) * 0.2)
+    const pad = Math.max(MIN_TEMPO_PAD_BPM, (hi - lo) * TEMPO_PAD_FRACTION)
     return (bpm) => height - 4 - ((bpm - lo + pad) / (hi - lo + 2 * pad)) * (height - 8)
   }
 
@@ -100,13 +104,13 @@
     tempoY: (bpm: number) => number
   ): void {
     const points: [number, number][] = []
-    map.flags.forEach((flag, j) => {
-      const sectionEndX = xOf(map.flags[j + 1]?.startMs ?? map.durationMs)
-      if (j === 0) points.push([Math.min(xOf(0), xOf(flag.startMs)), tempoY(flag.bpm)])
+    map.flags.forEach((flag, flagIndex) => {
+      const sectionEndX = xOf(map.flags[flagIndex + 1]?.startMs ?? map.durationMs)
+      if (flagIndex === 0) points.push([Math.min(xOf(0), xOf(flag.startMs)), tempoY(flag.bpm)])
       else {
-        const rampEnd = rampEndMs(draft, map, j)
+        const rampEnd = rampEndMs(draft, map, flagIndex)
         const reachedX = !flag.rampBeats ? xOf(flag.startMs) : rampEnd == null ? sectionEndX : xOf(rampEnd)
-        points.push([xOf(flag.startMs), tempoY(endBpm(map.flags[j - 1]))], [reachedX, tempoY(flag.bpm)])
+        points.push([xOf(flag.startMs), tempoY(endBpm(map.flags[flagIndex - 1]))], [reachedX, tempoY(flag.bpm)])
       }
       points.push([sectionEndX, tempoY(flag.bpm)])
     })
@@ -128,10 +132,11 @@
 
   function paintRampHandle(ctx: CanvasRenderingContext2D, x: number, y: number, hot: boolean): void {
     ctx.beginPath()
-    ctx.moveTo(x, y - 5)
-    ctx.lineTo(x + 5, y)
-    ctx.lineTo(x, y + 5)
-    ctx.lineTo(x - 5, y)
+    const r = RAMP_HANDLE_RADIUS
+    ctx.moveTo(x, y - r)
+    ctx.lineTo(x + r, y)
+    ctx.lineTo(x, y + r)
+    ctx.lineTo(x - r, y)
     ctx.closePath()
     ctx.fillStyle = hot ? '#ffffff' : TEMPO_FLAG_COLOR
     ctx.fill()
@@ -152,16 +157,16 @@
     const pennantTop = 3
     const pennantHeight = height - 7
     let previousRight = -Infinity
-    return map.flags.map((flag, j) => {
+    return map.flags.map((flag, flagIndex) => {
       const x = Math.round(xOf(flag.startMs)) + 0.5
-      const rampEnd = rampEndMs(draft, map, j)
+      const rampEnd = rampEndMs(draft, map, flagIndex)
       const rampX = rampEnd == null ? null : xOf(rampEnd)
       if (rampX != null && rampX > -8 && rampX < width + 8)
-        paintRampHandle(ctx, rampX, tempoY(flag.bpm), isHovered('ramp', j))
-      const label = flagLabel(map, j)
+        paintRampHandle(ctx, rampX, tempoY(flag.bpm), isHovered('ramp', flagIndex))
+      const label = flagLabel(map, flagIndex)
       const pennantWidth = Math.ceil(ctx.measureText(label).width) + 9
       const labelFits = x > previousRight + 2
-      const shape = { j, left: x - 4, right: labelFits ? x + pennantWidth : x + 4, rampX }
+      const shape = { flagIndex, left: x - 4, right: labelFits ? x + pennantWidth : x + 4, rampX }
       if (x < -pennantWidth - 4 || x > width + 4) return shape
       ctx.fillStyle = TEMPO_FLAG_COLOR
       ctx.fillRect(x - 0.5, 0, 1, height)
@@ -169,7 +174,7 @@
       const selected = grid.selectedFlagId === flag.id
       ctx.beginPath()
       ctx.roundRect(x + 0.5, pennantTop, pennantWidth, pennantHeight, [0, 3, 3, 0])
-      ctx.fillStyle = selected ? TEMPO_FLAG_COLOR : TEMPO_FLAG_COLOR + (isHovered('flag', j) ? '6b' : '42')
+      ctx.fillStyle = selected ? TEMPO_FLAG_COLOR : TEMPO_FLAG_COLOR + (isHovered('flag', flagIndex) ? '6b' : '42')
       ctx.fill()
       ctx.fillStyle = selected ? '#16101f' : '#f3edff'
       ctx.fillText(label, x + 5, pennantTop + pennantHeight / 2 + 0.5)
@@ -180,39 +185,39 @@
 
   function targetAt(x: number): Target | null {
     const ramp = flagShapes.find((s) => s.rampX != null && Math.abs(x - s.rampX) <= RAMP_HANDLE_HIT_PX)
-    if (ramp) return { kind: 'ramp', j: ramp.j }
+    if (ramp) return { kind: 'ramp', flagIndex: ramp.flagIndex }
     const flag = flagShapes.findLast((s) => x >= s.left && x <= s.right)
-    return flag ? { kind: 'flag', j: flag.j } : null
+    return flag ? { kind: 'flag', flagIndex: flag.flagIndex } : null
   }
 
-  function rampBeatsAt(draft: CompiledGrid, j: number, ms: number, exact: boolean): number {
-    const start = draft.sectionStart[j]
-    const lastStep = sectionEnd(draft, j) - 1 - start
+  function rampBeatsAt(draft: CompiledGrid, flagIndex: number, ms: number, exact: boolean): number {
+    const start = draft.sectionStart[flagIndex]
+    const lastStep = sectionEnd(draft, flagIndex) - 1 - start
     const step = Math.max(0, Math.min(lastStep, nearestBeatIndex(draft.times, ms) - start))
-    const beats = exact ? step : Math.round(step / 4) * 4
+    const beats = exact ? step : Math.round(step / BEATS_PER_BAR) * BEATS_PER_BAR
     return Math.max(MIN_RAMP_BEATS, Math.min(Math.max(MIN_RAMP_BEATS, lastStep), beats))
   }
 
-  function snappedFlagMs(j: number, ms: number): number {
+  function snappedFlagMs(flagIndex: number, ms: number): number {
     const draft = grid.draft
-    return draft ? nearest(continuedBeats(draft, j - 1, ms + SNAP_LOOKAHEAD_MS), ms) : ms
+    return draft ? nearest(continuedBeats(draft, flagIndex - 1, ms + SNAP_LOOKAHEAD_MS), ms) : ms
   }
 
   function onpointermove(e: PointerEvent): void {
     const x = localX(e)
     if (!drag) {
       const target = targetAt(x)
-      if (target?.kind !== hover?.kind || target?.j !== hover?.j) hover = target
+      if (target?.kind !== hover?.kind || target?.flagIndex !== hover?.flagIndex) hover = target
       return
     }
     if (!drag.moved && Math.abs(e.clientX - drag.x) < DRAG_THRESHOLD_PX) return
     drag.moved = true
     dragging = drag.kind
-    const { dragStart, j } = drag
+    const { dragStart, flagIndex } = drag
     if (drag.kind === 'ramp') {
-      if (grid.draft) grid.setRamp(j, rampBeatsAt(grid.draft, j, msAt(x), e.shiftKey), dragStart)
-    } else if (j === 0) grid.shiftSection(0, ((e.clientX - drag.x) / pxPerSecond()) * 1000, dragStart)
-    else grid.moveFlag(j, e.altKey ? msAt(x) : snappedFlagMs(j, msAt(x)), dragStart)
+      if (grid.draft) grid.setRamp(flagIndex, rampBeatsAt(grid.draft, flagIndex, msAt(x), e.shiftKey), dragStart)
+    } else if (flagIndex === 0) grid.shiftSection(0, ((e.clientX - drag.x) / pxPerSecond()) * 1000, dragStart)
+    else grid.moveFlag(flagIndex, e.altKey ? msAt(x) : snappedFlagMs(flagIndex, msAt(x)), dragStart)
   }
 
   function endDrag(): void {
@@ -220,7 +225,7 @@
     drag = null
     dragging = null
     if (!ended || ended.moved || ended.kind !== 'flag') return
-    const id = grid.map?.flags[ended.j]?.id ?? null
+    const id = grid.map?.flags[ended.flagIndex]?.id ?? null
     grid.select(grid.selectedFlagId === id ? null : id)
   }
 
@@ -242,7 +247,7 @@
     role="toolbar"
     tabindex="-1"
     aria-label="Tempo flags. Double-click to add a flag."
-    title={dragging || !grid.map ? undefined : describe(grid.map, hover)}
+    title={dragging || !grid.map ? undefined : describeTarget(grid.map, hover)}
     onpointerdown={(e) => {
       const target = targetAt(localX(e))
       if (e.button !== 0 || !grid.map || !target) return

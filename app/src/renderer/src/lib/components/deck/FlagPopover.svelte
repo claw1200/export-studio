@@ -3,7 +3,8 @@
   import { X } from '@lucide/svelte'
   import { getPlayer } from '$lib/deck/context'
   import { formatBeatLength, formatClock } from '$lib/format'
-  import { MAX_GRID_BPM, MIN_GRID_BPM, MIN_RAMP_BEATS, varies } from '$lib/tempo-map'
+  import { BEATS_PER_BAR } from '$lib/beat'
+  import { MAX_GRID_BPM, MIN_GRID_BPM, MIN_RAMP_BEATS, VARIES_DESCRIPTION, varies } from '$lib/tempo-map'
 
   const { xOf, width }: { xOf: (ms: number) => number; width: number } = $props()
 
@@ -11,8 +12,11 @@
   const grid = player.grid
   const POPOVER_WIDTH = 248
   const EDGE_MARGIN = 8
+  const FLAG_FROM_POPOVER_LEFT = 22
+  const ARROW_HALF_WIDTH = 5
+  const ARROW_EDGE_MARGIN = 10
   const DEFAULT_RAMP_BEATS = 16
-  const RAMP_LENGTHS = [1, 2, 4, 8, 16, 32].map((bars) => bars * 4)
+  const RAMP_LENGTHS = [1, 2, 4, 8, 16, 32].map((bars) => bars * BEATS_PER_BAR)
   const TRANSITIONS = [
     { label: 'Jump', ramps: false },
     { label: 'Ramp', ramps: true }
@@ -20,10 +24,15 @@
 
   const index = $derived(grid.map?.flags.findIndex((flag) => flag.id === grid.selectedFlagId) ?? -1)
   const flag = $derived(index >= 0 ? grid.map?.flags[index] : undefined)
-  const title = $derived(index === 0 ? 'Grid start' : `Flag ${index + 1}`)
+  const isGridStart = $derived(index === 0)
+  const title = $derived(isGridStart ? 'Grid start' : `Flag ${index + 1}`)
   const flagX = $derived(flag ? xOf(flag.startMs) : 0)
-  const left = $derived(Math.max(EDGE_MARGIN, Math.min(width - POPOVER_WIDTH - EDGE_MARGIN, flagX - 22)))
-  const arrowLeft = $derived(Math.max(10, Math.min(POPOVER_WIDTH - 20, flagX - left - 5)))
+  const left = $derived(
+    Math.max(EDGE_MARGIN, Math.min(width - POPOVER_WIDTH - EDGE_MARGIN, flagX - FLAG_FROM_POPOVER_LEFT))
+  )
+  const arrowLeft = $derived(
+    Math.max(ARROW_EDGE_MARGIN, Math.min(POPOVER_WIDTH - 2 * ARROW_EDGE_MARGIN, flagX - left - ARROW_HALF_WIDTH))
+  )
   const rampLengths = $derived(
     flag?.rampBeats && !RAMP_LENGTHS.includes(flag.rampBeats)
       ? [...RAMP_LENGTHS, flag.rampBeats].sort((a, b) => a - b)
@@ -33,10 +42,11 @@
   let input: HTMLInputElement | undefined = $state()
   let text = $state('')
   let error = $state('')
+  const showBpm = (bpm: number): string => bpm.toFixed(2)
 
   $effect(() => {
     if (!flag || document.activeElement === input) return
-    text = flag.bpm.toFixed(2)
+    text = showBpm(flag.bpm)
     error = ''
   })
 
@@ -107,7 +117,7 @@
           } else if (e.key === 'Escape') {
             e.preventDefault()
             e.stopPropagation()
-            text = flag.bpm.toFixed(2)
+            text = showBpm(flag.bpm)
             input?.blur()
           }
         }}
@@ -118,12 +128,10 @@
     {#if error}<p class="-mt-1 text-[11px] text-danger">{error}</p>{/if}
 
     {#if varies(flag)}
-      {@render note(
-        'The tempo here varies beat by beat, as rekordbox analysed it. Setting a tempo replaces it with a steady one.'
-      )}
+      {@render note(`${VARIES_DESCRIPTION}. Setting a tempo replaces it with a steady one.`)}
     {/if}
 
-    {#if index === 0}
+    {#if isGridStart}
       {@render note('The first flag sets where the grid starts and its tempo.')}
     {:else}
       <div
