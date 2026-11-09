@@ -48,7 +48,10 @@ export class Deck {
   /** What to apply once the engine has the track: the playhead may have moved while it loaded. */
   private pending: { seek: boolean } | null = null
 
-  constructor(private index = 0) {
+  constructor(
+    private index = 0,
+    private readonly snapPlayhead: () => boolean = () => false
+  ) {
     window.audio.onTick((tick) => this.tick(tick))
     window.audio.onEvent((event) => this.event(event))
     void window.audio.status().then((status) => {
@@ -345,7 +348,7 @@ export class Deck {
     this.lastFrame = now
     const target = extrapolate(this.anchor, now)
     const advance = (Math.max(0, since) / 1000) * this.anchor.rate
-    const next = follow(this.position, target, since, advance, this.anchor.loop)
+    const next = this.snapPlayhead() ? target : follow(this.position, target, since, advance, this.anchor.loop)
     this.position = this.duration > 0 ? Math.min(next, this.duration) : next
     this.raf = requestAnimationFrame(this.frame)
   }

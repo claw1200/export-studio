@@ -393,6 +393,12 @@
               {prefs.waveform.fallBlocks}
             </span>
           </div>
+          {@render toggle(
+            'Snap playhead',
+            'Draw the playhead exactly where the audio engine puts it each frame, instead of easing small corrections. Loops always jump back, but the playhead may stutter.',
+            prefs.snapPlayhead,
+            () => prefs.setSnapPlayhead(!prefs.snapPlayhead)
+          )}
         {:else if section === 'display'}
           <section class="mb-5">
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Browser</h3>

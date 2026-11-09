@@ -68,7 +68,7 @@ export class Player {
     readonly slot: number,
     private readonly prefs: DeckPrefs
   ) {
-    this.deck = new Deck(slot)
+    this.deck = new Deck(slot, () => prefs.snapPlayhead)
     this.tempo = new TempoControl(this.deck)
     this.display = new WaveformDisplay(
       prefs.waveform,
