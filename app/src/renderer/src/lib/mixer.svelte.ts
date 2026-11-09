@@ -173,6 +173,7 @@ export class Mixer {
   }
 
   private shareSync(): void {
+    for (const player of this.players) player.tempo.lockedToMaster = this.following(player)
     Deck.setSync(this.synced ? { master: this.master.deck, follower: this.follower.deck } : null)
   }
 

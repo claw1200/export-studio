@@ -5,14 +5,7 @@
   import { stepTempo } from '$lib/mix/sync'
   import Stepper from './Stepper.svelte'
 
-  let {
-    stepperClass,
-    lockedBy = null
-  }: {
-    stepperClass?: string
-    /** Why the tempo cannot be moved here, as when following the master. */
-    lockedBy?: string | null
-  } = $props()
+  let { stepperClass }: { stepperClass?: string } = $props()
 
   const player = getPlayer()
   const tempo = player.tempo
@@ -32,11 +25,12 @@
   name="BPM"
   value={track && bpm ? formatBpm(bpm * tempo.rate) : '—'}
   valueClass={tempo.rate !== 1 ? 'text-accent' : 'text-fg'}
-  title={lockedBy ??
-    (tempo.rate === 1
+  title={tempo.lockedToMaster
+    ? 'Following the master deck'
+    : tempo.rate === 1
       ? 'At the track’s own tempo'
-      : `${formatBpm(bpm)} BPM at the track’s own tempo. Click to go back to it.`)}
-  disabled={!track || !!lockedBy || !(bpm > 0)}
+      : `${formatBpm(bpm)} BPM at the track’s own tempo. Click to go back to it.`}
+  disabled={!track || tempo.lockedToMaster || !(bpm > 0)}
   onstep={stepBpm}
   onreset={() => tempo.reset()}
 />

@@ -92,7 +92,7 @@
           onclick={() => mixer.setMaster(player)}>MASTER</button
         >
       </div>
-      <TempoSteppers lockedBy={following ? `Following deck ${mixer.label(mixer.master)}` : null} />
+      <TempoSteppers />
       <div class={segment}>
         <button
           class={segmentButton(masterTempo, 'accent')}
