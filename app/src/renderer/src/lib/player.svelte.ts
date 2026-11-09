@@ -19,6 +19,7 @@ import {
   pressHotCue,
   releaseHold,
   resizeLoop,
+  SHORTEST_LOOP,
   type TransportState
 } from './deck/transport'
 import type { Beatgrid, Cue, Track, TrackDetail } from './types'
@@ -26,7 +27,6 @@ import type { Waveform } from './waveform/data'
 
 const CUE_HIT_TOLERANCE: Seconds = 0.05
 const END_MARGIN: Seconds = 0.001
-const SHORTEST_LOOP: Seconds = 0.01
 const SAME_LOOP_LENGTH_TOLERANCE: Seconds = 0.002
 /** Rekordbox's detail rate, so zoom covers the same time for a file that has no analysis. */
 const LOOSE_WAVE_RATE = 150
@@ -343,17 +343,17 @@ export class Player {
     if (!this.canCue) return
     const action = pressCue(this.state, this.quantisedPlayhead())
     switch (action.kind) {
-      case 'mark':
+      case 'setCueOnly':
         this.cuePoint = action.at
         break
-      case 'return':
+      case 'stopAtCue':
         this.deck.stopAt(action.at)
         break
-      case 'set':
+      case 'setCueAndGo':
         this.cuePoint = action.at
         this.seek(action.at)
         break
-      case 'hold':
+      case 'holdFromCue':
         this.startHold('cue', action.at)
         break
     }
