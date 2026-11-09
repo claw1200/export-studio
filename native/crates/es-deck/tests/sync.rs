@@ -194,3 +194,77 @@ fn a_follower_at_the_start_of_its_track_moves_forward_onto_the_beat() {
         );
     }
 }
+
+/// A jump this far into a 120 BPM track lands a quarter of a beat off where the other deck is.
+const OFF_BEAT_MS: f64 = 7_123.0;
+
+fn both_playing_in_phase(name: &str, synced: bool) -> Rig {
+    let rig = two_decks(name, 120.0);
+    if synced {
+        rig.engine.set_sync(Some((0, 1)));
+    }
+    rig.engine.play_together(&[0, 1]);
+    let _ = rig.pull(RATE as usize);
+    rig
+}
+
+#[test]
+fn a_synced_deck_jumping_while_both_play_lands_on_the_partners_beat() {
+    let rig = both_playing_in_phase("s-jump", true);
+    rig.engine.seek(1, OFF_BEAT_MS);
+    let _ = rig.pull(RATE as usize);
+    let error = phase_error(&rig, BEAT as f64);
+    assert!(error.abs() < TOLERANCE, "off by {error} frames");
+    let landed = position(&rig, 1) as f64 - f64::from(RATE);
+    let asked = OFF_BEAT_MS * f64::from(RATE) / 1000.0;
+    assert!(
+        (landed - asked).abs() <= BEAT as f64 / 2.0,
+        "within half a beat of where it was sent: {landed} for {asked}"
+    );
+}
+
+#[test]
+fn the_master_jumping_lands_on_the_followers_beat() {
+    let rig = both_playing_in_phase("s-master-jump", true);
+    rig.engine.seek(0, OFF_BEAT_MS);
+    let _ = rig.pull(RATE as usize);
+    let error = phase_error(&rig, BEAT as f64);
+    assert!(error.abs() < TOLERANCE, "off by {error} frames");
+}
+
+#[test]
+fn entering_a_loop_while_both_play_lands_on_the_partners_beat() {
+    let rig = both_playing_in_phase("s-loop", true);
+    rig.engine
+        .set_loop(1, OFF_BEAT_MS, OFF_BEAT_MS + 4_000.0, true);
+    let _ = rig.pull(RATE as usize);
+    let error = phase_error(&rig, BEAT as f64);
+    assert!(error.abs() < TOLERANCE, "off by {error} frames");
+}
+
+#[test]
+fn without_sync_a_jump_goes_exactly_where_it_was_sent() {
+    let rig = both_playing_in_phase("s-jump-unsynced", false);
+    rig.engine.seek(1, OFF_BEAT_MS);
+    let _ = rig.pull(RATE as usize);
+    assert!(
+        phase_error(&rig, BEAT as f64).abs() > TOLERANCE,
+        "left off the beat"
+    );
+}
+
+#[test]
+fn a_paused_synced_deck_goes_exactly_where_it_was_sent() {
+    let rig = two_decks("s-jump-paused", 120.0);
+    rig.engine.set_sync(Some((0, 1)));
+    rig.engine.play(0);
+    let _ = rig.pull(RATE as usize);
+    rig.engine.seek(1, OFF_BEAT_MS);
+    let _ = rig.pull(RATE as usize / 10);
+    let asked = (OFF_BEAT_MS * f64::from(RATE) / 1000.0).round() as u64;
+    assert_eq!(
+        position(&rig, 1),
+        asked,
+        "CUE moves a paused deck to the frame"
+    );
+}
