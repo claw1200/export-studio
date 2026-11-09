@@ -1,54 +1,48 @@
 import type { DeckEvent, DeckTick, Tick } from '../../../../preload/audio'
 import { MAX_KEY_SHIFT } from '../../../../shared/engine'
-import { type Anchor, extrapolate, follow, NO_ANCHOR, pinned } from './clock'
+import { type Anchor, easeTowards, extrapolate, type LoopRange, NO_ANCHOR, reanchored, type Seconds } from './clock'
+import type { DeckPrefs } from './prefs.svelte'
 
-/** Longer than this without an animation frame and ticks set the position directly. */
+type EngineCommand = Parameters<typeof window.audio.send>[0]
+
 const FRAME_STALL_MS = 100
+const LOOP_EDGE_TOLERANCE: Seconds = 1e-4
 
-/** A loop as the engine holds it, in seconds. */
 export interface DeckLoop {
-  start: number
-  end: number
-  /** Playback is held inside it. */
+  start: Seconds
+  end: Seconds
   active: boolean
 }
 
-/**
- * One deck of the native engine, as reactive state.
- *
- * Commands change this state at once, so the interface responds before the engine replies; ticks
- * then correct it. A tick taken before the engine applied the latest command is ignored, so it
- * cannot pull the playhead back to where it was. Between ticks the playhead is extrapolated.
- */
+function toMs(seconds: Seconds): number {
+  return seconds * 1000
+}
+
 export class Deck {
-  /** The engine has the track decoded and ready. */
   ready = $state(false)
   playing = $state(false)
   scrubbing = $state(false)
-  /** Seconds, as drawn. */
-  position = $state(0)
-  duration = $state(0)
+  position = $state<Seconds>(0)
+  duration = $state<Seconds>(0)
   loop = $state.raw<DeckLoop | null>(null)
   error = $state<string | null>(null)
-  /** Playback speed as a multiple of the file's. Kept across loads. */
   tempo = $state(1)
-  /** Keep the key when the tempo changes. */
   masterTempo = $state(false)
-  /** Semitones the key is moved by, on top of what the tempo does to it. Kept across loads. */
   keyShift = $state(0)
-  /** Called when a load finishes, with the engine's error if it failed. */
-  onSettled: ((error: string | null) => void) | null = null
+  onLoadSettled: ((error: string | null) => void) | null = null
 
   private request = 0
-  private sent = 0
+  private lastCommandSeq = 0
   private anchor: Anchor = NO_ANCHOR
   private generation = -1
   private raf = 0
   private lastFrame = 0
-  /** What to apply once the engine has the track: the playhead may have moved while it loaded. */
-  private pending: { seek: boolean } | null = null
+  private afterLoad: { seek: boolean } | null = null
 
-  constructor(private index = 0) {
+  constructor(
+    private index = 0,
+    private readonly prefs: Pick<DeckPrefs, 'snapPlayhead'> = { snapPlayhead: false }
+  ) {
     window.audio.onTick((tick) => this.tick(tick))
     window.audio.onEvent((event) => this.event(event))
     void window.audio.status().then((status) => {
@@ -56,11 +50,7 @@ export class Deck {
     })
   }
 
-  private send(command: Parameters<typeof window.audio.send>[0]): void {
-    this.sent = window.audio.send(command)
-  }
-
-  load(trackId: string, duration: number): void {
+  load(trackId: string, duration: Seconds): void {
     this.request++
     this.ready = false
     this.playing = false
@@ -70,7 +60,7 @@ export class Deck {
     this.position = 0
     this.duration = duration
     this.anchor = NO_ANCHOR
-    this.pending = { seek: false }
+    this.afterLoad = { seek: false }
     this.stopFrames()
     this.send({ op: 'load', deck: this.index, trackId, request: this.request })
   }
@@ -79,24 +69,27 @@ export class Deck {
     this.request++
     this.ready = false
     this.playing = false
-    this.pending = null
+    this.afterLoad = null
     this.stopFrames()
     this.send({ op: 'unload', deck: this.index })
   }
 
-  /** A deck synced with a playing one starts on its beat, unless `synced` is off. */
-  play({ synced = true }: { synced?: boolean } = {}): void {
-    if (!this.beginPlay()) return
-    this.send({ op: 'play', deck: this.index, unsynced: !synced })
+  play({ onMasterBeat = true }: { onMasterBeat?: boolean } = {}): void {
+    this.markPlaying()
+    if (!this.canStartNow) return
+    this.send({ op: 'play', deck: this.index, unsynced: !onMasterBeat })
     this.startFrames()
   }
 
-  align(): void {
-    if (this.ready) this.send({ op: 'align', deck: this.index })
-  }
-
-  setBeatgrid(timesMs: number[], bpms: number[]): void {
-    this.send({ op: 'beatgrid', deck: this.index, timesMs, bpms })
+  static playTogether(decks: Deck[]): void {
+    for (const deck of decks) deck.markPlaying()
+    const startable = decks.filter((deck) => deck.canStartNow)
+    if (!startable.length) return
+    const seq = window.audio.send({ op: 'playTogether', decks: startable.map((deck) => deck.index) })
+    for (const deck of startable) {
+      deck.lastCommandSeq = seq
+      deck.startFrames()
+    }
   }
 
   static setSync(link: { master: Deck; follower: Deck } | null): void {
@@ -104,131 +97,99 @@ export class Deck {
     window.audio.send({ op: 'sync', link: decks })
   }
 
-  /**
-   * Starts every deck in `decks` in the same instant, so the gap between their playheads holds.
-   * A deck still loading starts on its own once it is ready, as `play` would.
-   */
-  static playTogether(decks: Deck[]): void {
-    const ready = decks.filter((deck) => deck.beginPlay())
-    if (!ready.length) return
-    const seq = window.audio.send({ op: 'playTogether', decks: ready.map((deck) => deck.index) })
-    for (const deck of ready) {
-      deck.sent = seq
-      deck.startFrames()
-    }
+  align(): void {
+    this.sendIfReady({ op: 'align', deck: this.index })
   }
 
-  /** This deck's own level, linear, 0 to 1, under the master. */
-  setGain(gain: number): void {
-    this.send({ op: 'deckGain', deck: this.index, gain })
+  setBeatgrid(timesMs: number[], bpms: number[]): void {
+    this.send({ op: 'beatgrid', deck: this.index, timesMs, bpms })
   }
 
-  /** This deck's isolator low band, linear, 0 to 1. Null plays the deck without the isolator. */
-  setLow(gain: number | null): void {
-    this.send({ op: 'deckLow', deck: this.index, gain })
+  setGain(linearGain: number): void {
+    this.send({ op: 'deckGain', deck: this.index, gain: linearGain })
   }
 
-  /** Marks the deck playing. False when the engine cannot start it now. */
-  private beginPlay(): boolean {
-    if (this.error) return false
-    this.playing = true
-    if (!this.ready) return false
-    this.anchor = { ...pinned(this.anchor, this.position, performance.now()), playing: !this.scrubbing }
-    return true
+  setIsolatorLow(linearGain: number): void {
+    this.send({ op: 'deckLow', deck: this.index, gain: linearGain })
+  }
+
+  bypassIsolator(): void {
+    this.send({ op: 'deckLow', deck: this.index, gain: null })
   }
 
   pause(): void {
     this.playing = false
-    this.hold(this.position)
-    if (this.ready) this.send({ op: 'pause', deck: this.index })
+    this.holdAt(this.position)
+    this.sendIfReady({ op: 'pause', deck: this.index })
   }
 
-  seek(seconds: number): void {
-    this.move(seconds)
-    if (this.ready) this.send({ op: 'seek', deck: this.index, ms: seconds * 1000 })
-    else if (this.pending) this.pending.seek = true
+  seek(seconds: Seconds): void {
+    this.jumpTo(seconds)
+    this.sendOrReplayAfterLoad({ op: 'seek', deck: this.index, ms: toMs(seconds) })
   }
 
-  /**
-   * Moves by `seconds` from wherever the engine's playhead is when the command lands, which a
-   * position seen here a moment ago no longer is. While playing the engine keeps time through the
-   * move, so this is how one deck is lined up with another.
-   */
-  nudge(seconds: number): void {
-    if (!Number.isFinite(seconds) || seconds === 0) return
-    this.move(Math.max(0, Math.min(this.position + seconds, this.duration || Infinity)))
-    if (this.ready) this.send({ op: 'nudge', deck: this.index, ms: seconds * 1000 })
-    else if (this.pending) this.pending.seek = true
+  nudge(offset: Seconds): void {
+    if (!Number.isFinite(offset) || offset === 0) return
+    this.jumpTo(this.withinTrack(this.position + offset))
+    this.sendOrReplayAfterLoad({ op: 'nudge', deck: this.index, ms: toMs(offset) })
   }
 
-  /** Pause and move in one step, so the old position is never heard after the stop. */
-  stopAt(seconds: number): void {
+  stopAt(seconds: Seconds): void {
     this.playing = false
-    this.hold(seconds)
-    if (this.ready) this.send({ op: 'stopAt', deck: this.index, ms: seconds * 1000 })
-    else if (this.pending) this.pending.seek = true
+    this.holdAt(seconds)
+    this.sendOrReplayAfterLoad({ op: 'stopAt', deck: this.index, ms: toMs(seconds) })
   }
 
   scrubBegin(): void {
     if (this.scrubbing) return
     this.scrubbing = true
-    this.hold(this.position)
-    if (this.ready) this.send({ op: 'scrubBegin', deck: this.index })
+    this.holdAt(this.position)
+    this.sendIfReady({ op: 'scrubBegin', deck: this.index })
   }
 
-  /** `at` is the input event's timestamp, which sets how fast the head moves. */
-  scrubTo(seconds: number, at: number = performance.now()): void {
-    this.hold(seconds)
-    if (this.ready) this.send({ op: 'scrubTo', deck: this.index, ms: seconds * 1000, at })
-    else if (this.pending) this.pending.seek = true
+  scrubTo(seconds: Seconds, inputTimestamp = performance.now()): void {
+    this.holdAt(seconds)
+    this.sendOrReplayAfterLoad({ op: 'scrubTo', deck: this.index, ms: toMs(seconds), at: inputTimestamp })
   }
 
   scrubEnd(): void {
     if (!this.scrubbing) return
     this.scrubbing = false
-    this.anchor = { ...pinned(this.anchor, this.position, performance.now()), playing: this.playing }
-    if (this.ready) this.send({ op: 'scrubEnd', deck: this.index })
+    this.reanchor(this.position, { playing: this.playheadAdvancing })
+    this.sendIfReady({ op: 'scrubEnd', deck: this.index })
     if (this.playing) this.startFrames()
   }
 
-  /**
-   * Sets a loop. With `enter` playback goes into it, and a playhead outside it goes to the in point;
-   * without, the loop is left exited and the playhead stays where it is.
-   */
-  setLoop(start: number, end: number, enter = true): void {
+  setLoop(start: Seconds, end: Seconds, enter = true): void {
     if (!(end > start)) return
     this.loop = { start, end, active: enter }
-    if (!enter) this.anchor = { ...this.anchor, loop: null }
-    else if (this.position < start || this.position >= end) this.move(start)
-    else this.anchor = { ...this.anchor, loop: [start, end] }
-    if (this.ready) this.send({ op: 'setLoop', deck: this.index, inMs: start * 1000, outMs: end * 1000, enter })
-    else if (this.pending && enter) this.pending.seek = true
+    const playheadOutside = this.position < start || this.position >= end
+    if (!enter) this.updateAnchor({ loop: null })
+    else if (playheadOutside) this.jumpTo(start)
+    else this.updateAnchor({ loop: [start, end] })
+    this.sendOrReplayAfterLoad(this.loopCommand(this.loop), enter)
   }
 
-  /** RELOOP: back to the in point and inside the loop. EXIT: carry on past it, keeping the range. */
   setLooping(on: boolean): void {
     const loop = this.loop
     if (!loop || loop.active === on) return
     this.loop = { ...loop, active: on }
-    if (on) this.move(loop.start)
-    else this.anchor = { ...this.anchor, loop: null }
-    if (this.ready) this.send({ op: 'setLooping', deck: this.index, on })
-    else if (this.pending && on) this.pending.seek = true
+    if (on) this.jumpTo(loop.start)
+    else this.updateAnchor({ loop: null })
+    this.sendOrReplayAfterLoad({ op: 'setLooping', deck: this.index, on }, on)
   }
 
   clearLoop(): void {
     if (!this.loop) return
     this.loop = null
-    this.anchor = { ...this.anchor, loop: null }
-    if (this.ready) this.send({ op: 'clearLoop', deck: this.index })
+    this.updateAnchor({ loop: null })
+    this.sendIfReady({ op: 'clearLoop', deck: this.index })
   }
 
   setTempo(tempo: number): void {
     if (!(tempo > 0) || tempo === this.tempo) return
     this.tempo = tempo
-    // Re-anchor here so the playhead carries on at the new speed from where it is drawn.
-    const now = performance.now()
-    this.anchor = { ...pinned(this.anchor, this.position, now), playing: this.anchor.playing, rate: tempo }
+    this.reanchor(this.position, { rate: tempo })
     this.send({ op: 'tempo', deck: this.index, tempo })
   }
 
@@ -237,7 +198,6 @@ export class Deck {
     this.send({ op: 'masterTempo', deck: this.index, on })
   }
 
-  /** Moves the key by whole semitones, keeping the speed. The engine holds it within an octave. */
   setKeyShift(semitones: number): void {
     const shift = Math.max(-MAX_KEY_SHIFT, Math.min(MAX_KEY_SHIFT, Math.round(semitones)))
     if (shift === this.keyShift) return
@@ -245,69 +205,106 @@ export class Deck {
     this.send({ op: 'keyShift', deck: this.index, semitones: shift })
   }
 
-  private hold(seconds: number): void {
-    this.position = seconds
-    this.anchor = pinned(this.anchor, seconds, performance.now())
+  private send(command: EngineCommand): void {
+    this.lastCommandSeq = window.audio.send(command)
   }
 
-  /** The playhead jumped and carries on as it was: what the engine does itself on a loop entry. */
-  private move(seconds: number): void {
-    this.position = seconds
-    this.anchor = { ...pinned(this.anchor, seconds, performance.now()), playing: this.playing && !this.scrubbing }
+  private sendIfReady(command: EngineCommand): void {
+    if (this.ready) this.send(command)
   }
 
-  private activeLoop(): [number, number] | null {
+  private sendOrReplayAfterLoad(command: EngineCommand, movesPlayhead = true): void {
+    if (this.ready) this.send(command)
+    else if (movesPlayhead && this.afterLoad) this.afterLoad.seek = true
+  }
+
+  private loopCommand({ start, end, active }: DeckLoop): EngineCommand {
+    return { op: 'setLoop', deck: this.index, inMs: toMs(start), outMs: toMs(end), enter: active }
+  }
+
+  private markPlaying(): void {
+    if (this.error) return
+    this.playing = true
+    if (this.ready) this.reanchor(this.position, { playing: this.playheadAdvancing })
+  }
+
+  private get canStartNow(): boolean {
+    return this.ready && !this.error
+  }
+
+  private get playheadAdvancing(): boolean {
+    return this.playing && !this.scrubbing
+  }
+
+  private withinTrack(seconds: Seconds): Seconds {
+    return Math.max(0, Math.min(seconds, this.duration || Infinity))
+  }
+
+  private holdAt(seconds: Seconds): void {
+    this.position = seconds
+    this.reanchor(seconds, { playing: false })
+  }
+
+  private jumpTo(seconds: Seconds): void {
+    this.position = seconds
+    this.reanchor(seconds, { playing: this.playheadAdvancing })
+  }
+
+  private reanchor(seconds: Seconds, changes: Partial<Anchor> = {}): void {
+    this.anchor = { ...reanchored(this.anchor, seconds, performance.now()), ...changes }
+  }
+
+  private updateAnchor(changes: Partial<Anchor>): void {
+    this.anchor = { ...this.anchor, ...changes }
+  }
+
+  private activeLoop(): LoopRange | null {
     return this.loop?.active ? [this.loop.start, this.loop.end] : null
   }
 
   private event(event: DeckEvent): void {
     if (event.deck !== this.index || event.loadId !== this.request) return
-    if (event.kind === 'error') {
-      this.error = event.message ?? 'The track could not be played'
-      this.ready = false
-      this.playing = false
-      this.pending = null
-      this.onSettled?.(this.error)
-      return
-    }
-    this.ready = true
-    if (event.sampleRate > 0 && event.totalFrames > 0) this.duration = event.totalFrames / event.sampleRate
-    this.anchor = { ...NO_ANCHOR, sampleRate: event.sampleRate, at: performance.now(), rate: this.tempo }
-    this.flush()
-    this.onSettled?.(null)
+    if (event.kind === 'error') this.loadFailed(event.message ?? 'The track could not be played')
+    else this.loaded(event)
   }
 
-  /** Replays what happened while the track loaded. */
-  private flush(): void {
-    const pending = this.pending
-    this.pending = null
-    if (!pending) return
-    const deck = this.index
-    if (this.loop) {
-      const { start, end, active } = this.loop
-      this.send({ op: 'setLoop', deck, inMs: start * 1000, outMs: end * 1000, enter: active })
-    }
-    if (pending.seek && this.position > 0) this.send({ op: 'seek', deck, ms: this.position * 1000 })
-    this.anchor = pinned(this.anchor, this.position, performance.now())
-    if (this.scrubbing) this.send({ op: 'scrubBegin', deck })
+  private loadFailed(message: string): void {
+    this.error = message
+    this.ready = false
+    this.playing = false
+    this.afterLoad = null
+    this.onLoadSettled?.(message)
+  }
+
+  private loaded({ sampleRate, totalFrames }: DeckEvent): void {
+    this.ready = true
+    if (sampleRate > 0 && totalFrames > 0) this.duration = totalFrames / sampleRate
+    this.anchor = { ...NO_ANCHOR, sampleRate, at: performance.now(), rate: this.tempo }
+    this.applyAfterLoad()
+    this.onLoadSettled?.(null)
+  }
+
+  private applyAfterLoad(): void {
+    const afterLoad = this.afterLoad
+    this.afterLoad = null
+    if (!afterLoad) return
+    if (this.loop) this.send(this.loopCommand(this.loop))
+    if (afterLoad.seek && this.position > 0) this.send({ op: 'seek', deck: this.index, ms: toMs(this.position) })
+    this.holdAt(this.position)
+    if (this.scrubbing) this.send({ op: 'scrubBegin', deck: this.index })
     if (this.playing) this.play()
   }
 
   private tick(tick: Tick): void {
-    if (tick.seq < this.sent) return
+    const predatesLastCommand = tick.seq < this.lastCommandSeq
+    if (predatesLastCommand) return
     const deck: DeckTick | undefined = tick.decks[this.index]
     if (!deck || !this.ready || !deck.loaded || deck.loadId !== this.request) return
     const now = performance.now()
-    if (this.playing !== deck.playing) this.playing = deck.playing
-    if (this.tempo !== deck.tempo) this.tempo = deck.tempo
-    if (this.masterTempo !== deck.masterTempo) this.masterTempo = deck.masterTempo
-    if (deck.loopOutFrames > deck.loopInFrames && deck.sampleRate > 0) {
-      const start = deck.loopInFrames / deck.sampleRate
-      const end = deck.loopOutFrames / deck.sampleRate
-      const loop = this.loop
-      const moved = !loop || Math.abs(loop.start - start) > 1e-4 || Math.abs(loop.end - end) > 1e-4
-      if (moved || loop.active !== deck.looping) this.loop = { start, end, active: deck.looping }
-    } else if (this.loop) this.loop = null
+    this.playing = deck.playing
+    this.tempo = deck.tempo
+    this.masterTempo = deck.masterTempo
+    this.followEngineLoop(deck)
     this.anchor = {
       frames: deck.positionFrames,
       at: now,
@@ -318,13 +315,27 @@ export class Deck {
       loop: this.activeLoop()
     }
     if (this.scrubbing) return
-    // A hidden window gets no animation frames, so ticks keep the position true there.
+    const seekedOrLoaded = deck.generation !== this.generation
     const framesStalled = now - this.lastFrame > FRAME_STALL_MS
-    if (!this.anchor.playing || deck.generation !== this.generation || framesStalled) {
+    if (!this.anchor.playing || seekedOrLoaded || framesStalled) {
       this.generation = deck.generation
       this.position = extrapolate(this.anchor, now)
     }
     if (this.anchor.playing) this.startFrames()
+  }
+
+  private followEngineLoop(deck: DeckTick): void {
+    const engineHasLoop = deck.loopOutFrames > deck.loopInFrames && deck.sampleRate > 0
+    if (!engineHasLoop) {
+      this.loop = null
+      return
+    }
+    const start = deck.loopInFrames / deck.sampleRate
+    const end = deck.loopOutFrames / deck.sampleRate
+    const loop = this.loop
+    const moved =
+      !loop || Math.abs(loop.start - start) > LOOP_EDGE_TOLERANCE || Math.abs(loop.end - end) > LOOP_EDGE_TOLERANCE
+    if (moved || loop.active !== deck.looping) this.loop = { start, end, active: deck.looping }
   }
 
   private startFrames(): void {
@@ -341,11 +352,12 @@ export class Deck {
   private frame = (now: number): void => {
     this.raf = 0
     if (this.scrubbing || !this.anchor.playing) return
-    const since = now - this.lastFrame
+    const sinceLastFrame = now - this.lastFrame
     this.lastFrame = now
     const target = extrapolate(this.anchor, now)
-    const advance = (Math.max(0, since) / 1000) * this.anchor.rate
-    const next = follow(this.position, target, since, advance, this.anchor.loop)
+    const next = this.prefs.snapPlayhead
+      ? target
+      : easeTowards(this.position, target, sinceLastFrame, this.anchor.rate, this.anchor.loop)
     this.position = this.duration > 0 ? Math.min(next, this.duration) : next
     this.raf = requestAnimationFrame(this.frame)
   }

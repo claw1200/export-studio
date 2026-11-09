@@ -68,14 +68,14 @@ export class Player {
     readonly slot: number,
     private readonly prefs: DeckPrefs
   ) {
-    this.deck = new Deck(slot)
+    this.deck = new Deck(slot, prefs)
     this.tempo = new TempoControl(this.deck)
     this.display = new WaveformDisplay(
       prefs.waveform,
       () => this.track?.id ?? null,
       () => this.track?.collected === false
     )
-    this.deck.onSettled = () => {
+    this.deck.onLoadSettled = () => {
       const id = this.track?.id
       const missing = this.fileMissing
       if (id && missing !== null) for (const listener of this.fileListeners) listener(id, missing)
@@ -270,14 +270,16 @@ export class Player {
     this.deck.stopAt(this.insideFile(seconds))
   }
 
-  /** This deck's own level under the master, linear, 0 to 1: a channel fader or crossfader. */
-  setGain(gain: number): void {
-    this.deck.setGain(gain)
+  setGain(linearGain: number): void {
+    this.deck.setGain(linearGain)
   }
 
-  /** This deck's isolator low band, linear, 0 to 1. Null plays it without the isolator. */
-  setLow(gain: number | null): void {
-    this.deck.setLow(gain)
+  setIsolatorLow(linearGain: number): void {
+    this.deck.setIsolatorLow(linearGain)
+  }
+
+  bypassIsolator(): void {
+    this.deck.bypassIsolator()
   }
 
   /** This deck is about to be heard, so a preview must not start it again afterwards. */
@@ -375,7 +377,7 @@ export class Player {
     this.takeSpeakers()
     this.holding = { key, at, latched: false }
     if (this.position !== at) this.seek(at)
-    this.deck.play({ synced: false })
+    this.deck.play({ onMasterBeat: false })
   }
 
   private endHold(key: HoldKey): void {
