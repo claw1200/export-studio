@@ -34,8 +34,8 @@ const LOOSE_WAVE_RATE = 150
 const FILE_MISSING = 'Audio file not found'
 const STREAMING = 'Streaming tracks can’t be played here'
 
-/** Which button a hold belongs to: CUE, or a hot cue's slot. */
-type HoldKey = 'cue' | number
+type HotCueKind = number
+type HoldButton = 'cue' | HotCueKind
 
 /** The deck as the interface sees it: CDJ transport, cue and loop behaviour on top of the engine deck. */
 export class Player {
@@ -56,7 +56,7 @@ export class Player {
   /** Also the loop in point: LOOP OUT closes a loop from here. */
   cuePoint = $state<Seconds>(0)
   previewAt = $state<Seconds | null>(null)
-  private holding = $state.raw<(Hold & { key: HoldKey }) | null>(null)
+  private holding = $state.raw<(Hold & { key: HoldButton }) | null>(null)
   private previewOwner: string | null = null
   private fileListeners = new Set<(id: string, missing: boolean) => void>()
 
@@ -171,8 +171,7 @@ export class Player {
     return this.grid.grid
   }
 
-  /** At the file's own speed, before the tempo. */
-  get bpmUnderPlayhead(): number {
+  get trackBpmAtPlayhead(): number {
     return bpmAt(this.position, this.displayGrid, this.track?.bpm ?? 0)
   }
 
@@ -252,7 +251,6 @@ export class Player {
     this.pause()
   }
 
-  /** In the same instant, so decks paused together stay in step. */
   static resumeAfterPreview(players: readonly Player[]): void {
     const paused = players.filter((player) => player.pausedForPreview && player.track)
     for (const player of players) player.pausedForPreview = false
@@ -285,7 +283,6 @@ export class Player {
     else this.play()
   }
 
-  /** As on a CDJ, play during a cue hold keeps it playing, and only then syncs it. */
   private latchHold(): void {
     if (!this.holding) return
     this.holding = { ...this.holding, latched: true }
@@ -366,14 +363,14 @@ export class Player {
     this.endHold('cue')
   }
 
-  private startHold(key: HoldKey, at: Seconds): void {
+  private startHold(key: HoldButton, at: Seconds): void {
     this.takeSpeakers()
     this.holding = { key, at, latched: false }
     if (this.position !== at) this.seek(at)
     this.deck.play({ onMasterBeat: false })
   }
 
-  private endHold(key: HoldKey): void {
+  private endHold(key: HoldButton): void {
     const hold = this.holding
     if (hold?.key !== key) return
     this.holding = null
@@ -381,11 +378,11 @@ export class Player {
     if (back != null) this.deck.stopAt(back)
   }
 
-  private hotCue(kind: number): Cue | undefined {
+  private hotCue(kind: HotCueKind): Cue | undefined {
     return this.displayCues.find((c) => c.kind === 'hot' && c.slot === kind)
   }
 
-  hotCueDown(kind: number): void {
+  hotCueDown(kind: HotCueKind): void {
     const cue = this.hotCue(kind)
     if (!cue || !this.canCue) return
     const action = pressHotCue(this.state, cueRange(cue))
@@ -401,12 +398,12 @@ export class Player {
     this.startHold(kind, action.at)
   }
 
-  hotCueDownOrStore(kind: number): void {
+  hotCueDownOrStore(kind: HotCueKind): void {
     if (this.hotCue(kind)) this.hotCueDown(kind)
     else void this.setHotCue(kind)
   }
 
-  hotCueUp(kind: number): void {
+  hotCueUp(kind: HotCueKind): void {
     this.endHold(kind)
   }
 
@@ -454,7 +451,6 @@ export class Player {
     if (loop) this.deck.setLooping(!loop.active)
   }
 
-  /** Pressing the same loop length again leaves the loop. */
   beatLoop(beats: number): void {
     if (!this.playable) return
     const range = beatLoop(this.position, beats, this.displayGrid, this.track.bpm ?? 0, this.quantise)
@@ -469,7 +465,8 @@ export class Player {
     }
     const length = end - start
     const loopLength = loop.end - loop.start
-    if (Math.abs(loopLength - length) < SAME_LOOP_LENGTH_TOLERANCE) this.deck.setLooping(false)
+    const pressedSameLengthAgain = Math.abs(loopLength - length) < SAME_LOOP_LENGTH_TOLERANCE
+    if (pressedSameLengthAgain) this.deck.setLooping(false)
     else this.resizeLoop(length / loopLength)
   }
 
@@ -520,7 +517,7 @@ export class Player {
   }
 
   private cueHitTolerance(): Seconds {
-    const bpm = this.bpmUnderPlayhead
+    const bpm = this.trackBpmAtPlayhead
     if (!this.quantise || !(bpm > 0)) return CUE_HIT_TOLERANCE
     const halfBeat = 60 / bpm / 2
     return halfBeat

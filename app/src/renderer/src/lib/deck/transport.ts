@@ -6,8 +6,7 @@ import { firstIndexAtOrAfter, nearestBeat } from '../beat'
 import type { Beatgrid, Cue } from '../types'
 import type { LoopRange, Seconds } from './clock'
 
-/** How close to the cue point still counts as being on it, in seconds. */
-export const CUE_TOLERANCE = 0.001
+export const CUE_TOLERANCE: Seconds = 0.001
 
 export interface TransportState {
   position: number
@@ -34,7 +33,6 @@ export function pressCue(state: TransportState, here: number): CueAction {
   return { kind: 'hold', at: state.cuePoint }
 }
 
-/** `end` is set for a loop. */
 export interface CueRange {
   start: Seconds
   end: Seconds | null
@@ -49,10 +47,7 @@ export function loopOf({ start, end }: CueRange): LoopRange | null {
 }
 
 export type HotCueAction =
-  /** Playing: jump and keep playing (entering the loop, for a loop cue). */
-  | { kind: 'jump'; at: number; loop: LoopRange | null }
-  /** Paused: play from the cue while held, then return to it. It becomes the cue point. */
-  | { kind: 'hold'; at: number; loop: LoopRange | null }
+  { kind: 'jump'; at: number; loop: LoopRange | null } | { kind: 'hold'; at: number; loop: LoopRange | null }
 
 export function pressHotCue(state: TransportState, cue: CueRange): HotCueAction {
   const loop = loopOf(cue)

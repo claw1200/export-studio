@@ -13,7 +13,6 @@
   import Transport from '../deck/Transport.svelte'
   import { segment, segmentButton } from '../deck/segment'
 
-  /** One side of the mixer: the edit deck's parts, played but never edited, plus sync and master. */
   let {
     player,
     mixer,
@@ -26,7 +25,6 @@
     player: Player
     mixer: Mixer
     label: string
-    /** Double-clicked rows load here. */
     focused: boolean
     onfocus: () => void
     onedit: (track: Track) => void

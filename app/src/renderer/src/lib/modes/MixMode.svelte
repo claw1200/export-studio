@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getApp } from '$lib/context'
-  import { playKeys } from '$lib/deck/keys'
+  import { playOnlyKeys } from '$lib/deck/keys'
   import { chordLabel } from '$lib/keymap'
   import { Mixer } from '$lib/mixer.svelte'
   import type { Player } from '$lib/player.svelte'
@@ -12,11 +12,7 @@
   import LibraryBrowser from '$lib/components/LibraryBrowser.svelte'
   import type { ModeProps } from './types'
 
-  /**
-   * Two decks either side of a crossfader, to hear how a transition will sound. Put each deck's
-   * playhead where the mix should start, press play to start both at once, and fade across.
-   * Stop puts both back, ready to try it again.
-   */
+  /** Two decks either side of a crossfader, to hear how a transition will sound. */
   let { players, actions, inspectorOpen }: ModeProps = $props()
 
   const { decks, keybinds } = getApp()
@@ -30,26 +26,16 @@
       (playShortcut ? ` (${chordLabel(playShortcut)})` : '')
   )
 
-  // Every deck shortcut works here as in edit mode, bar track prep: on deck A as it is, on deck
-  // B with Shift added.
-  const mixKeys = (player: Player): ReturnType<typeof playKeys> => playKeys(player, () => mixer.toggleDeck(player))
+  const mixKeys = (player: Player): ReturnType<typeof playOnlyKeys> =>
+    playOnlyKeys(player, () => mixer.toggleDeck(player))
   $effect(() => keybinds.register(mixKeys(a)))
   $effect(() => keybinds.register(mixKeys(b), 'shift'))
   $effect(() => keybinds.register({ 'mix.playBoth': () => mixer.toggle() }))
-  $effect(() => mixer.applyPrefs())
-  // The browser highlights keys that mix with the master deck while mix mode is shown.
   $effect(() => {
     decks.mixMaster = mixer.master
     return () => {
       if (decks.mixMaster === mixer.master) decks.mixMaster = null
     }
-  })
-  $effect(() => mixer.shareBeatgrids())
-  // The engine outlives this view: leaving it must not leave the decks synced.
-  $effect(() => () => mixer.setSynced(false))
-  $effect(() => mixer.makeSoleAudibleDeckMaster())
-  $effect(() => {
-    if (mixer.synced && !mixer.canSync) mixer.setSynced(false)
   })
 
   const masterLabel = $derived(mixer.label(mixer.master))
@@ -62,7 +48,6 @@
         : `Sync deck ${followerLabel} to deck ${masterLabel}: match its tempo and line up the beats`
   )
 
-  /** Loads onto the focused deck, then moves the focus to the other deck if it is still empty. */
   function load(track: Track): void {
     const target = decks.focused === b ? b : a
     void target.load(track)

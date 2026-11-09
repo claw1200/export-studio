@@ -31,11 +31,6 @@ function storedCrossfader(): number {
   return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : FADER_CENTRE
 }
 
-/**
- * The engine, not the mixer, keeps a synced follower on the master's tempo and lands a deck
- * started while the other plays on the other's beat: only it knows where both playheads are at
- * the same instant.
- */
 export class Mixer {
   crossfader = $state(storedCrossfader())
   master: Player
@@ -56,6 +51,14 @@ export class Mixer {
     this.master = $state.raw(a)
     this.applyFader()
     this.shareSync()
+    $effect(() => this.applyPrefs())
+    $effect(() => this.shareBeatgrids())
+    $effect(() => this.makeSoleAudibleDeckMaster())
+    $effect(() => {
+      if (this.synced && !this.canSync) this.setSynced(false)
+    })
+    // The engine outlives the mixer: leaving mix mode must not leave the decks synced.
+    $effect(() => () => this.setSynced(false))
   }
 
   get follower(): Player {
@@ -67,7 +70,7 @@ export class Mixer {
   }
 
   get canSync(): boolean {
-    return this.players.every((player) => player.track && player.bpmUnderPlayhead > 0)
+    return this.players.every((player) => player.track && player.trackBpmAtPlayhead > 0)
   }
 
   following(player: Player): boolean {
@@ -87,11 +90,7 @@ export class Mixer {
     this.shareSync()
   }
 
-  /**
-   * While both or neither deck is heard the master stays as it is, so a deck picked by hand keeps
-   * it. Run it from an effect.
-   */
-  makeSoleAudibleDeckMaster(): void {
+  private makeSoleAudibleDeckMaster(): void {
     if (!this.prefs.autoMaster) return
     const playing = this.players.map((player) => player.playing) as [boolean, boolean]
     const sole = soleAudible(playing, crossfade(this.crossfader, this.prefs.curve))
@@ -107,8 +106,7 @@ export class Mixer {
     this.shareSync()
   }
 
-  /** Run it from an effect, so the engine hears of every change to the grids. */
-  shareBeatgrids(): void {
+  private shareBeatgrids(): void {
     for (const player of this.players) {
       const { timesMs, bpms } = beatsForSync(player)
       player.deck.setBeatgrid(timesMs, bpms)
@@ -152,21 +150,17 @@ export class Mixer {
     else this.play()
   }
 
-  /** A deck started from silence begins a new take, so stop no longer returns to the last play-both. */
   toggleDeck(player: Player): void {
     const startingFromSilence = !this.playing && !player.cueHeld
     if (startingFromSilence) this.playBothStartedFrom = null
     player.toggle()
   }
 
-  /**
-   * The swap carries on from where it stands, as though the fade began here, so the bass does not
-   * jump. Run it from an effect.
-   */
-  applyPrefs(): void {
+  private applyPrefs(): void {
     void this.prefs.curve
     void this.prefs.swapRange
     untrack(() => {
+      // Rebased, not restarted, so the bass does not jump.
       this.swap = rebaseBassSwap(this.swap.share, this.swap.position)
       this.applyFader()
     })

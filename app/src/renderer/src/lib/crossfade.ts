@@ -25,7 +25,6 @@ export function crossfade(position: number, curve = DEFAULT_CURVE): [a: number, 
   return [fade(x), fade(1 - x)]
 }
 
-/** A dragged position, clamped and pulled onto the centre when it is close. */
 export function faderPosition(position: number): number {
   const x = Math.min(1, Math.max(0, position))
   return Math.abs(x - FADER_CENTRE) < CENTRE_SNAP ? FADER_CENTRE : x

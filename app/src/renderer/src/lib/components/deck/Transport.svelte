@@ -13,7 +13,6 @@
   }: {
     /** Lays the buttons out, as `flex-col` to stack cue under play. */
     class?: ClassValue
-    /** Replaces the player's own play/pause, as the mixer does to keep a follower in sync. */
     onplay?: () => void
     playTitle?: string
   } = $props()

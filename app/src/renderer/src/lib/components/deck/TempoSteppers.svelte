@@ -10,7 +10,7 @@
   const player = getPlayer()
   const tempo = player.tempo
   const track = $derived(player.track)
-  const bpm = $derived(player.bpmUnderPlayhead)
+  const bpm = $derived(player.trackBpmAtPlayhead)
   const key = $derived(heardKey(track?.key ?? '', tempo))
   const signed = (n: number): string => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '')
 

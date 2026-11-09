@@ -5,12 +5,7 @@ import type { Player } from '../player.svelte'
 
 type DeckHandlers = Partial<Record<ActionId, ActionHandler>>
 
-/**
- * What a deck does while it is being played: transport, cue, loops, seeking, quantise and calling
- * cues the track already has. Nothing here changes the track's stored cues or beatgrid, so it is
- * all mix mode allows. `playPause` replaces the deck's own play/pause.
- */
-export function playKeys(player: Player, playPause: () => void = () => player.toggle()): DeckHandlers {
+export function playOnlyKeys(player: Player, playPause: () => void = () => player.toggle()): DeckHandlers {
   return {
     'deck.playPause': playPause,
     'deck.cue': { down: () => player.cueDown(), up: () => player.cueUp() },
@@ -31,10 +26,9 @@ export function playKeys(player: Player, playPause: () => void = () => player.to
   }
 }
 
-/** Everything a deck does in edit mode: playing it, and setting and deleting its cues. */
 export function deckKeys(player: Player): DeckHandlers {
   return {
-    ...playKeys(player),
+    ...playOnlyKeys(player),
     ...hotCueKeys(player, (kind) => player.hotCueDownOrStore(kind)),
     'cue.addMemory': () => void player.addMemoryCue(),
     'cue.deleteAtPlayhead': () => void player.deleteCueAtPlayhead()

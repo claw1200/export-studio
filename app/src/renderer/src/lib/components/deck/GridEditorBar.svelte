@@ -25,7 +25,7 @@
   const section = $derived(grid.map?.flags[grid.sectionAtPlayhead])
   const sectionVaries = $derived(!!section && varies(section))
   const sectionRamps = $derived(!!section && grid.sectionAtPlayhead > 0 && section.rampBeats > 0)
-  const sectionBpm = $derived(section && !sectionVaries ? section.bpm : player.bpmUnderPlayhead)
+  const sectionBpm = $derived(section && !sectionVaries ? section.bpm : player.trackBpmAtPlayhead)
 </script>
 
 {#snippet tool(

@@ -2,7 +2,6 @@
   import { FADER_CENTRE } from '$lib/crossfade'
   import type { Mixer } from '$lib/mixer.svelte'
 
-  /** A horizontal fader from A to B. Drag the cap or the track, or scroll over it; double-click centres it. */
   let { mixer }: { mixer: Mixer } = $props()
 
   const KEY_STEP = 0.05
@@ -50,25 +49,26 @@
     setAndSave(to ?? mixer.crossfader + step)
   }
 
-  /** Fader travel per pixel of scroll: a typical mouse-wheel notch (~100px) moves it a tenth. */
-  const WHEEL_PER_PX = 0.001
+  const WHEEL_NOTCH_PX = 100
+  const TRAVEL_PER_WHEEL_NOTCH = 0.1
+  const TRAVEL_PER_WHEEL_PX = TRAVEL_PER_WHEEL_NOTCH / WHEEL_NOTCH_PX
   const WHEEL_SAVE_DELAY_MS = 300
   let wheelSave: ReturnType<typeof setTimeout> | undefined
-  /**
-   * Where scrolling has taken the fader before the centre snap. Small trackpad deltas would
-   * otherwise each land inside the snap and be pulled back, so the fader could never leave centre.
-   */
-  let wheelRaw: number | null = null
+  // Small trackpad deltas would each land inside the centre snap and be pulled back to it.
+  let wheelPositionBeforeSnap: number | null = null
 
   function onwheel(e: WheelEvent): void {
     e.preventDefault()
     const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
     const px = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? delta * 16 : delta
-    wheelRaw = Math.min(1, Math.max(0, (wheelRaw ?? mixer.crossfader) + px * WHEEL_PER_PX))
-    mixer.setCrossfader(wheelRaw)
+    wheelPositionBeforeSnap = Math.min(
+      1,
+      Math.max(0, (wheelPositionBeforeSnap ?? mixer.crossfader) + px * TRAVEL_PER_WHEEL_PX)
+    )
+    mixer.setCrossfader(wheelPositionBeforeSnap)
     clearTimeout(wheelSave)
     wheelSave = setTimeout(() => {
-      wheelRaw = null
+      wheelPositionBeforeSnap = null
       mixer.saveCrossfader()
     }, WHEEL_SAVE_DELAY_MS)
   }

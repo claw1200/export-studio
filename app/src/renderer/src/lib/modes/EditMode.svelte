@@ -5,7 +5,6 @@
   import type { Track } from '$lib/types'
   import type { ModeProps } from './types'
 
-  /** One deck over the library: selecting a row previews it there, opening one plays it. */
   let { players, actions, inspectorOpen }: ModeProps = $props()
 
   const { library } = getApp()

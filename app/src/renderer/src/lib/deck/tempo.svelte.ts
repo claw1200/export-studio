@@ -58,7 +58,6 @@ export class TempoControl {
     storeFlag('masterTempo', on)
   }
 
-  /** Plays at `rate` times the file's speed, outside the fader's range: what sync and BPM steps set. */
   setRate(rate: number): void {
     if (this.lockedToMaster || !(rate > 0)) return
     this.deck.setTempo(Math.max(MIN_TEMPO, Math.min(MAX_TEMPO, rate)))
