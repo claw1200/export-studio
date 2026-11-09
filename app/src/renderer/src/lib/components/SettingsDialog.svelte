@@ -395,7 +395,7 @@
           </div>
           {@render toggle(
             'Snap playhead',
-            'Draw the playhead exactly where the audio engine puts it each frame, instead of easing small corrections. Loops always jump back, but the playhead may stutter.',
+            'Draw the playhead exactly where the audio engine reports it, instead of easing small corrections. Can look less smooth.',
             prefs.snapPlayhead,
             () => prefs.setSnapPlayhead(!prefs.snapPlayhead)
           )}

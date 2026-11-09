@@ -240,12 +240,12 @@ export class Mixer {
     if (this.swapBass) {
       this.swap = bassSwap(this.swap, this.crossfader, this.prefs.swapRange)
       this.lows = [1 - this.swap.share, this.swap.share]
-      this.a.setLow(bassLevel(this.lows[0]))
-      this.b.setLow(bassLevel(this.lows[1]))
+      this.a.setIsolatorLow(bassLevel(this.lows[0]))
+      this.b.setIsolatorLow(bassLevel(this.lows[1]))
     } else {
       this.lows = [1, 1]
-      this.a.setLow(null)
-      this.b.setLow(null)
+      this.a.bypassIsolator()
+      this.b.bypassIsolator()
     }
   }
 }
