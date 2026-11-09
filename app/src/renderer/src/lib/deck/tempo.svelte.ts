@@ -3,7 +3,6 @@ import { getSetting, setSetting } from '../settings'
 import type { Deck } from './deck.svelte'
 import { storedFlag, storeFlag } from './stored'
 
-const FILE_SPEED = 1
 const TEMPO_RANGES_PERCENT = [6, 10, 16, 50] as const
 type TempoRange = (typeof TEMPO_RANGES_PERCENT)[number]
 const DEFAULT_TEMPO_RANGE: TempoRange = 10
@@ -27,7 +26,7 @@ export class TempoControl {
   }
 
   get percent(): number {
-    return (this.deck.tempo - FILE_SPEED) * 100
+    return (this.deck.tempo - 1) * 100
   }
 
   get masterTempo(): boolean {
@@ -38,12 +37,12 @@ export class TempoControl {
     if (this.lockedToMaster) return
     const inRange = Math.max(-this.range, Math.min(this.range, percent))
     const stepped = Math.round(inRange / TEMPO_STEP_PERCENT) * TEMPO_STEP_PERCENT
-    this.deck.setTempo(FILE_SPEED + stepped / 100)
+    this.deck.setTempo(1 + stepped / 100)
   }
 
   reset(): void {
     if (this.lockedToMaster) return
-    this.deck.setTempo(FILE_SPEED)
+    this.deck.setTempo(1)
   }
 
   setMasterTempo(on: boolean): void {
