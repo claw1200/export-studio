@@ -1,5 +1,6 @@
 import { api } from './api'
 import { bpmAt, nearestBeat } from './beat'
+import type { Seconds } from './deck/clock'
 import { CueEditor } from './deck/cues.svelte'
 import { Deck, type DeckLoop } from './deck/deck.svelte'
 import { GridEditor } from './deck/grid.svelte'
@@ -7,44 +8,41 @@ import { TrackSession } from './deck/session.svelte'
 import { WaveformDisplay } from './deck/display.svelte'
 import type { CuePlacement, DeckPrefs } from './deck/prefs.svelte'
 import { TempoControl } from './deck/tempo.svelte'
+import { Listeners } from './listeners'
 import {
   beatLoop,
   CUE_TOLERANCE,
+  cueRange,
   cueToStore,
   type Hold,
+  loopOf,
   pressCue,
   pressHotCue,
   releaseHold,
   resizeLoop,
+  SHORTEST_LOOP,
   type TransportState
 } from './deck/transport'
 import type { Beatgrid, Cue, Track, TrackDetail } from './types'
 import type { Waveform } from './waveform/data'
 
-const CUE_HIT_TOLERANCE = 0.05
+const CUE_HIT_TOLERANCE: Seconds = 0.05
+const END_MARGIN: Seconds = 0.001
+const SAME_LOOP_LENGTH_TOLERANCE: Seconds = 0.002
 /** Rekordbox's detail rate, so zoom covers the same time for a file that has no analysis. */
 const LOOSE_WAVE_RATE = 150
 /** Matches the error the audio bridge sends when a track's file can't be resolved. */
 const FILE_MISSING = 'Audio file not found'
 const STREAMING = 'Streaming tracks can’t be played here'
 
-export type { CuePlacement } from './deck/prefs.svelte'
+type HotCueKind = number
+type HoldButton = 'cue' | HotCueKind
 
-/** Which button a hold belongs to: CUE, or a hot cue's slot. */
-type HoldKey = 'cue' | number
-
-/**
- * The deck as the interface sees it: CDJ transport, cue and loop behaviour on top of the engine
- * deck. The loaded track's detail, cue and beatgrid editing, tempo and waveform display are its
- * parts, used directly. Any number can exist, each on its own engine deck; preferences that hold
- * for every deck (quantise, cue placement, waveform drawing) come from the shared `prefs`.
- */
+/** The deck as the interface sees it: CDJ transport, cue and loop behaviour on top of the engine deck. */
 export class Player {
-  readonly session = new TrackSession()
-  /** Stops the browser audition as this deck takes the speakers. */
-  onDeckPlay: (() => void) | null = null
-  /** A preview paused playback and should start it again when the preview ends. */
-  private returnAfterPreview = false
+  private readonly session = new TrackSession()
+  onTakeSpeakers: (() => void) | null = null
+  private pausedForPreview = false
   readonly deck: Deck
   readonly grid = new GridEditor(
     this.session,
@@ -57,18 +55,17 @@ export class Player {
   readonly display: WaveformDisplay
 
   /** Also the loop in point: LOOP OUT closes a loop from here. */
-  cuePoint = $state(0)
-  previewAt = $state<number | null>(null)
-  private holding = $state.raw<(Hold & { key: HoldKey }) | null>(null)
+  cuePoint = $state<Seconds>(0)
+  previewAt = $state<Seconds | null>(null)
+  private holding = $state.raw<(Hold & { key: HoldButton }) | null>(null)
   private previewOwner: string | null = null
-  private fileListeners = new Set<(id: string, missing: boolean) => void>()
+  private fileChecked = new Listeners<[id: string, missing: boolean]>()
 
-  /** `slot` is the engine deck this player plays on. */
   constructor(
-    readonly slot: number,
+    engineDeck: number,
     private readonly prefs: DeckPrefs
   ) {
-    this.deck = new Deck(slot, prefs)
+    this.deck = new Deck(engineDeck, prefs)
     this.tempo = new TempoControl(this.deck)
     this.display = new WaveformDisplay(
       prefs.waveform,
@@ -78,7 +75,7 @@ export class Player {
     this.deck.onLoadSettled = () => {
       const id = this.track?.id
       const missing = this.fileMissing
-      if (id && missing !== null) for (const listener of this.fileListeners) listener(id, missing)
+      if (id && missing !== null) this.fileChecked.notify(id, missing)
     }
     api.onEvent((event) => {
       if (event !== 'library.locked') return
@@ -132,11 +129,11 @@ export class Player {
     return this.deck.playing
   }
 
-  get position(): number {
+  get position(): Seconds {
     return this.deck.position
   }
 
-  get duration(): number {
+  get duration(): Seconds {
     return this.deck.duration
   }
 
@@ -144,7 +141,7 @@ export class Player {
     return this.deck.loop
   }
 
-  get fileMissing(): boolean | null {
+  private get fileMissing(): boolean | null {
     const track = this.track
     if (!track) return null
     if (track.streaming) return false
@@ -153,8 +150,7 @@ export class Player {
   }
 
   onFileChecked(listener: (id: string, missing: boolean) => void): () => void {
-    this.fileListeners.add(listener)
-    return () => this.fileListeners.delete(listener)
+    return this.fileChecked.add(listener)
   }
 
   get playable(): boolean {
@@ -175,8 +171,7 @@ export class Player {
     return this.grid.grid
   }
 
-  /** At the file's own speed, before the tempo. */
-  get bpmUnderPlayhead(): number {
+  get trackBpmAtPlayhead(): number {
     return bpmAt(this.position, this.displayGrid, this.track?.bpm ?? 0)
   }
 
@@ -188,6 +183,10 @@ export class Player {
     return Math.abs(this.position - this.cuePoint) < CUE_TOLERANCE
   }
 
+  private get canCue(): boolean {
+    return this.playable && !this.holding
+  }
+
   private get state(): TransportState {
     return {
       position: this.position,
@@ -197,20 +196,24 @@ export class Player {
     }
   }
 
-  async load(track: Track, autoplay = false): Promise<void> {
-    if (this.track?.id === track.id && !this.fileMissing) {
-      if (autoplay) this.play()
-      return
-    }
-    await this.open(track, autoplay)
+  async load(track: Track): Promise<void> {
+    if (!this.alreadyLoaded(track)) await this.open(track)
   }
 
-  /** Load the deck's track again, e.g. after its audio file was relocated. */
+  async loadAndPlay(track: Track): Promise<void> {
+    if (this.alreadyLoaded(track)) this.play()
+    else await this.open(track, { play: true })
+  }
+
   async reopen(track: Track): Promise<void> {
-    if (this.track?.id === track.id) await this.open(track, false)
+    if (this.track?.id === track.id) await this.open(track)
   }
 
-  private clearHeld(): void {
+  private alreadyLoaded(track: Track): boolean {
+    return this.track?.id === track.id && !this.fileMissing
+  }
+
+  private resetForNewTrack(): void {
     this.cuePoint = 0
     this.holding = null
     this.previewOwner = null
@@ -220,57 +223,47 @@ export class Player {
 
   eject(): void {
     if (!this.track) return
-    this.clearHeld()
+    this.resetForNewTrack()
     this.deck.unload()
     this.session.close()
     this.display.reload()
   }
 
-  private async open(track: Track, autoplay: boolean): Promise<void> {
-    this.clearHeld()
-    if (autoplay) this.takeSpeakers()
+  private async open(track: Track, { play = false } = {}): Promise<void> {
+    this.resetForNewTrack()
+    if (play) this.takeSpeakers()
     this.deck.load(track.id, track.duration)
-    if (autoplay) this.deck.play()
+    if (play) this.deck.play()
     const opened = this.session.open(track)
     this.display.reload()
     await opened
   }
 
-  play(): void {
+  private play(): void {
     if (!this.track) return
     this.takeSpeakers()
     this.deck.play()
   }
 
-  /** Pause while a browser preview has the speakers. A deck that is already paused stays paused. */
   yieldToPreview(): void {
-    if (!this.playing || this.returnAfterPreview) return
-    this.returnAfterPreview = true
+    if (!this.playing || this.pausedForPreview) return
+    this.pausedForPreview = true
     this.pause()
   }
 
-  /** Starts again every player a preview paused, in the same instant so decks stay in step. */
   static resumeAfterPreview(players: readonly Player[]): void {
-    const back = players.filter((player) => player.returnAfterPreview && player.track)
-    for (const player of players) player.returnAfterPreview = false
-    Deck.playTogether(back.map((player) => player.deck))
+    const paused = players.filter((player) => player.pausedForPreview && player.track)
+    for (const player of players) player.pausedForPreview = false
+    Deck.playTogether(paused.map((player) => player.deck))
   }
 
-  /** Starts every loaded player in the same instant, keeping the gap between their playheads. */
   static playTogether(players: readonly Player[]): void {
-    const loaded = players.filter((player) => player.playable)
-    for (const player of loaded) player.takeSpeakers()
-    Deck.playTogether(loaded.map((player) => player.deck))
+    const playable = players.filter((player) => player.playable)
+    for (const player of playable) player.takeSpeakers()
+    Deck.playTogether(playable.map((player) => player.deck))
   }
 
-  /** Moves the playhead by `seconds`, keeping time while playing. See `Deck.nudge`. */
-  nudge(seconds: number): void {
-    if (!this.track) return
-    this.deck.nudge(seconds)
-  }
-
-  /** Pauses on `seconds`, in one step so the old position is never heard after the stop. */
-  stopAt(seconds: number): void {
+  stopAt(seconds: Seconds): void {
     if (!this.track) return
     this.deck.stopAt(this.insideFile(seconds))
   }
@@ -279,39 +272,28 @@ export class Player {
     this.stopAt(this.cuePoint)
   }
 
-  setGain(linearGain: number): void {
-    this.deck.setGain(linearGain)
-  }
-
-  setIsolatorLow(linearGain: number): void {
-    this.deck.setIsolatorLow(linearGain)
-  }
-
-  bypassIsolator(): void {
-    this.deck.bypassIsolator()
-  }
-
-  /** This deck is about to be heard, so a preview must not start it again afterwards. */
   private takeSpeakers(): void {
-    this.returnAfterPreview = false
-    this.onDeckPlay?.()
+    this.pausedForPreview = false
+    this.onTakeSpeakers?.()
   }
 
   pause(): void {
     this.deck.pause()
   }
 
-  /** Play while a cue is held makes the hold stick, as on a CDJ, and only then syncs it. */
   toggle(): void {
-    if (this.holding) {
-      this.holding = { ...this.holding, latched: true }
-      this.deck.align()
-    } else if (this.playing) this.pause()
+    if (this.holding) this.latchHold()
+    else if (this.playing) this.pause()
     else this.play()
   }
 
-  /** Moves the playhead, leaving an active loop it lands outside of. */
-  seek(seconds: number): void {
+  private latchHold(): void {
+    if (!this.holding) return
+    this.holding = { ...this.holding, latched: true }
+    this.deck.align()
+  }
+
+  seek(seconds: Seconds): void {
     const at = this.insideFile(seconds)
     this.leaveLoopOutside(at)
     if (this.deck.scrubbing) {
@@ -320,10 +302,9 @@ export class Player {
     } else this.deck.seek(at)
   }
 
-  /** Drags the playhead. `at` is the pointer event's timestamp, which the engine follows for speed. */
-  scrub(seconds: number, at?: number): void {
+  scrub(seconds: Seconds, inputTimestamp?: number): void {
     this.deck.scrubBegin()
-    this.deck.scrubTo(this.insideFile(seconds), at)
+    this.deck.scrubTo(this.insideFile(seconds), inputTimestamp)
   }
 
   endScrub(): void {
@@ -332,12 +313,12 @@ export class Player {
     this.deck.scrubEnd()
   }
 
-  private leaveLoopOutside(seconds: number): void {
-    const loop = this.deck.loop
+  private leaveLoopOutside(seconds: Seconds): void {
+    const loop = this.loop
     if (loop?.active && (seconds < loop.start || seconds >= loop.end)) this.deck.setLooping(false)
   }
 
-  setPreview(owner: string, seconds: number): void {
+  setPreview(owner: string, seconds: Seconds): void {
     this.previewOwner = owner
     this.previewAt = seconds
   }
@@ -348,31 +329,35 @@ export class Player {
     this.previewAt = null
   }
 
-  private insideFile(seconds: number): number {
+  private insideFile(seconds: Seconds): Seconds {
     const end = this.duration
-    const max = Number.isFinite(end) && end > 0.05 ? end - 0.001 : Math.max(0, end)
-    return Math.max(0, Math.min(seconds, max || seconds))
+    const last = Number.isFinite(end) && end > 0 ? Math.max(0, end - END_MARGIN) : Infinity
+    return Math.max(0, Math.min(seconds, last))
   }
 
-  private here(): number {
+  private notPastEnd(seconds: Seconds): Seconds {
+    return Math.min(seconds, this.duration || seconds)
+  }
+
+  private quantisedPlayhead(): Seconds {
     return this.insideFile(this.quantised(this.position))
   }
 
   cueDown(): void {
-    if (!this.track || this.holding || this.audioError) return
-    const action = pressCue(this.state, this.here())
+    if (!this.canCue) return
+    const action = pressCue(this.state, this.quantisedPlayhead())
     switch (action.kind) {
-      case 'mark':
+      case 'setCueOnly':
         this.cuePoint = action.at
         break
-      case 'return':
+      case 'stopAtCue':
         this.deck.stopAt(action.at)
         break
-      case 'set':
+      case 'setCueAndGo':
         this.cuePoint = action.at
         this.seek(action.at)
         break
-      case 'hold':
+      case 'holdFromCue':
         this.startHold('cue', action.at)
         break
     }
@@ -382,14 +367,14 @@ export class Player {
     this.endHold('cue')
   }
 
-  private startHold(key: HoldKey, at: number): void {
+  private startHold(key: HoldButton, at: Seconds): void {
     this.takeSpeakers()
     this.holding = { key, at, latched: false }
     if (this.position !== at) this.seek(at)
     this.deck.play({ onMasterBeat: false })
   }
 
-  private endHold(key: HoldKey): void {
+  private endHold(key: HoldButton): void {
     const hold = this.holding
     if (hold?.key !== key) return
     this.holding = null
@@ -397,22 +382,14 @@ export class Player {
     if (back != null) this.deck.stopAt(back)
   }
 
-  private hotCue(kind: number): Cue | undefined {
+  private hotCue(kind: HotCueKind): Cue | undefined {
     return this.displayCues.find((c) => c.kind === 'hot' && c.slot === kind)
   }
 
-  /**
-   * A set hot cue jumps while playing and plays while held when paused. An empty slot stores one,
-   * unless `create` is off (mix mode, where the track's cues are not edited).
-   */
-  hotCueDown(kind: number, create = true): void {
+  hotCueDown(kind: HotCueKind): void {
     const cue = this.hotCue(kind)
-    if (!cue) {
-      if (create) void this.setHotCue(kind)
-      return
-    }
-    if (!this.track || this.holding || this.audioError) return
-    const action = pressHotCue(this.state, { start: cue.start / 1000, end: cue.end == null ? null : cue.end / 1000 })
+    if (!cue || !this.canCue) return
+    const action = pressHotCue(this.state, cueRange(cue))
     if (action.loop) {
       this.cuePoint = action.loop[0]
       this.deck.setLoop(...action.loop)
@@ -425,18 +402,23 @@ export class Player {
     this.startHold(kind, action.at)
   }
 
-  hotCueUp(kind: number): void {
+  hotCueDownOrStore(kind: HotCueKind): void {
+    if (this.hotCue(kind)) this.hotCueDown(kind)
+    else void this.setHotCue(kind)
+  }
+
+  hotCueUp(kind: HotCueKind): void {
     this.endHold(kind)
   }
 
   callCue(cue: Cue): void {
-    const start = this.insideFile(cue.start / 1000)
-    if (cue.end != null && cue.end > cue.start) this.deck.setLoop(start, cue.end / 1000)
-    this.cueAt(start)
+    const range = cueRange(cue)
+    const loop = loopOf(range)
+    if (loop) this.deck.setLoop(this.insideFile(loop[0]), loop[1])
+    this.cueAt(range.start)
   }
 
-  /** Makes `seconds` the cue point and goes there: playing carries on from it, paused waits on it. */
-  cueAt(seconds: number): void {
+  cueAt(seconds: Seconds): void {
     const at = this.insideFile(seconds)
     this.cuePoint = at
     if (this.playing) this.seek(at)
@@ -455,7 +437,7 @@ export class Player {
 
   setLoopIn(): void {
     if (!this.playable) return
-    const here = this.here()
+    const here = this.quantisedPlayhead()
     this.cuePoint = here
     if (!this.playing && !this.deck.scrubbing) this.seek(here)
   }
@@ -463,8 +445,8 @@ export class Player {
   setLoopOut(): void {
     if (!this.playable) return
     const start = this.cuePoint
-    const end = this.here()
-    if (!(end > start + 0.01)) return
+    const end = this.quantisedPlayhead()
+    if (!(end > start + SHORTEST_LOOP)) return
     this.deck.setLoop(start, end)
   }
 
@@ -473,24 +455,23 @@ export class Player {
     if (loop) this.deck.setLooping(!loop.active)
   }
 
-  /** Pressing the same loop length again leaves the loop. */
   beatLoop(beats: number): void {
     if (!this.playable) return
     const range = beatLoop(this.position, beats, this.displayGrid, this.track.bpm ?? 0, this.quantise)
     if (!range) return
+    const [start, end] = range
     const loop = this.loop
-    if (loop?.active && this.position >= loop.start && this.position < loop.end) {
-      const same = Math.abs(loop.end - loop.start - (range[1] - range[0])) < 0.002
-      if (same) {
-        this.deck.setLooping(false)
-        return
-      }
-      const resized = resizeLoop([loop.start, loop.end], (range[1] - range[0]) / (loop.end - loop.start))
-      if (resized) this.deck.setLoop(...resized)
+    const insideActiveLoop = loop?.active && this.position >= loop.start && this.position < loop.end
+    if (!insideActiveLoop) {
+      this.cuePoint = start
+      this.deck.setLoop(start, this.notPastEnd(end))
       return
     }
-    this.cuePoint = range[0]
-    this.deck.setLoop(range[0], Math.min(range[1], this.duration || range[1]))
+    const length = end - start
+    const loopLength = loop.end - loop.start
+    const pressedSameLengthAgain = Math.abs(loopLength - length) < SAME_LOOP_LENGTH_TOLERANCE
+    if (pressedSameLengthAgain) this.deck.setLooping(false)
+    else this.resizeLoop(length / loopLength)
   }
 
   resizeLoop(factor: number): void {
@@ -498,7 +479,7 @@ export class Player {
     if (!loop) return
     const resized = resizeLoop([loop.start, loop.end], factor)
     if (!resized) return
-    const end = Math.min(resized[1], this.duration || resized[1])
+    const end = this.notPastEnd(resized[1])
     if (end > resized[0]) this.deck.setLoop(resized[0], end, loop.active)
   }
 
@@ -506,26 +487,21 @@ export class Player {
     await this.session.refresh()
   }
 
-  setCuePlacement(placement: CuePlacement): void {
-    this.prefs.setCuePlacement(placement)
-  }
-
-  /** Where a new cue goes, in milliseconds, with the loop's out point when it saves a loop. */
-  private placement(): [ms: number, endMs: number | null] {
+  private newCueMs(): [startMs: number, endMs: number | null] {
     const seconds = this.cuePlacement === 'cuePoint' ? this.cuePoint : this.position
     const { start, end } = cueToStore(this.quantised(seconds), this.loop)
     return [Math.round(start * 1000), end == null ? null : Math.round(end * 1000)]
   }
 
   setHotCue(kind: number): Promise<void> {
-    return this.cues.setHotCue(kind, ...this.placement())
+    return this.cues.setHotCue(kind, ...this.newCueMs())
   }
 
   addMemoryCue(): Promise<void> {
-    return this.cues.addMemoryCue(...this.placement())
+    return this.cues.addMemoryCue(...this.newCueMs())
   }
 
-  cueAtPlayhead(): Cue | null {
+  private cueAtPlayhead(): Cue | null {
     const tolerance = this.cueHitTolerance()
     let nearest: Cue | null = null
     let nearestGap = Infinity
@@ -544,17 +520,18 @@ export class Player {
     return cue ? this.cues.deleteCue(cue) : Promise.resolve()
   }
 
-  private cueHitTolerance(): number {
-    if (!this.quantise) return CUE_HIT_TOLERANCE
-    const bpm = this.bpmUnderPlayhead
-    return bpm > 0 ? 30 / bpm : CUE_HIT_TOLERANCE
+  private cueHitTolerance(): Seconds {
+    const bpm = this.trackBpmAtPlayhead
+    if (!this.quantise || !(bpm > 0)) return CUE_HIT_TOLERANCE
+    const halfBeat = 60 / bpm / 2
+    return halfBeat
   }
 
   setQuantise(on: boolean): void {
     this.prefs.setQuantise(on)
   }
 
-  quantised(seconds: number): number {
+  quantised(seconds: Seconds): Seconds {
     if (!this.quantise) return seconds
     return nearestBeat(seconds, this.displayGrid)
   }

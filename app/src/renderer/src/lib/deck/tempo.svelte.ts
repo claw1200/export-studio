@@ -3,19 +3,16 @@ import { getSetting, setSetting } from '../settings'
 import type { Deck } from './deck.svelte'
 import { storedFlag, storeFlag } from './stored'
 
-/** How far the fader reaches either side of the file's speed, in percent, as on a CDJ. */
-const TEMPO_RANGES = [6, 10, 16, 50] as const
-type TempoRange = (typeof TEMPO_RANGES)[number]
-
-/** Smallest tempo change, in percent. */
-const TEMPO_STEP = 0.01
+const TEMPO_RANGES_PERCENT = [6, 10, 16, 50] as const
+type TempoRange = (typeof TEMPO_RANGES_PERCENT)[number]
+const DEFAULT_TEMPO_RANGE: TempoRange = 10
+const TEMPO_STEP_PERCENT = 0.01
 
 function storedRange(): TempoRange {
   const n = Number(getSetting('tempoRange'))
-  return TEMPO_RANGES.find((r) => r === n) ?? 10
+  return TEMPO_RANGES_PERCENT.find((r) => r === n) ?? DEFAULT_TEMPO_RANGE
 }
 
-/** The tempo fader: speed in percent within a range, and master tempo to keep the key. */
 export class TempoControl {
   range = $state<TempoRange>(storedRange())
   lockedToMaster = $state(false)
@@ -24,7 +21,6 @@ export class TempoControl {
     if (storedFlag('masterTempo')) deck.setMasterTempo(true)
   }
 
-  /** Playback speed as a multiple of the file's. */
   get rate(): number {
     return this.deck.tempo
   }
@@ -40,7 +36,7 @@ export class TempoControl {
   setPercent(percent: number): void {
     if (this.lockedToMaster) return
     const inRange = Math.max(-this.range, Math.min(this.range, percent))
-    const stepped = Math.round(inRange / TEMPO_STEP) * TEMPO_STEP
+    const stepped = Math.round(inRange / TEMPO_STEP_PERCENT) * TEMPO_STEP_PERCENT
     this.deck.setTempo(1 + stepped / 100)
   }
 
@@ -58,13 +54,11 @@ export class TempoControl {
     storeFlag('masterTempo', on)
   }
 
-  /** Plays at `rate` times the file's speed, outside the fader's range: what sync and BPM steps set. */
   setRate(rate: number): void {
     if (this.lockedToMaster || !(rate > 0)) return
     this.deck.setTempo(Math.max(MIN_TEMPO, Math.min(MAX_TEMPO, rate)))
   }
 
-  /** Semitones the key is moved by, on top of what the tempo does to it. */
   get keyShift(): number {
     return this.deck.keyShift
   }
@@ -73,22 +67,24 @@ export class TempoControl {
     this.deck.setKeyShift(semitones)
   }
 
-  /** A narrower range pulls the tempo in to fit it, as moving the range switch does. */
   setRange(range: TempoRange): void {
     this.range = range
     setSetting('tempoRange', String(range))
+    this.fitTempoInRange()
+  }
+
+  private fitTempoInRange(): void {
     this.setPercent(this.percent)
   }
 
   cycleRange(): void {
-    const next = TEMPO_RANGES[(TEMPO_RANGES.indexOf(this.range) + 1) % TEMPO_RANGES.length]
-    this.setRange(next)
+    const ranges = TEMPO_RANGES_PERCENT
+    this.setRange(ranges[(ranges.indexOf(this.range) + 1) % ranges.length])
   }
 }
 
-/** A tempo as a signed percentage: `+2.35%`, `−0.50%`, `0.00%`. */
 export function formatTempo(percent: number): string {
-  const rounded = Math.round(percent / TEMPO_STEP) * TEMPO_STEP
-  if (Math.abs(rounded) < TEMPO_STEP / 2) return '0.00%'
+  const rounded = Math.round(percent / TEMPO_STEP_PERCENT) * TEMPO_STEP_PERCENT
+  if (Math.abs(rounded) < TEMPO_STEP_PERCENT / 2) return '0.00%'
   return `${rounded > 0 ? '+' : '−'}${Math.abs(rounded).toFixed(2)}%`
 }

@@ -8,7 +8,7 @@ register(new URL('./resolve-ts.mjs', import.meta.url).href)
 ;(globalThis as { window?: unknown }).window = { api: { platform: 'darwin' } }
 
 const { withShift, withoutShift } = await import('../src/renderer/src/lib/keymap.ts')
-const { deckKeys, playKeys } = await import('../src/renderer/src/lib/deck/keys.ts')
+const { deckKeys, playOnlyKeys } = await import('../src/renderer/src/lib/deck/keys.ts')
 
 describe('withShift / withoutShift', () => {
   it('adds Shift just before the key, after the other modifiers', () => {
@@ -39,10 +39,10 @@ function fakePlayer(): { player: never; calls: string[] } {
   return { player: player as never, calls }
 }
 
-describe('playKeys', () => {
+describe('playOnlyKeys', () => {
   it('leaves out everything that edits the track', () => {
     const { player } = fakePlayer()
-    const keys = playKeys(player)
+    const keys = playOnlyKeys(player)
     for (const id of ['cue.addMemory', 'cue.deleteAtPlayhead', 'deck.gridEdit', 'grid.addFlag', 'grid.undo']) {
       assert.equal(id in keys, false, id)
     }
@@ -51,7 +51,7 @@ describe('playKeys', () => {
 
   it('has the memory cue and loop length keys', () => {
     const { player, calls } = fakePlayer()
-    const keys = playKeys(player)
+    const keys = playOnlyKeys(player)
     for (const id of [
       'cue.nextMemory',
       'cue.previousMemory',
@@ -72,17 +72,17 @@ describe('playKeys', () => {
 
   it('calls hot cues without storing new ones', () => {
     const { player, calls } = fakePlayer()
-    const hot = playKeys(player)['cue.hot1'] as { down: () => void }
+    const hot = playOnlyKeys(player)['cue.hot1'] as { down: () => void }
     hot.down()
-    assert.deepEqual(calls, ['hotCueDown(1,false)'])
+    assert.deepEqual(calls, ['hotCueDown(1)'])
     calls.length = 0
     ;(deckKeys(player)['cue.hot1'] as { down: () => void }).down()
-    assert.deepEqual(calls, ['hotCueDown(1,true)'])
+    assert.deepEqual(calls, ['hotCueDownOrStore(1)'])
   })
 
   it('plays and pauses the deck itself', () => {
     const { player, calls } = fakePlayer()
-    ;(playKeys(player)['deck.playPause'] as () => void)()
+    ;(playOnlyKeys(player)['deck.playPause'] as () => void)()
     assert.deepEqual(calls, ['toggle()'])
   })
 })

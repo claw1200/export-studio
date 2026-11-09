@@ -3,6 +3,7 @@ import { isDurationSlack } from '$lib/library/duplicates'
 import { getSetting, setSetting } from '$lib/settings'
 import type { DuplicateMatch, PlaylistMembership, Track, TrackViewFilters, View } from '$lib/types'
 import { introduceViews } from './defaults'
+import { looseFileId } from '../trackIds'
 
 export { emptyFilters } from './defaults'
 
@@ -29,7 +30,7 @@ export function looseTrack(path: string, row: Partial<Track> = {}): Track {
   const stem = dot > 0 ? file.slice(0, dot) : file
   const suffix = dot > 0 ? file.slice(dot + 1).toUpperCase() : ''
   return {
-    id: `file:${encodeURIComponent(stored)}`,
+    id: looseFileId(stored),
     title: row.title || stem || file,
     artist: row.artist ?? '',
     album: row.album ?? '',

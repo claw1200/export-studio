@@ -10,6 +10,7 @@ import { verdictForTrack } from './hardware/compatibility'
 import { DEFAULT_GREEN, playerById } from './hardware/players'
 import { isRekordboxPresetTrack } from './library/factory'
 import { loadViews, looseTrack, matchesTrack, pathKey, saveViews, type FileEntry } from './library/views'
+import { Listeners } from './listeners'
 import { getSetting, setSetting } from './settings'
 import type {
   ConvertMode,
@@ -28,6 +29,7 @@ import type {
   View,
   Volume
 } from './types'
+import { DEVICE_TRACKS_READ_ONLY, isDeviceTrack, isLooseFile } from './trackIds'
 
 export const TRACK_DRAG_TYPE = 'application/x-exportstudio-tracks'
 export const PLAYLIST_TREE_DRAG_TYPE = 'application/x-exportstudio-playlist-tree'
@@ -137,9 +139,9 @@ export class Library {
   /** The row a drag of `dragging` was started on: what a deck loads when they are dropped on it. */
   dragAnchor: string | null = null
   private noticeTimer: ReturnType<typeof setTimeout> | undefined
-  private trackListeners = new Set<(tracks: Track[]) => void>()
-  private importListeners = new Set<(tracks: Track[]) => void>()
-  private removeListeners = new Set<(ids: string[]) => void>()
+  private tracksUpdated = new Listeners<[tracks: Track[]]>()
+  private imported = new Listeners<[tracks: Track[]]>()
+  private removed = new Listeners<[ids: string[]]>()
 
   viewById = $derived(new Map(this.views.map((view) => [view.id, view])))
   sourceView = $derived(this.source.type === 'view' ? (this.viewById.get(this.source.id) ?? null) : null)
@@ -497,18 +499,15 @@ export class Library {
   }
 
   onTracksUpdated(listener: (tracks: Track[]) => void): () => void {
-    this.trackListeners.add(listener)
-    return () => this.trackListeners.delete(listener)
+    return this.tracksUpdated.add(listener)
   }
 
   onImported(listener: (tracks: Track[]) => void): () => void {
-    this.importListeners.add(listener)
-    return () => this.importListeners.delete(listener)
+    return this.imported.add(listener)
   }
 
   onRemoved(listener: (ids: string[]) => void): () => void {
-    this.removeListeners.add(listener)
-    return () => this.removeListeners.delete(listener)
+    return this.removed.add(listener)
   }
 
   /** Apply rows from outside an edit, such as finished analysis. */
@@ -551,7 +550,7 @@ export class Library {
   }
 
   private replaceTrack(id: string, fresh: Track): void {
-    if (id.startsWith('usb:')) this.deviceTracks = this.deviceTracks.map((row) => (row.id === id ? fresh : row))
+    if (isDeviceTrack(id)) this.deviceTracks = this.deviceTracks.map((row) => (row.id === id ? fresh : row))
     else this.applyTracks([fresh])
   }
 
@@ -559,7 +558,7 @@ export class Library {
     if (!rows.length) return
     const fresh = new Map(rows.map((r) => [r.id, r]))
     this.tracks = this.tracks.map((t) => fresh.get(t.id) ?? t)
-    for (const listener of this.trackListeners) listener(rows)
+    this.tracksUpdated.notify(rows)
     if (!this.sourceLoading) void this.fillFileGaps()
   }
 
@@ -584,11 +583,11 @@ export class Library {
 
   async updateTracks(ids: string[], fields: TrackEdit): Promise<boolean> {
     if (!ids.length || !Object.keys(fields).length) return true
-    if (ids.some((id) => id.startsWith('file:'))) {
+    if (ids.some(isLooseFile)) {
       this.notify('Import a file before editing it')
       return false
     }
-    if (ids.some((id) => id.startsWith('usb:'))) {
+    if (ids.some(isDeviceTrack)) {
       this.notify('Device tracks follow the playlist synced to that volume')
       return false
     }
@@ -666,7 +665,7 @@ export class Library {
       }
       void this.fillFileGaps()
       this.notify(this.importSummary(result, playlistId), result.failed.length ? 'warning' : 'info')
-      if (result.tracks.length) for (const listener of this.importListeners) listener(result.tracks)
+      if (result.tracks.length) this.imported.notify(result.tracks)
       return result
     } finally {
       this.importing = false
@@ -697,7 +696,7 @@ export class Library {
 
   /** Remove tracks from the collection and every playlist, deleting cues and the beatgrid. */
   async removeFromCollection(ids: string[], trash = false): Promise<boolean> {
-    const local = ids.filter((id) => !id.startsWith('usb:'))
+    const local = ids.filter((id) => !isDeviceTrack(id))
     if (!local.length) {
       this.notify('Device tracks follow the playlist synced to that volume')
       return false
@@ -715,7 +714,7 @@ export class Library {
     if (this.sourceIds) this.sourceIds = this.sourceIds.filter((id) => !gone.has(id))
     this.selection = new Set([...this.selection].filter((id) => !gone.has(id)))
     if (this.selectedId && gone.has(this.selectedId)) this.selectedId = null
-    for (const listener of this.removeListeners) listener(result.removed)
+    this.removed.notify(result.removed)
     await this.refreshMembers()
     void this.fillFileGaps()
     const count = gone.size === 1 ? 'one track' : `${gone.size} tracks`
@@ -733,7 +732,7 @@ export class Library {
 
   /** Encode tracks to `preset` and point the library at the new files, or add them as copies. */
   async convertTracks(ids: string[], preset: ConvertPreset, mode: ConvertMode): Promise<boolean> {
-    const local = ids.filter((id) => !id.startsWith('usb:') && !id.startsWith('file:'))
+    const local = ids.filter((id) => !isDeviceTrack(id) && !isLooseFile(id))
     if (!local.length || this.converting) return false
     this.converting = true
     try {
@@ -768,11 +767,11 @@ export class Library {
   }
 
   async addToPlaylist(playlistId: string, ids: string[]): Promise<void> {
-    if (ids.some((id) => id.startsWith('file:'))) {
+    if (ids.some(isLooseFile)) {
       this.notify('Import a file before adding it to a playlist')
       return
     }
-    if (ids.some((id) => id.startsWith('usb:'))) {
+    if (ids.some(isDeviceTrack)) {
       this.notify('Device tracks stay on the volume')
       return
     }
@@ -786,8 +785,8 @@ export class Library {
   }
 
   async removeFromPlaylist(playlistId: string, ids: string[]): Promise<void> {
-    if (ids.some((id) => id.startsWith('usb:'))) {
-      this.notify('Device tracks are read-only; sync to change them')
+    if (ids.some(isDeviceTrack)) {
+      this.notify(DEVICE_TRACKS_READ_ONLY)
       return
     }
     const result = await this.edit(() => api.removeFromPlaylist(playlistId, ids))
@@ -799,8 +798,8 @@ export class Library {
 
   /** Move tracks so they sit just before `beforeId`, or at the end when it is null. */
   async moveInPlaylist(playlistId: string, ids: string[], beforeId: string | null): Promise<void> {
-    if (ids.some((id) => id.startsWith('usb:'))) {
-      this.notify('Device tracks are read-only; sync to change them')
+    if (ids.some(isDeviceTrack)) {
+      this.notify(DEVICE_TRACKS_READ_ONLY)
       return
     }
     if (!(this.source.type === 'playlist' && this.source.id === playlistId && this.sourceIds)) return
@@ -817,8 +816,8 @@ export class Library {
   }
 
   async createPlaylist(parentId = 'root', folder = false, trackIds: string[] = []): Promise<string | null> {
-    if (trackIds.some((id) => id.startsWith('usb:'))) {
-      this.notify('Device tracks are read-only; sync to change them')
+    if (trackIds.some(isDeviceTrack)) {
+      this.notify(DEVICE_TRACKS_READ_ONLY)
       return null
     }
     const name = folder ? 'New folder' : 'New playlist'
@@ -856,8 +855,8 @@ export class Library {
   }
 
   async setTag(tagId: string, ids: string[], on: boolean): Promise<void> {
-    if (ids.some((id) => id.startsWith('usb:'))) {
-      this.notify('Device tracks are read-only; sync to change them')
+    if (ids.some(isDeviceTrack)) {
+      this.notify(DEVICE_TRACKS_READ_ONLY)
       return
     }
     const result = await this.edit(() => (on ? api.addTag(tagId, ids) : api.removeTag(tagId, ids)))

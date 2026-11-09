@@ -92,7 +92,7 @@ export class Backups {
     this.busy = 'restore'
     this.error = null
     this.analysis.cancel()
-    this.decks.eject()
+    this.decks.ejectAll()
     try {
       const result = await api.backupRestore(backup.id)
       this.library.notify(`Restored the library from ${backupDate(backup)}: ${result.tracks.toLocaleString()} tracks`)

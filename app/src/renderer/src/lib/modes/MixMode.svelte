@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getApp } from '$lib/context'
-  import { playKeys } from '$lib/deck/keys'
+  import { playOnlyKeys } from '$lib/deck/keys'
   import { chordLabel } from '$lib/keymap'
   import { Mixer } from '$lib/mixer.svelte'
   import type { Player } from '$lib/player.svelte'
@@ -12,11 +12,7 @@
   import LibraryBrowser from '$lib/components/LibraryBrowser.svelte'
   import type { ModeProps } from './types'
 
-  /**
-   * Two decks either side of a crossfader, to hear how a transition will sound. Set each deck's
-   * cue where the mix should start, press play to start both at once, and fade across. Stop
-   * returns both to their cues, ready to try it again.
-   */
+  /** Two decks either side of a crossfader, to hear how a transition will sound. */
   let { players, actions, inspectorOpen }: ModeProps = $props()
 
   const { decks, keybinds } = getApp()
@@ -30,25 +26,14 @@
       (playShortcut ? ` (${chordLabel(playShortcut)})` : '')
   )
 
-  // Every deck shortcut works here as in edit mode, bar track prep: on deck A as it is, on deck
-  // B with Shift added.
-  $effect(() => keybinds.register(playKeys(a)))
-  $effect(() => keybinds.register(playKeys(b), 'shift'))
+  $effect(() => keybinds.register(playOnlyKeys(a)))
+  $effect(() => keybinds.register(playOnlyKeys(b), 'shift'))
   $effect(() => keybinds.register({ 'mix.playBoth': () => mixer.toggle() }))
-  $effect(() => mixer.applyPrefs())
-  // The browser highlights keys that mix with the master deck while mix mode is shown.
   $effect(() => {
     decks.mixMaster = mixer.master
     return () => {
       if (decks.mixMaster === mixer.master) decks.mixMaster = null
     }
-  })
-  $effect(() => mixer.shareBeatgrids())
-  // The engine outlives this view: leaving it must not leave the decks synced.
-  $effect(() => () => mixer.setSynced(false))
-  $effect(() => mixer.makeSoleAudibleDeckMaster())
-  $effect(() => {
-    if (mixer.synced && !mixer.canSync) mixer.setSynced(false)
   })
 
   const masterLabel = $derived(mixer.label(mixer.master))
@@ -61,7 +46,6 @@
         : `Sync deck ${followerLabel} to deck ${masterLabel}: match its tempo and line up the beats`
   )
 
-  /** Loads onto the focused deck, then moves the focus to the other deck if it is still empty. */
   function load(track: Track): void {
     const target = decks.focused === b ? b : a
     void target.load(track)
@@ -70,11 +54,10 @@
   }
 </script>
 
-{#snippet deck(player: Player, label: string)}
+{#snippet deck(player: Player)}
   <MixDeck
     {player}
     {mixer}
-    {label}
     focused={decks.focused === player}
     onfocus={() => decks.focus(player)}
     onedit={actions.openInEdit}
@@ -82,13 +65,13 @@
 {/snippet}
 
 <div class="flex shrink-0 gap-2 border-b border-line-soft bg-bg p-2">
-  {@render deck(a, 'A')}
+  {@render deck(a)}
   <div
     class="flex w-48 shrink-0 flex-col items-center justify-center gap-3 rounded-lg border border-line-soft bg-surface px-4 py-3"
   >
     <PlayButton
       size="lg"
-      stop
+      stopsInsteadOfPausing
       playing={mixer.playing}
       disabled={!mixer.playable && !mixer.playing}
       onclick={() => mixer.toggle()}
@@ -127,6 +110,6 @@
       <EqKnob label="B" value={mixer.lowKnobs[1]} active={mixer.swapBass} />
     </div>
   </div>
-  {@render deck(b, 'B')}
+  {@render deck(b)}
 </div>
 <LibraryBrowser {actions} {inspectorOpen} onactivate={load} settingsPrefix="mix." />

@@ -2,10 +2,6 @@
   import type { Snippet } from 'svelte'
   import type { HTMLButtonAttributes } from 'svelte/elements'
 
-  /**
-   * A round player-style button: a brushed silver face inside a coloured ring that glows while
-   * lit. Any other attributes, attachments included, go on the button itself.
-   */
   let {
     tone,
     lit,

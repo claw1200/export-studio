@@ -1,6 +1,8 @@
 import type { AnalysisOptions, AnalysisProgress, GridMode } from '../../../preload/analysis'
+import { Listeners } from './listeners'
 import { getSetting, setSetting } from './settings'
 import type { Track } from './types'
+import { isDeviceTrack } from './trackIds'
 
 /** The tempo ranges rekordbox offers, as the lowest and highest BPM the analysis may pick. */
 export const BPM_RANGES: readonly (readonly [number, number])[] = [
@@ -59,7 +61,7 @@ function load(): AnalysisSettings {
 }
 
 export function analysable(track: Track): boolean {
-  return !track.missing && !track.streaming && !track.id.startsWith('usb:')
+  return !track.missing && !track.streaming && !isDeviceTrack(track.id)
 }
 
 /** Analysis settings, and the progress of the analysis running in the main process. */
@@ -69,8 +71,8 @@ export class Analysis {
   running = $derived(!!this.progress && this.progress.done + this.progress.failed < this.progress.total)
   /** The most recent failure in this batch. */
   lastError = $state<string | null>(null)
-  private finishListeners = new Set<(track: Track | null, id: string, error?: string) => void>()
-  private batchListeners = new Set<(analysed: number, failed: number, error: string | null) => void>()
+  private finished = new Listeners<[track: Track | null, id: string, error?: string]>()
+  private batchDone = new Listeners<[analysed: number, failed: number, error: string | null]>()
 
   constructor() {
     window.api.onAnalysis((progress) => {
@@ -80,18 +82,13 @@ export class Analysis {
       const finished = progress.finished
       if (!finished) return
       if (finished.error) this.lastError = finished.error
-      for (const listener of this.finishListeners)
-        listener((finished.track as Track) ?? null, finished.id, finished.error)
-      if (!this.running) {
-        for (const listener of this.batchListeners) listener(progress.done, progress.failed, this.lastError)
-      }
+      this.finished.notify((finished.track as Track) ?? null, finished.id, finished.error)
+      if (!this.running) this.batchDone.notify(progress.done, progress.failed, this.lastError)
     })
   }
 
-  /** Called when every queued track has been analysed or has failed. */
   onBatchDone(listener: (analysed: number, failed: number, error: string | null) => void): () => void {
-    this.batchListeners.add(listener)
-    return () => this.batchListeners.delete(listener)
+    return this.batchDone.add(listener)
   }
 
   set<K extends keyof AnalysisSettings>(key: K, value: AnalysisSettings[K]): void {
@@ -117,10 +114,8 @@ export class Analysis {
     }
   }
 
-  /** Called with each track as its analysis is saved, or with null and the error when it failed. */
   onFinished(listener: (track: Track | null, id: string, error?: string) => void): () => void {
-    this.finishListeners.add(listener)
-    return () => this.finishListeners.delete(listener)
+    return this.finished.add(listener)
   }
 
   analyse(tracks: Track[], settings: AnalysisSettings = this.settings): void {

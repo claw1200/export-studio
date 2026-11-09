@@ -10,6 +10,7 @@
   const player = getPlayer()
   const track = $derived(player.track)
   const lg = $derived(size === 'lg')
+  const remaining = $derived(Math.max(0, player.duration - player.position))
 </script>
 
 <div class={['flex min-w-0 items-center', lg ? 'gap-3' : 'gap-2.5', className]}>
@@ -40,7 +41,7 @@
   <div class={['tabular shrink-0 text-right font-mono', lg ? 'w-[88px]' : 'w-[72px]']}>
     <div class={['font-medium text-fg', lg ? 'text-[18px]' : 'text-[14px]']}>{formatClock(player.position * 1000)}</div>
     <div class={['text-faint', lg ? 'mt-0.5 text-[12.5px]' : 'text-[11px]']}>
-      −{formatClock(Math.max(0, player.duration - player.position) * 1000)}
+      −{formatClock(remaining * 1000)}
     </div>
   </div>
 </div>

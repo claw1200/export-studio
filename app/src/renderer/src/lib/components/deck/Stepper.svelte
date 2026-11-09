@@ -1,7 +1,6 @@
 <script lang="ts">
   import { Minus, Plus } from '@lucide/svelte'
 
-  /** − and + step by 1, dragging the value steps too, and clicking the value resets it. */
   let {
     name,
     value,
@@ -27,6 +26,7 @@
   } = $props()
 
   const DRAG_PX_PER_STEP = 8
+  const asSentence = (text: string): string => text.replace(/\.?$/, '.')
   let drag: { pointer: number; y: number; moved: boolean } | null = null
 
   function dragStart(e: PointerEvent): void {
@@ -44,7 +44,6 @@
     onstep(steps)
   }
 
-  /** The click that ends a drag must not also reset. */
   function resetUnlessDragged(): void {
     const dragged = drag?.moved
     drag = null
@@ -74,7 +73,7 @@
     ]}
     style:color={color ?? undefined}
     {disabled}
-    title="{title.replace(/\.?$/, '.')} Drag up or down to change it."
+    title="{asSentence(title)} Drag up or down to change it."
     onpointerdown={dragStart}
     onpointermove={dragMove}
     onpointercancel={() => (drag = null)}

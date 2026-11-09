@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isDeviceTrack } from '$lib/trackIds'
   import { SvelteSet } from 'svelte/reactivity'
   import {
     Library as LibraryIcon,
@@ -47,7 +48,7 @@
   let deviceSettingsId = $state<string | null>(null)
 
   function trackOnVolume(trackId: string | null | undefined, volumeId: string): boolean {
-    if (!trackId?.startsWith('usb:')) return false
+    if (!isDeviceTrack(trackId)) return false
     const body = trackId.slice(4)
     const split = body.lastIndexOf(':')
     if (split <= 0) return false
@@ -62,7 +63,7 @@
     if (library.syncing || ejectingId) return
     ejectingId = volume.id
     if (trackOnVolume(audition.trackId, volume.id)) audition.stop()
-    decks.eject((id) => trackOnVolume(id, volume.id))
+    decks.ejectWhere((id) => trackOnVolume(id, volume.id))
     try {
       await library.ejectDevice(volume.id)
     } catch (e) {

@@ -4,6 +4,7 @@ import type { Beatgrid } from './types'
 export const MIN_GRID_BPM = 40
 export const MAX_GRID_BPM = 300
 export const MIN_RAMP_BEATS = BEATS_PER_BAR
+export const VARIES_DESCRIPTION = 'The tempo here varies beat by beat, as rekordbox analysed it'
 const MIN_STEADY_BEATS = BEATS_PER_BAR
 const MIN_BEATS_BEFORE_NEXT_FLAG = 0.25
 const MIN_BEATS_BETWEEN_FLAGS = 0.75

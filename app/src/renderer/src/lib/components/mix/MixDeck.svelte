@@ -11,22 +11,18 @@
   import TempoSteppers from '../deck/TempoSteppers.svelte'
   import TrackInfo from '../deck/TrackInfo.svelte'
   import Transport from '../deck/Transport.svelte'
-  import { segment, segmentButton } from '../deck/segment'
+  import { segmentGroup, segmentButton } from '../deck/segment'
 
-  /** One side of the mixer: the edit deck's parts, played but never edited, plus sync and master. */
   let {
     player,
     mixer,
-    label,
     focused,
     onfocus,
     onedit
   }: {
-    /** Fixed for the component's life: key the deck on it to swap. */
+    // Fixed for the component's life: key the deck on it to swap.
     player: Player
     mixer: Mixer
-    label: string
-    /** Double-clicked rows load here. */
     focused: boolean
     onfocus: () => void
     onedit: (track: Track) => void
@@ -35,7 +31,8 @@
   // svelte-ignore state_referenced_locally
   setPlayer(player)
   // svelte-ignore state_referenced_locally
-  setDeckInfo({ label, shifted: player === mixer.b })
+  const label = mixer.label(player)
+  setDeckInfo({ label, shifted: label === 'B' })
 
   const track = $derived(player.track)
   const isMaster = $derived(mixer.master === player)
@@ -80,7 +77,7 @@
     <LoopControls showBeatLoop={false} />
 
     <div class="ml-auto flex items-center gap-2">
-      <div class={segment}>
+      <div class={segmentGroup}>
         <button
           class={segmentButton(isMaster, 'solid')}
           disabled={!track}
@@ -90,7 +87,7 @@
         >
       </div>
       <TempoSteppers />
-      <div class={segment}>
+      <div class={segmentGroup}>
         <button
           class={segmentButton(masterTempo, 'accent')}
           disabled={!track}

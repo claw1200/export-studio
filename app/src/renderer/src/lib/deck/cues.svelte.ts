@@ -3,6 +3,7 @@ import { browserPreviews } from '../browserPreview.svelte'
 import type { Cue } from '../types'
 import type { GridEditor } from './grid.svelte'
 import type { TrackSession } from './session.svelte'
+import { isDeviceTrack } from '../trackIds'
 
 /** Library writes to the track's hot cues and memory cues. Locked while the grid is being edited. */
 export class CueEditor {
@@ -32,7 +33,7 @@ export class CueEditor {
   private async write(write: (id: string) => Promise<Cue[]>): Promise<void> {
     if (this.grid.editing) return
     const id = this.session.track?.id
-    if (id?.startsWith('usb:')) return
+    if (isDeviceTrack(id)) return
     const cues = await this.session.edit(write, (detail, next) => ({ ...detail, cues: next }))
     if (id && cues) browserPreviews.noteCues(id, cues)
   }
