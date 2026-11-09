@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isDeviceTrack } from '$lib/trackIds'
   import { getApp } from '$lib/context'
   import { setDeckInfo, setPlayer } from '$lib/deck/context'
   import { deckKeys } from '$lib/deck/keys'
@@ -29,7 +30,7 @@
   const focused = $derived(decks.focused === player)
 
   const editingGrid = $derived(player.grid.editing)
-  const deviceTrack = $derived(player.track?.id.startsWith('usb:') ?? false)
+  const deviceTrack = $derived(isDeviceTrack(player.track?.id))
   const gridEditable = $derived(library.writable && player.grid.canEdit && !deviceTrack)
 
   $effect(() => {

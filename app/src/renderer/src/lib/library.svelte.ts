@@ -29,6 +29,7 @@ import type {
   View,
   Volume
 } from './types'
+import { isDeviceTrack, isLooseFile } from './trackIds'
 
 export const TRACK_DRAG_TYPE = 'application/x-exportstudio-tracks'
 export const PLAYLIST_TREE_DRAG_TYPE = 'application/x-exportstudio-playlist-tree'
@@ -549,7 +550,7 @@ export class Library {
   }
 
   private replaceTrack(id: string, fresh: Track): void {
-    if (id.startsWith('usb:')) this.deviceTracks = this.deviceTracks.map((row) => (row.id === id ? fresh : row))
+    if (isDeviceTrack(id)) this.deviceTracks = this.deviceTracks.map((row) => (row.id === id ? fresh : row))
     else this.applyTracks([fresh])
   }
 
@@ -582,11 +583,11 @@ export class Library {
 
   async updateTracks(ids: string[], fields: TrackEdit): Promise<boolean> {
     if (!ids.length || !Object.keys(fields).length) return true
-    if (ids.some((id) => id.startsWith('file:'))) {
+    if (ids.some(isLooseFile)) {
       this.notify('Import a file before editing it')
       return false
     }
-    if (ids.some((id) => id.startsWith('usb:'))) {
+    if (ids.some(isDeviceTrack)) {
       this.notify('Device tracks follow the playlist synced to that volume')
       return false
     }
@@ -695,7 +696,7 @@ export class Library {
 
   /** Remove tracks from the collection and every playlist, deleting cues and the beatgrid. */
   async removeFromCollection(ids: string[], trash = false): Promise<boolean> {
-    const local = ids.filter((id) => !id.startsWith('usb:'))
+    const local = ids.filter((id) => !isDeviceTrack(id))
     if (!local.length) {
       this.notify('Device tracks follow the playlist synced to that volume')
       return false
@@ -731,7 +732,7 @@ export class Library {
 
   /** Encode tracks to `preset` and point the library at the new files, or add them as copies. */
   async convertTracks(ids: string[], preset: ConvertPreset, mode: ConvertMode): Promise<boolean> {
-    const local = ids.filter((id) => !id.startsWith('usb:') && !id.startsWith('file:'))
+    const local = ids.filter((id) => !isDeviceTrack(id) && !isLooseFile(id))
     if (!local.length || this.converting) return false
     this.converting = true
     try {
@@ -766,11 +767,11 @@ export class Library {
   }
 
   async addToPlaylist(playlistId: string, ids: string[]): Promise<void> {
-    if (ids.some((id) => id.startsWith('file:'))) {
+    if (ids.some(isLooseFile)) {
       this.notify('Import a file before adding it to a playlist')
       return
     }
-    if (ids.some((id) => id.startsWith('usb:'))) {
+    if (ids.some(isDeviceTrack)) {
       this.notify('Device tracks stay on the volume')
       return
     }
@@ -784,7 +785,7 @@ export class Library {
   }
 
   async removeFromPlaylist(playlistId: string, ids: string[]): Promise<void> {
-    if (ids.some((id) => id.startsWith('usb:'))) {
+    if (ids.some(isDeviceTrack)) {
       this.notify('Device tracks are read-only; sync to change them')
       return
     }
@@ -797,7 +798,7 @@ export class Library {
 
   /** Move tracks so they sit just before `beforeId`, or at the end when it is null. */
   async moveInPlaylist(playlistId: string, ids: string[], beforeId: string | null): Promise<void> {
-    if (ids.some((id) => id.startsWith('usb:'))) {
+    if (ids.some(isDeviceTrack)) {
       this.notify('Device tracks are read-only; sync to change them')
       return
     }
@@ -815,7 +816,7 @@ export class Library {
   }
 
   async createPlaylist(parentId = 'root', folder = false, trackIds: string[] = []): Promise<string | null> {
-    if (trackIds.some((id) => id.startsWith('usb:'))) {
+    if (trackIds.some(isDeviceTrack)) {
       this.notify('Device tracks are read-only; sync to change them')
       return null
     }
@@ -854,7 +855,7 @@ export class Library {
   }
 
   async setTag(tagId: string, ids: string[], on: boolean): Promise<void> {
-    if (ids.some((id) => id.startsWith('usb:'))) {
+    if (ids.some(isDeviceTrack)) {
       this.notify('Device tracks are read-only; sync to change them')
       return
     }

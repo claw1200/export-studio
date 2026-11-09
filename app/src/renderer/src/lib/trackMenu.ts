@@ -28,6 +28,7 @@ import type { TreeNode } from './library/tree'
 import { tidy, type MenuEntry } from './menu'
 import type { Decks } from './decks.svelte'
 import type { ConvertPreset, Track, TrackEdit } from './types'
+import { isDeviceTrack } from './trackIds'
 
 export type TrackMenuShortcut =
   'library.editInfo' | 'library.removeFromPlaylist' | 'library.removeFromCollection' | 'library.analyse'
@@ -118,8 +119,8 @@ export function trackMenu(library: Library, decks: Decks, tracks: Track[], actio
   const update = (fields: TrackEdit): void => void library.updateTracks(ids, fields)
   const color = shared(tracks, 'color')
   const rating = shared(tracks, 'rating')
-  const missing = tracks.filter((t) => t.missing && !t.id.startsWith('usb:'))
-  const device = tracks.some((t) => t.id.startsWith('usb:'))
+  const missing = tracks.filter((t) => t.missing && !isDeviceTrack(t.id))
+  const device = tracks.some((t) => isDeviceTrack(t.id))
   const analysable = tracks.filter((t) => !t.missing && !t.streaming)
   const presets = loadPresets()
   return tidy([

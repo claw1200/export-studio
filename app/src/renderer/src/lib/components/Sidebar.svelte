@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isDeviceTrack } from '$lib/trackIds'
   import { SvelteSet } from 'svelte/reactivity'
   import {
     Library as LibraryIcon,
@@ -47,7 +48,7 @@
   let deviceSettingsId = $state<string | null>(null)
 
   function trackOnVolume(trackId: string | null | undefined, volumeId: string): boolean {
-    if (!trackId?.startsWith('usb:')) return false
+    if (!isDeviceTrack(trackId)) return false
     const body = trackId.slice(4)
     const split = body.lastIndexOf(':')
     if (split <= 0) return false

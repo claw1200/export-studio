@@ -2,6 +2,7 @@ import type { AnalysisOptions, AnalysisProgress, GridMode } from '../../../prelo
 import { Listeners } from './listeners'
 import { getSetting, setSetting } from './settings'
 import type { Track } from './types'
+import { isDeviceTrack } from './trackIds'
 
 /** The tempo ranges rekordbox offers, as the lowest and highest BPM the analysis may pick. */
 export const BPM_RANGES: readonly (readonly [number, number])[] = [
@@ -60,7 +61,7 @@ function load(): AnalysisSettings {
 }
 
 export function analysable(track: Track): boolean {
-  return !track.missing && !track.streaming && !track.id.startsWith('usb:')
+  return !track.missing && !track.streaming && !isDeviceTrack(track.id)
 }
 
 /** Analysis settings, and the progress of the analysis running in the main process. */

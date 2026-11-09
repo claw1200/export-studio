@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isDeviceTrack } from '$lib/trackIds'
   import { Music, FolderSearch, Repeat, AlertTriangle, X, Pencil } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import { api, artworkUrl } from '$lib/api'
@@ -28,12 +29,12 @@
     return decks.withTrack(track.id)[0] ?? null
   })
   const loose = $derived(track?.collected === false)
-  const deviceTrack = $derived(track?.id.startsWith('usb:') ?? false)
+  const deviceTrack = $derived(isDeviceTrack(track?.id))
   const editable = $derived(library.writable && !loose && !deviceTrack)
   const canEditSelection = $derived(
     library.writable &&
       library.selectedTracks.length > 0 &&
-      library.selectedTracks.every((item) => item.collected !== false && !item.id.startsWith('usb:'))
+      library.selectedTracks.every((item) => item.collected !== false && !isDeviceTrack(item.id))
   )
   const MAX_NUMBER = 9999
 

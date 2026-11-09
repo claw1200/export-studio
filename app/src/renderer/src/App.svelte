@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isDeviceTrack } from '$lib/trackIds'
   import { LoaderCircle, AlertTriangle } from '@lucide/svelte'
   import { browserPreviews } from '$lib/browserPreview.svelte'
   import { setApp } from '$lib/context'
@@ -82,7 +83,7 @@
   let settings = $state<SettingsSection | null>(null)
 
   function collectionTracks(tracks: Track[]): Track[] {
-    return tracks.filter((track) => track.collected !== false && !track.id.startsWith('usb:'))
+    return tracks.filter((track) => track.collected !== false && !isDeviceTrack(track.id))
   }
 
   function whenCollectionWritable(tracks: Track[], locked: string, act: (rows: Track[]) => void): void {
@@ -118,7 +119,7 @@
   }
 
   function edit(tracks: Track[]): void {
-    if (tracks.some((track) => track.id.startsWith('usb:'))) {
+    if (tracks.some((track) => isDeviceTrack(track.id))) {
       library.notify('Device tracks are read-only; sync to change them')
       return
     }

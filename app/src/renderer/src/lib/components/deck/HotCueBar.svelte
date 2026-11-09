@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isDeviceTrack } from '$lib/trackIds'
   import { Pencil, Plus, X } from '@lucide/svelte'
   import { getApp } from '$lib/context'
   import type { ClassValue } from 'svelte/elements'
@@ -17,7 +18,7 @@
     return HOT_CUE_KINDS.map((kind) => ({ letter: hotCueLetter(kind), kind, cue: bySlot.get(kind) ?? null }))
   })
   const editable = $derived(
-    !playOnly && library.writable && !!player.detail && !player.grid.editing && !player.track?.id.startsWith('usb:')
+    !playOnly && library.writable && !!player.detail && !player.grid.editing && !isDeviceTrack(player.track?.id)
   )
   const pad = 'flex h-6 w-full min-w-0 items-center gap-1.5 rounded px-2 text-[11px] font-semibold'
   const placementLabel = $derived(player.cuePlacement === 'cuePoint' ? 'cue point' : 'playhead')
