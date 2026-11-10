@@ -1,3 +1,4 @@
+import { Lru } from '../lru'
 import { heldBandPeaks } from './fall'
 
 type Rgb = readonly [red: number, green: number, blue: number]
@@ -21,6 +22,19 @@ function writeGradientColor(stopsLowToHigh: readonly Rgb[], balance: number, out
   const to = stopsLowToHigh[lower + 1]
   for (let channel = 0; channel < 3; channel++)
     out[offset + channel] = Math.round(from[channel] + (to[channel] - from[channel]) * fraction)
+}
+
+const PENDING_GREY = 180
+
+const pendingByLength = new Lru<number, Uint8Array>(8)
+
+/** Grey for each of `entries` waveform entries, shown until the gradient colours can be worked out. */
+export function pendingColors(entries: number): Uint8Array {
+  const kept = pendingByLength.get(entries)
+  if (kept) return kept
+  const colors = new Uint8Array(entries * 3).fill(PENDING_GREY)
+  pendingByLength.set(entries, colors)
+  return colors
 }
 
 interface Colored {

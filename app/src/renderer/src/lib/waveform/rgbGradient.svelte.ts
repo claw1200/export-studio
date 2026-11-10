@@ -1,7 +1,7 @@
 import { getSetting, setSetting } from '../settings'
 import { isBandList, isHex } from './bandStyle.svelte'
 
-export const DEFAULT_RGB_GRADIENT: readonly string[] = ['#ff2d1f', '#3ce35a', '#2f8bff']
+export const DEFAULT_RGB_GRADIENT: readonly string[] = ['#0054ff', '#02cff7', '#ffffff']
 
 const KEY = 'waveformRgbGradient'
 

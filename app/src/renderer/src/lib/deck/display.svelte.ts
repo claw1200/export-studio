@@ -1,7 +1,7 @@
 import { Listeners } from '../listeners'
 import { getSetting, setSetting } from '../settings'
 import type { Waveform, WaveformMode } from '../waveform/data'
-import { gradientColors } from '../waveform/gradientColors'
+import { gradientColors, pendingColors } from '../waveform/gradientColors'
 import { rgbGradient } from '../waveform/rgbGradient.svelte'
 import { type Percent, storedFlag, storeFlag, storedNumber, storedPercent } from './stored'
 import { WaveLoader, type WaveSamples } from './waves.svelte'
@@ -26,7 +26,7 @@ export class WaveformPrefs {
   mode = $state<WaveformMode>((getSetting('waveformMode') as WaveformMode) || '3band')
   qualities = $state<Record<WaveformMode, Percent>>({ rgb: storedQuality('rgb'), '3band': storedQuality('3band') })
   fallBlocksPerQuality = $state(storedNumber('fallBlocksPerQuality', 1.3, 0, MAX_FALL_BLOCKS_PER_QUALITY))
-  customRgbColors = $state(storedFlag('waveformCustomRgbColors'))
+  customRgbColors = $state(storedFlag('waveformCustomRgbColors', true))
   zoom = $state(Number(getSetting('waveformZoom')) || 1)
 
   private changed = new Listeners<[change: WaveformChange]>()
@@ -51,7 +51,7 @@ export class WaveformPrefs {
     return this.mode === '3band' || this.rgbColorsFromAudio
   }
 
-  /** One colour per waveform entry: rekordbox's, or with custom colours on, the gradient over `bands` once they are in. */
+  /** One colour per waveform entry: rekordbox's, or with custom colours on, the gradient over `bands` (grey until in). */
   rgbColors(
     rekordboxColors: Uint8Array | undefined,
     entriesPerSecond: number,
@@ -59,9 +59,11 @@ export class WaveformPrefs {
     bands: Uint8Array | undefined,
     bandsPerSecond: number | undefined
   ): Uint8Array | undefined {
-    if (!this.customRgbColors || !bands || !bandsPerSecond) return rekordboxColors
+    if (!this.customRgbColors) return rekordboxColors
     const { stopsLowToHigh } = rgbGradient
-    return gradientColors(bands, bandsPerSecond, entriesPerSecond, entries, stopsLowToHigh) ?? rekordboxColors
+    const computed =
+      bands && bandsPerSecond ? gradientColors(bands, bandsPerSecond, entriesPerSecond, entries, stopsLowToHigh) : null
+    return computed ?? pendingColors(entries)
   }
 
   setMode(mode: WaveformMode): void {

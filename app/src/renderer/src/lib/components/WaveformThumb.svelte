@@ -35,9 +35,9 @@
 
   function rgbColors(wave: BrowserWave): Uint8Array | undefined {
     const seconds = track.duration
-    if (!(seconds > 0)) return wave.colors
     const { rgbLength, bands, bandLength } = wave
-    return decks.prefs.waveform.rgbColors(wave.colors, rgbLength / seconds, rgbLength, bands, bandLength / seconds)
+    const timedBands = seconds > 0 ? bands : undefined
+    return decks.prefs.waveform.rgbColors(wave.colors, rgbLength / seconds, rgbLength, timedBands, bandLength / seconds)
   }
 
   function paint(canvas: HTMLCanvasElement): void {
