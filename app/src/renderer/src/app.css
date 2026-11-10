@@ -87,3 +87,12 @@
 @utility tabular {
   font-variant-numeric: tabular-nums;
 }
+
+@utility selected-row {
+  background-color: var(--color-select);
+  color: var(--color-fg);
+
+  & .text-faint {
+    color: var(--color-muted);
+  }
+}
