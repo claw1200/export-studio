@@ -4,7 +4,8 @@ import { describe, it } from 'node:test'
 
 register(new URL('./resolve-ts.mjs', import.meta.url).href)
 
-const { gradientColors, lowToHighBalance } = await import('../src/renderer/src/lib/waveform/gradientColors.ts')
+const { gradientColors, lowToHighBalance, stretchBalances } =
+  await import('../src/renderer/src/lib/waveform/gradientColors.ts')
 
 const RED_GREEN_BLUE = ['#ff0000', '#00ff00', '#0000ff']
 
@@ -23,6 +24,20 @@ describe('lowToHighBalance', () => {
 
   it('treats silence as low', () => {
     assert.equal(lowToHighBalance(0, 0, 0), 0)
+  })
+})
+
+describe('stretchBalances', () => {
+  it("spreads a track's range of balances across the whole gradient", () => {
+    const balances = new Float32Array([0.25, 0.5, 0.75])
+    stretchBalances(balances)
+    assert.deepEqual(Array.from(balances), [0, 0.5, 1])
+  })
+
+  it('leaves a track whose balances barely vary as it is', () => {
+    const balances = new Float32Array([0.5, 0.51, 0.52])
+    stretchBalances(balances)
+    assert.deepEqual(Array.from(balances), Array.from(new Float32Array([0.5, 0.51, 0.52])))
   })
 })
 

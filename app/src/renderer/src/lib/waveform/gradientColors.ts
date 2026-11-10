@@ -30,6 +30,44 @@ interface Colored {
 
 const coloredByBands = new WeakMap<Uint8Array, Colored>()
 
+/** Balances this rare at either end are let run off the gradient, so the rest spread across it. */
+const BALANCE_OUTLIER_SHARE = 0.02
+/** A track whose balances spread less than this keeps them as they are, rather than magnifying noise. */
+const MIN_BALANCE_SPREAD = 0.05
+
+function balanceAtShare(sortedBalances: Float32Array, share: number): number {
+  return sortedBalances[Math.round(share * (sortedBalances.length - 1))]
+}
+
+/** Spreads the track's own range of balances across the whole gradient. */
+export function stretchBalances(balances: Float32Array): void {
+  const sorted = balances.slice().sort()
+  const lowest = balanceAtShare(sorted, BALANCE_OUTLIER_SHARE)
+  const highest = balanceAtShare(sorted, 1 - BALANCE_OUTLIER_SHARE)
+  const spread = highest - lowest
+  if (spread < MIN_BALANCE_SPREAD) return
+  for (let i = 0; i < balances.length; i++) balances[i] = Math.min(1, Math.max(0, (balances[i] - lowest) / spread))
+}
+
+function entryBalances(
+  bands: Uint8Array,
+  bandsPerSecond: number,
+  entriesPerSecond: number,
+  entries: number
+): Float32Array | null {
+  const stride = Math.max(1, bandsPerSecond / entriesPerSecond)
+  const blocksPerSecond = bandsPerSecond / stride
+  const peaks = heldBandPeaks(bands, stride, blocksPerSecond)
+  const blocks = peaks.length / 3
+  if (blocks < 1 || entries < 1) return null
+  const balances = new Float32Array(entries)
+  for (let entry = 0; entry < entries; entry++) {
+    const block = Math.min(blocks - 1, Math.floor((entry * blocksPerSecond) / entriesPerSecond)) * 3
+    balances[entry] = lowToHighBalance(peaks[block], peaks[block + 1], peaks[block + 2])
+  }
+  return balances
+}
+
 /**
  * Red, green and blue bytes for each of `entries` waveform entries, laid out like rekordbox's RGB
  * colours, from where each entry's band peaks sit between the gradient's stops. Null without bands.
@@ -44,18 +82,12 @@ export function gradientColors(
   const key = `${bandsPerSecond}|${entriesPerSecond}|${entries}|${stopsLowToHigh.join()}`
   const kept = coloredByBands.get(bands)
   if (kept?.key === key) return kept.colors
-  const stride = Math.max(1, bandsPerSecond / entriesPerSecond)
-  const blocksPerSecond = bandsPerSecond / stride
-  const peaks = heldBandPeaks(bands, stride, blocksPerSecond)
-  const blocks = peaks.length / 3
-  if (blocks < 1 || entries < 1) return null
+  const balances = entryBalances(bands, bandsPerSecond, entriesPerSecond, entries)
+  if (!balances) return null
+  stretchBalances(balances)
   const stops = stopsLowToHigh.map(hexToRgb)
   const colors = new Uint8Array(entries * 3)
-  for (let entry = 0; entry < entries; entry++) {
-    const block = Math.min(blocks - 1, Math.floor((entry * blocksPerSecond) / entriesPerSecond)) * 3
-    const balance = lowToHighBalance(peaks[block], peaks[block + 1], peaks[block + 2])
-    writeGradientColor(stops, balance, colors, entry * 3)
-  }
+  for (let entry = 0; entry < entries; entry++) writeGradientColor(stops, balances[entry], colors, entry * 3)
   coloredByBands.set(bands, { key, colors })
   return colors
 }

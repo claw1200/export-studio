@@ -1,6 +1,6 @@
 /** The scrolling waveform around the playhead, with everything drawn over it. */
 import type { WaveSamples } from '../deck/waves.svelte'
-import { drawAnalysisBands, drawAnalysisRgb } from './analysis'
+import { drawAnalysisBands, drawRgbDetail } from './analysis'
 import type { Waveform, WaveformMode } from './data'
 import type { DetailView, Frame } from './frame'
 import {
@@ -43,7 +43,7 @@ function paintWave(
     const fall = fallBlocks >= 1 ? { blocksPerSecond, timeConstantBlocks: fallBlocks } : null
     drawAnalysisBands(ctx, custom.bands, from * scale, to * scale, pw, waveH, 'center', stride, fall)
   } else if (mode === '3band' && wf.bands) drawAnalysisBands(ctx, wf.bands, from, to, pw, waveH, 'center')
-  else if (wf.rgbHeights && rgbColors) drawAnalysisRgb(ctx, wf.rgbHeights, rgbColors, from, to, pw, waveH, 'center')
+  else if (wf.rgbHeights && rgbColors) drawRgbDetail(ctx, wf.rgbHeights, rgbColors, from, to, pw, waveH)
   ctx.restore()
 }
 

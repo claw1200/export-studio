@@ -2,7 +2,7 @@
   import type { BrowserWave } from '$lib/browserPreview.svelte'
   import { getApp } from '$lib/context'
   import type { Cue, Track } from '$lib/types'
-  import { drawAnalysisRgb, drawStackedBands } from '$lib/waveform/analysis'
+  import { drawRgbOverview, drawStackedBands } from '$lib/waveform/analysis'
   import { setupCanvas } from '$lib/waveform/canvas'
   import { drawCueMarks } from '$lib/waveform/cueMarks'
   import WaveformMarks from './WaveformMarks.svelte'
@@ -48,7 +48,7 @@
     const colors = rgbColors(wave)
     if (bands) drawStackedBands(ctx, bands, canvas.width, canvas.height)
     else if (wave.heights && colors)
-      drawAnalysisRgb(ctx, wave.heights, colors, 0, wave.rgbLength, canvas.width, canvas.height, 'bottom')
+      drawRgbOverview(ctx, wave.heights, colors, wave.rgbLength, canvas.width, canvas.height)
     else if (wave.bands) drawStackedBands(ctx, wave.bands, canvas.width, canvas.height)
     if (!live) drawCueMarks(ctx, cues, span, width, height, window.devicePixelRatio || 1)
   }
