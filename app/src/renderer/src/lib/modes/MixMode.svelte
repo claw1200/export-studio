@@ -27,7 +27,7 @@
   )
 
   $effect(() => keybinds.register(playOnlyKeys(a)))
-  $effect(() => keybinds.register(playOnlyKeys(b), 'shift'))
+  $effect(() => keybinds.register(playOnlyKeys(b), 'modified'))
   $effect(() => keybinds.register({ 'mix.playBoth': () => mixer.toggle() }))
   $effect(() => {
     decks.mixMaster = mixer.master

@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 
 register(new URL('./resolve-ts.mjs', import.meta.url).href)
 
-const { keyMatch, toCamelot, withinCutoff, keyMatchColor, heardKey } =
+const { keyMatch, toCamelot, withinCutoff, keyMatchColor, heardKey, heardSemitones } =
   await import('../src/renderer/src/lib/mix/harmonic.ts')
 
 describe('keyMatch', () => {
@@ -91,5 +91,13 @@ describe('heardKey', () => {
     assert.equal(heardKey('1A', { rate: 2 ** (1 / 12), keyShift: 0, masterTempo: false }), '8A')
     assert.equal(heardKey('1A', { rate: 2 ** (1 / 12), keyShift: 0, masterTempo: true }), '1A')
     assert.equal(heardKey('', { rate: 1, keyShift: 3, masterTempo: false }), '')
+  })
+})
+
+describe('heardSemitones', () => {
+  it('adds the exact pitch of the tempo unless master tempo holds it', () => {
+    assert.equal(heardSemitones({ rate: 1, keyShift: -2, masterTempo: false }), -2)
+    assert.ok(Math.abs(heardSemitones({ rate: 1.04, keyShift: 1, masterTempo: false }) - 1.679) < 0.001)
+    assert.equal(heardSemitones({ rate: 1.04, keyShift: 1, masterTempo: true }), 1)
   })
 })

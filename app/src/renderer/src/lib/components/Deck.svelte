@@ -6,7 +6,6 @@
   import type { Player } from '$lib/player.svelte'
   import { DEVICE_TRACKS_READ_ONLY, isDeviceTrack } from '$lib/trackIds'
   import WaveformOverview from './WaveformOverview.svelte'
-  import TempoFader from './TempoFader.svelte'
   import WaveformToolbar from './deck/WaveformToolbar.svelte'
   import GridEditorBar from './deck/GridEditorBar.svelte'
   import TempoLane from './deck/TempoLane.svelte'
@@ -15,6 +14,7 @@
   import HotCueBar from './deck/HotCueBar.svelte'
   import LoopControls from './deck/LoopControls.svelte'
   import TempoSteppers from './deck/TempoSteppers.svelte'
+  import MasterTempoButton from './deck/MasterTempoButton.svelte'
   import DeckShell from './deck/DeckShell.svelte'
   import { segmentGroup, segmentButton } from './deck/segment'
 
@@ -24,7 +24,7 @@
   const { library, decks, keybinds } = getApp()
   // svelte-ignore state_referenced_locally
   setPlayer(player)
-  setDeckInfo({ label: null, shifted: false })
+  setDeckInfo({ label: null, modifiedKeys: false })
   const shortcut = useShortcut()
   // svelte-ignore state_referenced_locally
   const grid = player.grid
@@ -104,48 +104,46 @@
     <TempoLane />
   {/if}
 
-  <div class="flex">
-    <TempoFader />
-    <div class="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2.5 px-4 py-3">
-      <div class="flex items-center gap-3">
-        <Transport class="flex-col" />
-        <TrackInfo size="lg" class="min-w-[360px] flex-1" />
-      </div>
-      <div class="relative h-[52px] overflow-hidden rounded bg-wave">
-        <WaveformOverview />
-      </div>
+  <div class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2.5 px-4 py-3">
+    <div class="flex items-center gap-3">
+      <Transport class="flex-col" />
+      <TrackInfo size="lg" class="min-w-[360px] flex-1" />
+    </div>
+    <div class="relative h-[52px] overflow-hidden rounded bg-wave">
+      <WaveformOverview />
+    </div>
 
-      <div class="flex items-center gap-3">
-        <LoopControls />
-        <div class="flex shrink-0 gap-1">
-          <TempoSteppers stepperClass="w-[104px]" />
-        </div>
+    <div class="flex items-center gap-3">
+      <LoopControls />
+      <div class="flex shrink-0 items-center gap-1">
+        <TempoSteppers />
+        <MasterTempoButton rememberAsDefault />
       </div>
-      <div class="flex items-center gap-3">
-        <div class={segmentGroup} role="group" aria-label="Hot cues or beatgrid">
-          <button
-            class={segmentButton(!editingGrid, 'accent')}
-            aria-pressed={!editingGrid}
-            title={editingGrid ? 'Save the beatgrid and go back to the hot cues' : 'Hot cues'}
-            onclick={() => {
-              if (editingGrid) void saveGrid()
-            }}>CUES</button
-          >
-          <button
-            class={segmentButton(editingGrid, 'accent')}
-            disabled={!editingGrid && !gridEditable}
-            aria-pressed={editingGrid}
-            title={editingGrid ? 'Editing the beatgrid' : gridTitle}
-            onclick={beginGridEdit}>GRID</button
-          >
-        </div>
-        <div class="flex min-w-0 flex-1 justify-center">
-          {#if editingGrid}
-            <GridEditorBar onsave={saveGrid} />
-          {:else}
-            <HotCueBar class="w-full max-w-[618px]" />
-          {/if}
-        </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class={segmentGroup} role="group" aria-label="Hot cues or beatgrid">
+        <button
+          class={segmentButton(!editingGrid, 'accent')}
+          aria-pressed={!editingGrid}
+          title={editingGrid ? 'Save the beatgrid and go back to the hot cues' : 'Hot cues'}
+          onclick={() => {
+            if (editingGrid) void saveGrid()
+          }}>CUES</button
+        >
+        <button
+          class={segmentButton(editingGrid, 'accent')}
+          disabled={!editingGrid && !gridEditable}
+          aria-pressed={editingGrid}
+          title={editingGrid ? 'Editing the beatgrid' : gridTitle}
+          onclick={beginGridEdit}>GRID</button
+        >
+      </div>
+      <div class="flex min-w-0 flex-1 justify-center">
+        {#if editingGrid}
+          <GridEditorBar onsave={saveGrid} />
+        {:else}
+          <HotCueBar class="w-full max-w-[618px]" />
+        {/if}
       </div>
     </div>
   </div>

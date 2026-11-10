@@ -65,10 +65,24 @@ function mod(n: number, m: number): number {
   return ((n % m) + m) % m
 }
 
-/** Semitones the pitch moves at `rate` (1 is the file's own pitch), to the nearest one. */
 export function pitchSemitones(rate: number): number {
   if (!(rate > 0)) return 0
-  return Math.round(12 * Math.log2(rate))
+  return 12 * Math.log2(rate)
+}
+
+const withSign = (n: number, magnitude: string): string => `${n > 0 ? '+' : '−'}${magnitude}`
+
+export function formatTempoChange(percent: number): string {
+  const hundredths = Math.round(percent * 100)
+  if (!hundredths) return '0.00%'
+  return withSign(hundredths, `${(Math.abs(hundredths) / 100).toFixed(2)}%`)
+}
+
+export function formatKeyChange(semitones: number): string {
+  const tenths = Math.round(semitones * 10)
+  if (!tenths) return '0'
+  const magnitude = Math.abs(tenths) / 10
+  return withSign(tenths, Number.isInteger(magnitude) ? String(magnitude) : magnitude.toFixed(1))
 }
 
 /** The key heard when the pitch moves by `semitones`. Camelot stays Camelot; a note name keeps its spelling. */

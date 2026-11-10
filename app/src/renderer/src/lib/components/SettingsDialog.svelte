@@ -54,11 +54,14 @@
     chordFromEvent,
     chordKeys,
     chordLabel,
+    LAYER_MODIFIERS,
+    layerModifierName,
     type ActionGroup,
-    type ActionId
+    type ActionId,
+    type LayerModifier
   } from '$lib/keymap'
   import type { BrowserTrackStyle } from '$lib/library.svelte'
-  import type { CuePlacement } from '$lib/deck/prefs.svelte'
+  import type { CuePlacement, TempoReadout } from '$lib/deck/prefs.svelte'
   import type { Backup, BackupProgress, BackupReason, ConvertFormat, ConvertPreset } from '$lib/types'
   import type { GridMode } from '../../../../preload/analysis'
   import { REPO_URL, type Update } from '../../../../shared/updates'
@@ -104,6 +107,10 @@
   const PLACEMENTS: { id: CuePlacement; label: string }[] = [
     { id: 'playhead', label: 'Playhead' },
     { id: 'cuePoint', label: 'Cue point' }
+  ]
+  const TEMPO_READOUTS: (Choice & { id: TempoReadout })[] = [
+    { id: 'absolute', label: 'Value' },
+    { id: 'relative', label: 'Change' }
   ]
   const TRACK_STYLES: (Choice & { id: BrowserTrackStyle })[] = [
     { id: 'standard', label: 'Standard' },
@@ -553,6 +560,13 @@
                 {/each}
               </div>
             </div>
+            {@render choice(
+              'BPM and key readout',
+              `Whether the deck steppers show the BPM and key, or how far they have moved from the track. Hold ${layerModifierName(keybinds.layerModifier)} to see and change the other.`,
+              TEMPO_READOUTS,
+              prefs.tempoReadout,
+              (id) => prefs.setTempoReadout(id as TempoReadout)
+            )}
           </div>
 
           <section class="mt-5">
@@ -840,9 +854,25 @@
             <RotateCcw class="size-3.5" /> Restore defaults
           </button>
         {:else}
-          <p class="mb-4 px-2 text-[11.5px] leading-snug text-faint">
-            In mix mode the deck shortcuts control deck A. Hold Shift with them to control deck B.
-          </p>
+          <div class="mb-4 flex items-start gap-3 rounded-md px-2 py-2">
+            <span class="min-w-0 flex-1">
+              <span class="block text-[12.5px] font-medium">Layer modifier</span>
+              <span class="mt-0.5 block text-[11px] leading-snug text-faint">
+                In mix mode the deck shortcuts control deck A. Hold this key with them to control deck B. It also swaps
+                what the BPM and key steppers show.
+              </span>
+            </span>
+            <select
+              class="h-7 shrink-0 rounded-md border border-line bg-bg px-2 text-[12px] text-fg"
+              aria-label="Layer modifier"
+              value={keybinds.layerModifier}
+              onchange={(e) => keybinds.setLayerModifier(e.currentTarget.value as LayerModifier)}
+            >
+              {#each LAYER_MODIFIERS as modifier (modifier)}
+                <option value={modifier}>{layerModifierName(modifier)}</option>
+              {/each}
+            </select>
+          </div>
           {#each groups as { group, ids } (group)}
             <section class="mb-5 last:mb-0">
               <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">{group}</h3>
