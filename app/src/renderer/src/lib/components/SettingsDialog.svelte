@@ -1,6 +1,6 @@
 <script module lang="ts">
   export type SettingsSection =
-    'general' | 'display' | 'mix' | 'analysis' | 'convert' | 'database' | 'keyboard' | 'developer' | 'about'
+    'general' | 'display' | 'theme' | 'mix' | 'analysis' | 'convert' | 'database' | 'keyboard' | 'developer' | 'about'
 </script>
 
 <script lang="ts">
@@ -17,6 +17,7 @@
     Keyboard,
     LoaderCircle,
     Monitor,
+    Palette,
     Plus,
     RotateCcw,
     Search,
@@ -99,6 +100,7 @@
   const SECTIONS: { id: SettingsSection; label: string; icon: typeof Keyboard }[] = [
     { id: 'general', label: 'General', icon: SlidersHorizontal },
     { id: 'display', label: 'Display', icon: Monitor },
+    { id: 'theme', label: 'Theme & colors', icon: Palette },
     { id: 'mix', label: 'Mix', icon: Blend },
     { id: 'analysis', label: 'Import & analysis', icon: AudioWaveform },
     { id: 'convert', label: 'Convert formats', icon: FileAudio },
@@ -364,13 +366,6 @@
             </div>
           </div>
         {:else if section === 'developer'}
-          {@render colorPicker(
-            'Accent color',
-            'Buttons, highlights, and progress.',
-            accent.color,
-            DEFAULT_ACCENT,
-            (color) => accent.set(color)
-          )}
           {@render toggle(
             'Snap playhead',
             'Draw the playhead exactly where the audio engine reports it, instead of easing small corrections. Can look less smooth.',
@@ -387,35 +382,8 @@
             )}
           </section>
           <section class="mt-5">
-            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Color waveform</h3>
-            {@render toggle(
-              'Custom colors',
-              'Color the waveform ourselves: each moment sits on a gradient from the low to the high color by where its sound lies. Decks read the audio; the browser reads the rekordbox 3-band preview. Off uses the rekordbox colors.',
-              prefs.waveform.customRgbColors,
-              () => prefs.waveform.setCustomRgbColors(!prefs.waveform.customRgbColors)
-            )}
-            {#if prefs.waveform.customRgbColors}
-              {#each BAND_NAMES_LOW_TO_HIGH as name, band (name)}
-                {@render colorPicker(
-                  `${name} color`,
-                  `Where the sound is mostly ${name.toLowerCase()}.`,
-                  rgbGradient.stopsLowToHigh[band],
-                  DEFAULT_RGB_GRADIENT[band],
-                  (color) => rgbGradient.setStop(band, color)
-                )}
-              {/each}
-            {/if}
-          </section>
-          <section class="mt-5">
-            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">3-band waveform</h3>
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Waveform colors</h3>
             {#each BAND_NAMES_LOW_TO_HIGH as name, band (name)}
-              {@render colorPicker(
-                `${name} color`,
-                `Fill for the ${name.toLowerCase()} band.`,
-                bandStyle.colors[band],
-                DEFAULT_BAND_STYLE.colors[band],
-                (color) => bandStyle.setColor(band, color)
-              )}
               {#if band > 0}
                 {@render slider(
                   `${name} opacity`,
@@ -450,6 +418,46 @@
                 Reset
               </button>
             </div>
+          </section>
+        {:else if section === 'theme'}
+          {@render colorPicker(
+            'Accent color',
+            'Buttons, highlights, and progress.',
+            accent.color,
+            DEFAULT_ACCENT,
+            (color) => accent.set(color)
+          )}
+          <section class="mt-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Color waveform</h3>
+            {@render toggle(
+              'Custom colors',
+              'Color the waveform by sound, from low to high. Off uses the rekordbox colors.',
+              prefs.waveform.customRgbColors,
+              () => prefs.waveform.setCustomRgbColors(!prefs.waveform.customRgbColors)
+            )}
+            {#if prefs.waveform.customRgbColors}
+              {#each BAND_NAMES_LOW_TO_HIGH as name, band (name)}
+                {@render colorPicker(
+                  `${name} color`,
+                  `The color for the ${name.toLowerCase()} band.`,
+                  rgbGradient.stopsLowToHigh[band],
+                  DEFAULT_RGB_GRADIENT[band],
+                  (color) => rgbGradient.setStop(band, color)
+                )}
+              {/each}
+            {/if}
+          </section>
+          <section class="mt-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">3-band waveform</h3>
+            {#each BAND_NAMES_LOW_TO_HIGH as name, band (name)}
+              {@render colorPicker(
+                `${name} color`,
+                `Fill color for the ${name.toLowerCase()} band.`,
+                bandStyle.colors[band],
+                DEFAULT_BAND_STYLE.colors[band],
+                (color) => bandStyle.setColor(band, color)
+              )}
+            {/each}
           </section>
         {:else if section === 'display'}
           <section class="mb-5">
