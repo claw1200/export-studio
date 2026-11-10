@@ -12,7 +12,7 @@ import {
   readBandLevel,
   rgbPeakIndex
 } from './columns'
-import { bandFall } from './fall'
+import { type BandFall, bandFall } from './fall'
 
 /** Overview peaks stop this far short of the top of the waveform window. */
 export const OVERVIEW_TOP_PAD = 0.1
@@ -73,7 +73,7 @@ function clearedBandLayers(pw: number, ph: number): CanvasRenderingContext2D {
 
 /**
  * Entries `from`–`to` of interleaved low/mid/high bands, each band layered over the one below.
- * `stride` reads every so-many entries as one; `fallBlocks` is how slowly each level eases down after a peak.
+ * `stride` reads every so-many entries as one; with `fall`, each level eases down after a peak.
  */
 export function drawAnalysisBands(
   ctx: CanvasRenderingContext2D,
@@ -84,9 +84,9 @@ export function drawAnalysisBands(
   ph: number,
   anchor: 'bottom' | 'center',
   stride = 1,
-  fallBlocks = 0
+  fall: BandFall | null = null
 ): void {
-  const fallen = fallBlocks >= 1 ? bandFall(bands, stride, fallBlocks) : null
+  const fallen = fall ? bandFall(bands, stride, fall) : null
   const source = fallen ? bandSource(fallen, 1) : bandSource(bands, stride)
   const grid = pixelGrid(from, to, pw)
   if (!grid || source.count < 1) return

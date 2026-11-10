@@ -1,31 +1,15 @@
-type CurvePoint = readonly [inputLevel: number, outputLevel: number]
+export type LevelCurve = (inputLevel: number) => number
 
-/** Points from input level 0 to 1, in order; levels between them are joined by straight lines. */
-export type LevelCurve = readonly CurvePoint[]
-
-const UNCHANGED: LevelCurve = [
-  [0, 0],
-  [1, 1]
-]
-
-const LIFTED_QUIET_MIDS: LevelCurve = [
-  [0, 0],
-  [0.2, 0.32],
-  [0.5, 0.65],
-  [0.8, 0.88],
-  [1, 1]
-]
-
-const BAND_CURVES_LOW_TO_HIGH: readonly LevelCurve[] = [UNCHANGED, LIFTED_QUIET_MIDS, UNCHANGED]
-
-export function followCurve(curve: LevelCurve, inputLevel: number): number {
-  let upper = 1
-  while (upper < curve.length - 1 && inputLevel > curve[upper][0]) upper++
-  const [fromInput, fromOutput] = curve[upper - 1]
-  const [toInput, toOutput] = curve[upper]
-  return fromOutput + ((inputLevel - fromInput) / (toInput - fromInput)) * (toOutput - fromOutput)
+export function softClip(drive: number, scale: number): LevelCurve {
+  const fullScale = Math.tanh(drive)
+  return (inputLevel) => Math.tanh(drive * inputLevel) / (fullScale * scale)
 }
 
+const unchanged: LevelCurve = (inputLevel) => inputLevel
+
+// const BAND_CURVES_LOW_TO_HIGH: readonly LevelCurve[] = [unchanged, softClip(1.3), unchanged]
+const BAND_CURVES_LOW_TO_HIGH: readonly LevelCurve[] = [softClip(1, 1.4), softClip(1.3, 1.4), softClip(0.01, 1.4)]
+
 export function shapeBandLevel(band: number, level: number): number {
-  return followCurve(BAND_CURVES_LOW_TO_HIGH[band], level)
+  return BAND_CURVES_LOW_TO_HIGH[band](level)
 }

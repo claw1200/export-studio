@@ -1,14 +1,26 @@
 import { Lru } from '../lru'
 import { logicalCount } from './columns'
 
+export interface BandFall {
+  blocksPerSecond: number
+  timeConstantBlocks: number
+}
+
 interface Peaks {
   stride: number
+  blocksPerSecond: number
   data: Uint8Array
 }
 
 interface Fallen extends Peaks {
   timeConstantBlocks: number
 }
+
+/**
+ * The lowest frequency each band carries. Entries are far shorter than a bass cycle, so they
+ * trace the rectified wave; holding a level for half its cycle stops each ripple reading as a hit.
+ */
+const LOWEST_HZ_LOW_TO_HIGH = [40, 200, 2000]
 
 /** Every deck on screen, with room to switch back. */
 const TRACKS_KEPT = 4
@@ -39,6 +51,39 @@ function peaksPerStride(bands: Uint8Array, stride: number): Uint8Array {
   return out
 }
 
+/** Van Herk/Gil-Werman: the max of each `reach`-either-side window from running maxima within window-sized chunks. */
+export function slidingMax(column: Uint8Array, reach: number): Uint8Array {
+  const width = reach * 2 + 1
+  const silencePadded = new Uint8Array(column.length + reach * 2)
+  silencePadded.set(column, reach)
+  const n = silencePadded.length
+  const forward = new Uint8Array(n)
+  const backward = new Uint8Array(n)
+  for (let chunk = 0; chunk < n; chunk += width) {
+    const end = Math.min(n, chunk + width)
+    let running = 0
+    for (let i = chunk; i < end; i++) forward[i] = running = Math.max(running, silencePadded[i])
+    running = 0
+    for (let i = end - 1; i >= chunk; i--) backward[i] = running = Math.max(running, silencePadded[i])
+  }
+  const out = new Uint8Array(column.length)
+  for (let i = 0; i < column.length; i++) out[i] = Math.max(backward[i], forward[i + width - 1])
+  return out
+}
+
+function holdOverHalfCycle(peaks: Uint8Array, blocksPerSecond: number): Uint8Array {
+  const blocks = peaks.length / 3
+  const out = new Uint8Array(peaks.length)
+  const column = new Uint8Array(blocks)
+  for (let band = 0; band < 3; band++) {
+    const quarterCycleBlocks = Math.round(blocksPerSecond / LOWEST_HZ_LOW_TO_HIGH[band] / 4)
+    for (let block = 0; block < blocks; block++) column[block] = peaks[block * 3 + band]
+    const held = quarterCycleBlocks > 0 ? slidingMax(column, quarterCycleBlocks) : column
+    for (let block = 0; block < blocks; block++) out[block * 3 + band] = held[block]
+  }
+  return out
+}
+
 function decayAfterPeaks(peaks: Uint8Array, timeConstantBlocks: number): Uint8Array {
   const decayPerBlock = Math.exp(-1 / timeConstantBlocks)
   const out = new Uint8Array(peaks.length)
@@ -56,18 +101,24 @@ function decayAfterPeaks(peaks: Uint8Array, timeConstantBlocks: number): Uint8Ar
   return out
 }
 
-function cachedPeaks(bands: Uint8Array, stride: number): Uint8Array {
+function cachedHeldPeaks(bands: Uint8Array, stride: number, blocksPerSecond: number): Uint8Array {
   const kept = peaksByTrack.get(bands)
-  if (kept && kept.stride === stride) return kept.data
-  const data = peaksPerStride(bands, stride)
-  peaksByTrack.set(bands, { stride, data })
+  if (kept && kept.stride === stride && kept.blocksPerSecond === blocksPerSecond) return kept.data
+  const data = holdOverHalfCycle(peaksPerStride(bands, stride), blocksPerSecond)
+  peaksByTrack.set(bands, { stride, blocksPerSecond, data })
   return data
 }
 
-export function bandFall(bands: Uint8Array, stride: number, timeConstantBlocks: number): Uint8Array {
+export function bandFall(bands: Uint8Array, stride: number, fall: BandFall): Uint8Array {
+  const { blocksPerSecond, timeConstantBlocks } = fall
   const kept = fallenByTrack.get(bands)
-  if (kept && kept.stride === stride && kept.timeConstantBlocks === timeConstantBlocks) return kept.data
-  const data = decayAfterPeaks(cachedPeaks(bands, stride), timeConstantBlocks)
-  fallenByTrack.set(bands, { stride, timeConstantBlocks, data })
+  const unchanged =
+    kept &&
+    kept.stride === stride &&
+    kept.blocksPerSecond === blocksPerSecond &&
+    kept.timeConstantBlocks === timeConstantBlocks
+  if (unchanged) return kept.data
+  const data = decayAfterPeaks(cachedHeldPeaks(bands, stride, blocksPerSecond), timeConstantBlocks)
+  fallenByTrack.set(bands, { stride, blocksPerSecond, timeConstantBlocks, data })
   return data
 }

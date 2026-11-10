@@ -37,8 +37,10 @@ function paintWave(
   if (mode === 'rgb' && custom) drawSampleWave(ctx, wf, custom, from, to, pw, waveH, quality)
   else if (mode === '3band' && custom?.bands && custom.bandRate) {
     const stride = waveStride(quality)
-    const scale = custom.bandRate / stride / wf.rate
-    drawAnalysisBands(ctx, custom.bands, from * scale, to * scale, pw, waveH, 'center', stride, fallBlocks)
+    const blocksPerSecond = custom.bandRate / stride
+    const scale = blocksPerSecond / wf.rate
+    const fall = fallBlocks >= 1 ? { blocksPerSecond, timeConstantBlocks: fallBlocks } : null
+    drawAnalysisBands(ctx, custom.bands, from * scale, to * scale, pw, waveH, 'center', stride, fall)
   } else if (mode === '3band' && wf.bands) drawAnalysisBands(ctx, wf.bands, from, to, pw, waveH, 'center')
   else if (wf.rgbHeights && wf.rgbColors)
     drawAnalysisRgb(ctx, wf.rgbHeights, wf.rgbColors, from, to, pw, waveH, 'center')
