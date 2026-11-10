@@ -62,6 +62,8 @@
   } from '$lib/keymap'
   import type { BrowserTrackStyle } from '$lib/library.svelte'
   import type { CuePlacement, TempoReadout } from '$lib/deck/prefs.svelte'
+  import { FALL_BLOCKS_PER_QUALITY_STEP, MAX_FALL_BLOCKS_PER_QUALITY, MAX_QUALITY } from '$lib/deck/display.svelte'
+  import type { WaveformMode } from '$lib/waveform/data'
   import type { Backup, BackupProgress, BackupReason, ConvertFormat, ConvertPreset } from '$lib/types'
   import type { GridMode } from '../../../../preload/analysis'
   import { REPO_URL, type Update } from '../../../../shared/updates'
@@ -378,28 +380,6 @@
               <RotateCcw class="size-3" />
             </button>
           </div>
-          <div class="flex items-center gap-3 rounded-md px-2 py-2">
-            <span class="min-w-0 flex-1">
-              <span class="block text-[12.5px] font-medium">Fall blocks</span>
-              <span class="mt-0.5 block text-[11px] leading-snug text-faint">
-                How many blocks a 3-band fall slopes across. 0 keeps the steps.
-              </span>
-            </span>
-            <input
-              class="h-4 w-28 shrink-0 cursor-pointer accent-accent"
-              type="range"
-              min="0"
-              max="100"
-              step="1"
-              aria-label="Fall blocks"
-              aria-valuetext={String(prefs.waveform.fallBlocks)}
-              value={prefs.waveform.fallBlocks}
-              oninput={(e) => prefs.waveform.setFallBlocks(Number(e.currentTarget.value))}
-            />
-            <span class="w-9 shrink-0 text-right font-mono text-[11px] text-muted tabular-nums">
-              {prefs.waveform.fallBlocks}
-            </span>
-          </div>
           {@render toggle(
             'Snap playhead',
             'Draw the playhead exactly where the audio engine reports it, instead of easing small corrections. Can look less smooth.',
@@ -416,29 +396,14 @@
               library.browserTrackStyle,
               (id) => library.setBrowserTrackStyle(id as BrowserTrackStyle)
             )}
-            <div class="flex items-center gap-3 rounded-md px-2 py-2">
-              <span class="min-w-0 flex-1">
-                <span class="block text-[12.5px] font-medium">Track height</span>
-                <span class="mt-0.5 block text-[11px] leading-snug text-faint">
-                  Height of each track in the browser. Text, artwork and waveforms scale with it. Lower fits more
-                  tracks, higher is easier to read.
-                </span>
-              </span>
-              <input
-                class="h-4 w-28 shrink-0 cursor-pointer accent-accent"
-                type="range"
-                min={ROW_HEIGHT_MIN}
-                max={ROW_HEIGHT_MAX}
-                step={ROW_HEIGHT_STEP}
-                aria-label="Track height"
-                aria-valuetext="{library.browserRowHeight} pixels"
-                value={library.browserRowHeight}
-                oninput={(e) => library.setBrowserRowHeight(Number(e.currentTarget.value))}
-              />
-              <span class="w-9 shrink-0 text-right font-mono text-[11px] text-muted tabular-nums">
-                {library.browserRowHeight}px
-              </span>
-            </div>
+            {@render slider(
+              'Track height',
+              'Height of each track in the browser. Text, artwork and waveforms scale with it. Lower fits more tracks, higher is easier to read.',
+              { min: ROW_HEIGHT_MIN, max: ROW_HEIGHT_MAX, step: ROW_HEIGHT_STEP },
+              library.browserRowHeight,
+              `${library.browserRowHeight}px`,
+              (height) => library.setBrowserRowHeight(height)
+            )}
             {@render toggle(
               'Hide streaming tracks',
               'Leave tracks from streaming services out of the collection, playlists, histories and tags. They stay in rekordbox.',
@@ -465,28 +430,24 @@
 
           <section class="mb-5">
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Waveforms</h3>
-            <div class="flex items-center gap-3 rounded-md px-2 py-2">
-              <span class="min-w-0 flex-1">
-                <span class="block text-[12.5px] font-medium">High quality waveforms</span>
-                <span class="mt-0.5 block text-[11px] leading-snug text-faint">
-                  Draw the detail waveform from the audio. Off uses the rekordbox analysis. Higher keeps more detail.
-                </span>
-              </span>
-              <input
-                class="h-4 w-28 shrink-0 cursor-pointer accent-accent"
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                aria-label="High quality waveforms"
-                aria-valuetext={prefs.waveform.quality === 0 ? 'Off' : `${prefs.waveform.quality}%`}
-                value={prefs.waveform.quality}
-                oninput={(e) => prefs.waveform.setQuality(Number(e.currentTarget.value))}
-              />
-              <span class="w-9 shrink-0 text-right font-mono text-[11px] text-muted tabular-nums">
-                {prefs.waveform.quality === 0 ? 'Off' : `${prefs.waveform.quality}%`}
-              </span>
-            </div>
+            {@render qualitySlider(
+              'RGB quality',
+              'Draw the RGB detail waveform from the audio. Off uses the rekordbox analysis. Higher keeps more detail.',
+              'rgb'
+            )}
+            {@render qualitySlider(
+              '3-band quality',
+              'Draw the 3-band detail waveform from the audio. Off uses the rekordbox analysis. Higher keeps more detail.',
+              '3band'
+            )}
+            {@render slider(
+              'Smoothing',
+              'How gently the 3-band waveform eases down after each peak. Off shows hard steps.',
+              { min: 0, max: MAX_FALL_BLOCKS_PER_QUALITY, step: FALL_BLOCKS_PER_QUALITY_STEP },
+              prefs.waveform.fallBlocksPerQuality,
+              prefs.waveform.fallBlocksPerQuality === 0 ? 'Off' : `${prefs.waveform.fallBlocksPerQuality.toFixed(2)}×`,
+              (blocks) => prefs.waveform.setFallBlocksPerQuality(blocks)
+            )}
           </section>
         {:else if section === 'mix'}
           <MixCurvePreview curve={mixPrefs.curve} range={mixPrefs.swapRange} />
@@ -970,6 +931,46 @@
     {label}
     <ExternalLink class="size-3" />
   </a>
+{/snippet}
+
+{#snippet slider(
+  label: string,
+  description: string,
+  range: { min: number; max: number; step: number },
+  value: number,
+  valueText: string,
+  set: (value: number) => void
+)}
+  <div class="flex items-center gap-3 rounded-md px-2 py-2">
+    <span class="min-w-0 flex-1">
+      <span class="block text-[12.5px] font-medium">{label}</span>
+      <span class="mt-0.5 block text-[11px] leading-snug text-faint">{description}</span>
+    </span>
+    <input
+      class="h-4 w-28 shrink-0 cursor-pointer accent-accent"
+      type="range"
+      min={range.min}
+      max={range.max}
+      step={range.step}
+      aria-label={label}
+      aria-valuetext={valueText}
+      {value}
+      oninput={(e) => set(Number(e.currentTarget.value))}
+    />
+    <span class="w-9 shrink-0 text-right font-mono text-[11px] text-muted tabular-nums">{valueText}</span>
+  </div>
+{/snippet}
+
+{#snippet qualitySlider(label: string, description: string, mode: WaveformMode)}
+  {@const quality = prefs.waveform.qualities[mode]}
+  {@render slider(
+    label,
+    description,
+    { min: 0, max: MAX_QUALITY[mode], step: 1 },
+    quality,
+    quality === 0 ? 'Off' : `${quality}%`,
+    (q) => prefs.waveform.setQuality(mode, q)
+  )}
 {/snippet}
 
 {#snippet toggle(label: string, description: string, on: boolean, flip: () => void)}

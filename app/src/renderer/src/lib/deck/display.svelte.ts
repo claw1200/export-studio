@@ -1,25 +1,42 @@
 import { Listeners } from '../listeners'
 import { getSetting, setSetting } from '../settings'
 import type { WaveformMode } from '../waveform/data'
-import { storedPercent } from './stored'
+import { type Percent, storedNumber, storedPercent } from './stored'
 import { WaveLoader, type WaveSamples } from './waves.svelte'
 
 /** What changed in the waveform preferences, so each deck can decide whether to fetch again. */
-type WaveformChange = { kind: 'mode' } | { kind: 'quality'; wasOff: boolean }
+type WaveformChange = { kind: 'mode' } | { kind: 'quality'; mode: WaveformMode; wasOff: boolean }
+
+const QUALITY_KEYS: Record<WaveformMode, string> = { rgb: 'waveQualityRgb', '3band': 'waveQuality3band' }
+const DEFAULT_QUALITY = storedPercent('waveQuality', 30)
+export const MAX_QUALITY: Record<WaveformMode, Percent> = { rgb: 100, '3band': 25 }
+
+function storedQuality(mode: WaveformMode): Percent {
+  return Math.min(MAX_QUALITY[mode], storedPercent(QUALITY_KEYS[mode], DEFAULT_QUALITY))
+}
+
+export const MAX_FALL_BLOCKS_PER_QUALITY = 3
+export const FALL_BLOCKS_PER_QUALITY_STEP = 0.05
 
 /** How every deck's waveforms are drawn, kept between sessions. */
 export class WaveformPrefs {
   mode = $state<WaveformMode>((getSetting('waveformMode') as WaveformMode) || '3band')
-  /** Detail of the engine's own waveform, 0 to 100; 0 draws rekordbox's analysis instead. */
-  quality = $state(storedPercent('waveQuality', 30))
-  /** How far the 3-band levels fall after a peak, 0 to 100 blocks. */
-  fallBlocks = $state(storedPercent('fallBlocks', 40))
+  qualities = $state<Record<WaveformMode, Percent>>({ rgb: storedQuality('rgb'), '3band': storedQuality('3band') })
+  fallBlocksPerQuality = $state(storedNumber('fallBlocksPerQuality', 1.3, 0, MAX_FALL_BLOCKS_PER_QUALITY))
   zoom = $state(Number(getSetting('waveformZoom')) || 1)
 
   private changed = new Listeners<[change: WaveformChange]>()
 
   subscribe(listener: (change: WaveformChange) => void): () => void {
     return this.changed.add(listener)
+  }
+
+  get quality(): Percent {
+    return this.qualities[this.mode]
+  }
+
+  get fallBlocks(): number {
+    return Math.round(this.fallBlocksPerQuality * this.qualities['3band'])
   }
 
   setMode(mode: WaveformMode): void {
@@ -29,20 +46,21 @@ export class WaveformPrefs {
     this.emit({ kind: 'mode' })
   }
 
-  setQuality(quality: number): void {
-    const q = Math.min(100, Math.max(0, Math.round(quality)))
-    if (this.quality === q) return
-    const wasOff = this.quality <= 0
-    this.quality = q
-    setSetting('waveQuality', String(q))
-    this.emit({ kind: 'quality', wasOff })
+  setQuality(mode: WaveformMode, quality: Percent): void {
+    const q = Math.min(MAX_QUALITY[mode], Math.max(0, Math.round(quality)))
+    if (this.qualities[mode] === q) return
+    const wasOff = this.qualities[mode] <= 0
+    this.qualities[mode] = q
+    setSetting(QUALITY_KEYS[mode], String(q))
+    this.emit({ kind: 'quality', mode, wasOff })
   }
 
-  setFallBlocks(blocks: number): void {
-    const n = Math.min(100, Math.max(0, Math.round(blocks)))
-    if (this.fallBlocks === n) return
-    this.fallBlocks = n
-    setSetting('fallBlocks', String(n))
+  setFallBlocksPerQuality(scale: number): void {
+    const steps = Math.round(Math.min(MAX_FALL_BLOCKS_PER_QUALITY, Math.max(0, scale)) / FALL_BLOCKS_PER_QUALITY_STEP)
+    const snapped = Number((steps * FALL_BLOCKS_PER_QUALITY_STEP).toFixed(2))
+    if (this.fallBlocksPerQuality === snapped) return
+    this.fallBlocksPerQuality = snapped
+    setSetting('fallBlocksPerQuality', String(snapped))
   }
 
   setZoom(zoom: number): void {
@@ -71,6 +89,7 @@ export class WaveformDisplay {
     this.isLoose = isLoose
     prefs.subscribe((change) => {
       if (change.kind === 'mode') this.reload()
+      else if (change.mode !== prefs.mode) return
       else if (this.isLoose() || prefs.quality <= 0 || change.wasOff) this.reload()
     })
   }
@@ -122,14 +141,6 @@ export class WaveformDisplay {
 
   setMode(mode: WaveformMode): void {
     this.prefs.setMode(mode)
-  }
-
-  setQuality(quality: number): void {
-    this.prefs.setQuality(quality)
-  }
-
-  setFallBlocks(blocks: number): void {
-    this.prefs.setFallBlocks(blocks)
   }
 
   setZoom(zoom: number): void {
