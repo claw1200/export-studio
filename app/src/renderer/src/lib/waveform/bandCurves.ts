@@ -8,11 +8,6 @@ const UNCHANGED: LevelCurve = [
   [1, 1]
 ]
 
-const QUIETER_HIGHS: LevelCurve = [
-  [0, 0],
-  [1, 0.6]
-]
-
 const LIFTED_QUIET_MIDS: LevelCurve = [
   [0, 0],
   [0.2, 0.32],

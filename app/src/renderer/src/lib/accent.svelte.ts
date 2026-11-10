@@ -44,10 +44,6 @@ export class Accent {
     paint(hex)
     setSetting(KEY, hex)
   }
-
-  reset(): void {
-    this.set(DEFAULT_ACCENT)
-  }
 }
 
 export const accent = new Accent()

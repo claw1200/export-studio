@@ -47,6 +47,7 @@
   import { suspendModal } from '$lib/modal'
   import { resetSettings } from '$lib/settings'
   import { PLAYERS } from '$lib/hardware/players'
+  import { BAND_NAMES_LOW_TO_HIGH, BLEND_MODES, bandStyle, DEFAULT_BAND_STYLE } from '$lib/waveform/bandStyle.svelte'
   import { formatSize } from '$lib/format'
   import {
     ACTION_IDS,
@@ -86,6 +87,7 @@
   const mixPrefs = decks.mixPrefs
 
   type Choice = { id: string; label: string }
+  const PLAYER_CHOICES: Choice[] = PLAYERS.map((player) => ({ id: player.id, label: player.name }))
   const SECTIONS: { id: SettingsSection; label: string; icon: typeof Keyboard }[] = [
     { id: 'general', label: 'General', icon: SlidersHorizontal },
     { id: 'display', label: 'Display', icon: Monitor },
@@ -354,38 +356,64 @@
             </div>
           </div>
         {:else if section === 'developer'}
-          <div class="flex items-center gap-3 rounded-md px-2 py-2">
-            <span class="min-w-0 flex-1">
-              <span class="block text-[12.5px] font-medium">Accent color</span>
-              <span class="mt-0.5 block text-[11px] leading-snug text-faint"> Buttons, highlights, and progress. </span>
-            </span>
-            <input
-              class="h-7 w-10 shrink-0 cursor-pointer overflow-hidden rounded-md border border-line bg-transparent p-0 [&::-webkit-color-swatch]:border-none [&::-webkit-color-swatch-wrapper]:p-0"
-              type="color"
-              aria-label="Accent color"
-              value={accent.color}
-              oninput={(e) => accent.set(e.currentTarget.value)}
-              onchange={(e) => accent.set(e.currentTarget.value)}
-            />
-            <span class="w-16 shrink-0 text-right font-mono text-[11px] text-muted uppercase tabular-nums">
-              {accent.color}
-            </span>
-            <button
-              class="grid size-6 shrink-0 place-items-center rounded text-faint hover:bg-hover hover:text-fg disabled:invisible"
-              disabled={accent.color === DEFAULT_ACCENT}
-              onclick={() => accent.reset()}
-              aria-label="Reset accent color"
-              title="Reset to default"
-            >
-              <RotateCcw class="size-3" />
-            </button>
-          </div>
+          {@render colorPicker(
+            'Accent color',
+            'Buttons, highlights, and progress.',
+            accent.color,
+            DEFAULT_ACCENT,
+            (color) => accent.set(color)
+          )}
           {@render toggle(
             'Snap playhead',
             'Draw the playhead exactly where the audio engine reports it, instead of easing small corrections. Can look less smooth.',
             prefs.snapPlayhead,
             () => prefs.setSnapPlayhead(!prefs.snapPlayhead)
           )}
+          <section class="mt-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">3-band waveform</h3>
+            {#each BAND_NAMES_LOW_TO_HIGH as name, band (name)}
+              {@render colorPicker(
+                `${name} color`,
+                `Fill for the ${name.toLowerCase()} band.`,
+                bandStyle.colors[band],
+                DEFAULT_BAND_STYLE.colors[band],
+                (color) => bandStyle.setColor(band, color)
+              )}
+              {#if band > 0}
+                {@render slider(
+                  `${name} opacity`,
+                  `How much of the bands beneath show through the ${name.toLowerCase()} band where they overlap.`,
+                  { min: 0, max: 1, step: 0.05 },
+                  bandStyle.layeredOpacities[band],
+                  `${Math.round(bandStyle.layeredOpacities[band] * 100)}%`,
+                  (opacity) => bandStyle.setLayeredOpacity(band, opacity)
+                )}
+              {/if}
+            {/each}
+            {@render menu(
+              'Blend',
+              'How each band mixes with the bands beneath it where they overlap.',
+              BLEND_MODES,
+              bandStyle.blend,
+              (id) => bandStyle.setBlend(id)
+            )}
+            <div class="flex items-start gap-3 rounded-md px-2 py-2">
+              <span class="min-w-0 flex-1">
+                <span class="block text-[12.5px] font-medium">Default look</span>
+                <span class="mt-0.5 block text-[11px] leading-snug text-faint">
+                  Put the band colors, opacities and blend back to their defaults.
+                </span>
+              </span>
+              <button
+                class="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-line px-3 text-[12px] font-medium text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
+                disabled={bandStyle.isDefault}
+                onclick={() => bandStyle.reset()}
+              >
+                <RotateCcw class="size-3.5" />
+                Reset
+              </button>
+            </div>
+          </section>
         {:else if section === 'display'}
           <section class="mb-5">
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Browser</h3>
@@ -420,9 +448,10 @@
 
           <section class="mb-5">
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Hardware</h3>
-            {@render playerMenu(
+            {@render menu(
               'Target',
               'Green plays on this player and every newer one. Yellow plays here, but not on a newer player. Red will not play here.',
+              PLAYER_CHOICES,
               library.hardwareGreen,
               (id) => library.setHardwareGreen(id)
             )}
@@ -998,7 +1027,7 @@
   </button>
 {/snippet}
 
-{#snippet playerMenu(label: string, description: string, current: string, pick: (id: string) => void)}
+{#snippet menu(label: string, description: string, options: Choice[], current: string, pick: (id: string) => void)}
   <label class="flex items-start gap-3 rounded-md px-2 py-2">
     <span class="min-w-0 flex-1">
       <span class="block text-[12.5px] font-medium">{label}</span>
@@ -1010,11 +1039,44 @@
       value={current}
       onchange={(e) => pick(e.currentTarget.value)}
     >
-      {#each PLAYERS as player (player.id)}
-        <option value={player.id}>{player.name}</option>
+      {#each options as o (o.id)}
+        <option value={o.id}>{o.label}</option>
       {/each}
     </select>
   </label>
+{/snippet}
+
+{#snippet colorPicker(
+  label: string,
+  description: string,
+  color: string,
+  defaultColor: string,
+  set: (color: string) => void
+)}
+  <div class="flex items-center gap-3 rounded-md px-2 py-2">
+    <span class="min-w-0 flex-1">
+      <span class="block text-[12.5px] font-medium">{label}</span>
+      <span class="mt-0.5 block text-[11px] leading-snug text-faint">{description}</span>
+    </span>
+    <input
+      class="h-7 w-10 shrink-0 cursor-pointer overflow-hidden rounded-md border border-line bg-transparent p-0 [&::-webkit-color-swatch]:border-none [&::-webkit-color-swatch-wrapper]:p-0"
+      type="color"
+      aria-label={label}
+      value={color}
+      oninput={(e) => set(e.currentTarget.value)}
+      onchange={(e) => set(e.currentTarget.value)}
+    />
+    <span class="w-16 shrink-0 text-right font-mono text-[11px] text-muted uppercase tabular-nums">{color}</span>
+    <button
+      class="grid size-6 shrink-0 place-items-center rounded text-faint hover:bg-hover hover:text-fg disabled:invisible"
+      disabled={color === defaultColor}
+      onclick={() => set(defaultColor)}
+      aria-label="Reset {label.toLowerCase()}"
+      title="Reset to default"
+    >
+      <RotateCcw class="size-3" />
+    </button>
+  </div>
 {/snippet}
 
 {#snippet choice(label: string, description: string, options: Choice[], current: string, pick: (id: string) => void)}
