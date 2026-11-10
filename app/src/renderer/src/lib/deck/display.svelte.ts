@@ -15,7 +15,7 @@ function storedQuality(mode: WaveformMode): Percent {
   return Math.min(MAX_QUALITY[mode], storedPercent(QUALITY_KEYS[mode], DEFAULT_QUALITY))
 }
 
-export const MAX_FALL_BLOCKS_PER_QUALITY = 3
+export const MAX_FALL_BLOCKS_PER_QUALITY = 10
 export const FALL_BLOCKS_PER_QUALITY_STEP = 0.05
 
 /** How every deck's waveforms are drawn, kept between sessions. */

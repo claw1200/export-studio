@@ -53,7 +53,7 @@ export function drawAnalysisRgb(
 
 /**
  * Entries `from`–`to` of interleaved low/mid/high bands, each band layered over the one below.
- * `stride` reads every so-many entries as one; `fallBlocks` lets each level fall over that many.
+ * `stride` reads every so-many entries as one; `fallBlocks` is how slowly each level eases down after a peak.
  */
 export function drawAnalysisBands(
   ctx: CanvasRenderingContext2D,
@@ -66,7 +66,6 @@ export function drawAnalysisBands(
   stride = 1,
   fallBlocks = 0
 ): void {
-  // The fallen bands are worked out at `stride` already, so they are read entry by entry.
   const fallen = fallBlocks >= 1 ? bandFall(bands, stride, fallBlocks) : null
   const source = fallen ? bandSource(fallen, 1) : bandSource(bands, stride)
   const grid = pixelGrid(from, to, pw)
