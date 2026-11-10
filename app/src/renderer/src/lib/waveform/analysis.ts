@@ -1,4 +1,5 @@
 /** Drawing rekordbox-style analysis data: an RGB waveform, and 3-band waveforms. */
+import { shapeBandLevel } from './bandCurves'
 import { BANDS_LOW_TO_HIGH } from './colors'
 import {
   bandSource,
@@ -75,12 +76,12 @@ export function drawAnalysisBands(
   const { per, first } = grid
   const reach = anchor === 'center' ? ph / 2 : ph
   for (const layer of BANDS_LOW_TO_HIGH) {
-    const fill = layer.color
+    const { color: fill, band } = layer
     for (let x = 0; x < pw; x++) {
       const start = (first + x) * per
-      const level = readBandLevel(source, layer.band, start, start + per, fallen != null)
+      const level = readBandLevel(source, band, start, start + per, fallen != null)
       const empty = Number.isNaN(level)
-      amp[x] = empty ? NaN : level * reach
+      amp[x] = empty ? NaN : shapeBandLevel(band, level) * reach
       color[x] = empty ? -1 : 1
     }
     paintColumns(ctx, pw, ph, anchor, () => fill, true)
@@ -100,7 +101,7 @@ export function drawStackedBands(ctx: CanvasRenderingContext2D, bands: Uint8Arra
   }
   const level = stackedLevels
   const floor0 = stackedFloor
-  let peak = 1
+  let peak = byteLevel(1)
   for (let x = 0; x < pw; x++) {
     const a = Math.floor((x * length) / pw)
     const b = Math.max(a + 1, Math.floor(((x + 1) * length) / pw))
@@ -108,7 +109,7 @@ export function drawStackedBands(ctx: CanvasRenderingContext2D, bands: Uint8Arra
     for (let band = 0; band < 3; band++) {
       let bandSum = 0
       for (let i = a; i < b; i++) bandSum += bands[i * 3 + band]
-      sum += bandSum / (b - a)
+      sum += shapeBandLevel(band, byteLevel(bandSum / (b - a)))
       level[band][x] = sum
     }
     if (sum > peak) peak = sum
