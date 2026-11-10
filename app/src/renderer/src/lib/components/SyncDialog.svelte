@@ -8,6 +8,7 @@
   import { FORMAT_NAMES, presetKey, presetLabel } from '$lib/convertPresets'
   import { suspendModal } from '$lib/modal'
   import { buildTree, type TreeNode } from '$lib/library/tree'
+  import { syncPhaseLabel } from '$lib/syncProgress'
   import type { DeviceLibraryView, Volume } from '$lib/types'
   import type { SyncInspection, SyncPlan, SyncResolution } from '../../../../preload/engine'
 
@@ -44,9 +45,6 @@
   let deviceToken = $state(0)
   let confirm = $state<'format' | null>(null)
   let formatId = $state<string | null>(null)
-  let batch = $state(false)
-  let ejecting = $state(false)
-  let activeDevice = $state<string | null>(null)
   let inspections = $state.raw<Record<string, SyncInspection>>({})
   let inspectionErrors = $state.raw<Record<string, string>>({})
   let resolutions = $state<Record<string, Record<string, SyncResolution>>>({})
@@ -65,7 +63,7 @@
   })
   const volumeId = $derived(selectedIds[0] ?? '')
   const pending = $derived(volumeId !== '' && loadedFor !== volumeId)
-  const locked = $derived(library.syncing || batch)
+  const locked = $derived(library.syncing)
   const canEject = $derived(selectedIds.some((id) => library.devices.some((item) => item.id === id && item.ejectable)))
 
   async function recoverVolume(id: string): Promise<void> {
@@ -380,87 +378,20 @@
     return parts.length ? parts.join(' · ') : 'No audio to copy or convert'
   }
 
-  function phaseLabel(): string {
-    const device = activeDevice ? library.devices.find((item) => item.id === activeDevice) : null
-    const prefix = device && selectedIds.length > 1 ? `${device.name} · ` : ''
-    if (ejecting) return prefix + 'Ejecting device'
-    const progress = library.syncProgress
-    if (!progress) return prefix + 'Preparing sync'
-    if (progress.phase === 'copy') {
-      const done = progress.done ?? 0
-      const total = progress.total ?? 0
-      return prefix + (total ? `Copying ${done + 1} of ${total}` : 'Copying audio')
-    }
-    if (progress.phase === 'convert') {
-      const done = progress.done ?? 0
-      const total = progress.total ?? 0
-      const name = progress.name ? ` · ${progress.name}` : ''
-      return prefix + (total ? `Converting ${done + 1} of ${total}${name}` : 'Converting audio')
-    }
-    if (progress.phase === 'import') {
-      const done = progress.done ?? 0
-      const total = progress.total ?? 0
-      const name = progress.name ? ` · ${progress.name}` : ''
-      return prefix + (total ? `Importing ${Math.min(done + 1, total)} of ${total}${name}` : 'Importing')
-    }
-    if (progress.phase === 'format') return 'Formatting the USB'
-    if (progress.phase === 'reading') return prefix + 'Reading the volume'
-    if (progress.phase === 'writing') return prefix + 'Writing the library'
-    if (progress.phase === 'staged' || progress.phase === 'verifying') return prefix + 'Checking the export'
-    if (progress.phase === 'publishing') return prefix + 'Publishing'
-    if (progress.phase === 'done') return prefix + 'Finalizing sync'
-    return prefix + 'Syncing'
-  }
-
   async function submit(): Promise<void> {
-    const targets = [...selectedIds]
     const playlistIds = [...checked]
-    if (locked || pending || reviewing || reviewBlocked || reviewUnresolved || !targets.length || !playlistIds.length) return
+    if (locked || pending || reviewing || reviewBlocked || reviewUnresolved || !volumeId || !playlistIds.length) return
     error = null
     notice = null
     confirm = null
-    batch = true
-    let ejected = 0
-    try {
-      for (const id of targets) {
-        activeDevice = id
-        const inspection = inspections[id]
-        const selectedResolutions = resolutions[id] ?? {}
-        const review = inspection && Object.keys(selectedResolutions).length
-          ? { token: inspection.token, resolutions: { ...selectedResolutions } }
-          : undefined
-        const ok = await library.syncTo(id, playlistIds, review, convert)
-        if (!ok) {
-          error = library.syncError
-          refreshToken += 1
-          return
-        }
-      }
-      deviceToken += 1
-      refreshToken += 1
-      if (ejectAfter) {
-        for (const id of targets) {
-          const device = library.devices.find((item) => item.id === id)
-          if (!device?.ejectable) continue
-          try {
-            activeDevice = id
-            ejecting = true
-            await library.ejectDevice(id)
-            ejected += 1
-          } catch (reason) {
-            error = reason instanceof Error ? reason.message : 'Couldn’t eject the device'
-            return
-          }
-        }
-      }
-      notice = ejected
-        ? 'Sync finished and the device was ejected'
-        : 'Sync finished'
-    } finally {
-      ejecting = false
-      activeDevice = null
-      batch = false
-    }
+    const inspection = inspections[volumeId]
+    const chosen = resolutions[volumeId] ?? {}
+    const review = inspection && Object.keys(chosen).length ? { token: inspection.token, resolutions: { ...chosen } } : undefined
+    const summary = await library.syncTo(volumeId, playlistIds, { review, convert, ejectAfter })
+    deviceToken += 1
+    refreshToken += 1
+    if (summary) notice = summary
+    else error = library.syncError
   }
 
   async function runFormat(): Promise<void> {
@@ -582,11 +513,7 @@
   aria-label="Sync"
   onclose={() => onclose()}
   onclick={(e) => {
-    if (locked) return
     if (e.target === e.currentTarget) e.currentTarget.close()
-  }}
-  oncancel={(e) => {
-    if (locked) e.preventDefault()
   }}
 >
   <form
@@ -605,11 +532,7 @@
         type="button"
         class="grid size-7 shrink-0 place-items-center rounded-md text-faint hover:bg-hover hover:text-fg disabled:opacity-40"
         aria-label="Close"
-        disabled={locked}
-        onclick={(e) => {
-          if (locked) return
-          e.currentTarget.closest('dialog')?.close()
-        }}
+        onclick={(e) => e.currentTarget.closest('dialog')?.close()}
       >
         <X class="size-4" />
       </button>
@@ -914,7 +837,7 @@
               {:else}
                 <Check class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
               {/if}
-              <span>{locked ? phaseLabel() : notice}</span>
+              <span>{locked ? syncPhaseLabel(library.syncProgress) : notice}</span>
             </p>
           {/if}
         </div>

@@ -4,12 +4,25 @@
   import { api } from '$lib/api'
   import { getApp } from '$lib/context'
   import { suspendModal } from '$lib/modal'
+  import { syncPhaseLabel } from '$lib/syncProgress'
   import type { PlaylistPolicy, UsbImportPreview, UsbImportResult } from '$lib/types'
 
   const POLICIES: { value: PlaylistPolicy; label: string; hint: string }[] = [
-    { value: 'skipExisting', label: 'Leave existing playlists alone', hint: 'Playlists the library already has keep their tracks.' },
-    { value: 'merge', label: 'Add to existing playlists', hint: 'Tracks from the device are added to playlists with the same name.' },
-    { value: 'createNew', label: 'Always create new playlists', hint: 'Every playlist on the device becomes a new one.' }
+    {
+      value: 'skipExisting',
+      label: 'Leave existing playlists alone',
+      hint: 'Playlists the library already has keep their tracks.'
+    },
+    {
+      value: 'merge',
+      label: 'Add to existing playlists',
+      hint: 'Tracks from the device are added to playlists with the same name.'
+    },
+    {
+      value: 'createNew',
+      label: 'Always create new playlists',
+      hint: 'Every playlist on the device becomes a new one.'
+    }
   ]
 
   let { volumeId, onclose }: { volumeId: string; onclose: () => void } = $props()
@@ -75,15 +88,6 @@
     result = outcome
   }
 
-  function progressLabel(): string {
-    const progress = library.syncProgress
-    if (progress?.phase !== 'import') return 'Importing'
-    const total = progress.total ?? 0
-    if (!total) return 'Importing'
-    const name = progress.name ? ` · ${progress.name}` : ''
-    return `Importing ${Math.min((progress.done ?? 0) + 1, total)} of ${total}${name}`
-  }
-
   function plural(n: number, word: string, many = `${word}s`): string {
     return `${n.toLocaleString()} ${n === 1 ? word : many}`
   }
@@ -135,7 +139,9 @@
           ({result.copied} copied, {result.reused} already in the library).
         </p>
         {#if result.failed.length}
-          <p class="mt-3 text-[12px] font-semibold text-warn">{plural(result.failed.length, 'track')} couldn’t be imported</p>
+          <p class="mt-3 text-[12px] font-semibold text-warn">
+            {plural(result.failed.length, 'track')} couldn’t be imported
+          </p>
           <div class="mt-1.5 max-h-48 overflow-y-auto rounded-md border border-line">
             {#each result.failed as item, i (i)}
               <p class="truncate px-2 py-1.5 text-[12px]" title={item.error}>
@@ -146,8 +152,8 @@
         {/if}
       {:else}
         <p class="text-[12.5px] leading-relaxed text-muted">
-          Review what will be added to the library. Tracks already in the library are reused, and nothing on the
-          USB is changed.
+          Review what will be added to the library. Tracks already in the library are reused, and nothing on the USB is
+          changed.
         </p>
 
         <p class="mt-4 text-[11px] font-semibold tracking-wider text-faint uppercase">Copy new tracks to</p>
@@ -290,7 +296,7 @@
           <p class="mt-3 text-[12px] leading-relaxed text-warn">{error}</p>
         {/if}
         {#if locked}
-          <p class="mt-3 text-[11px] text-muted">{progressLabel()}</p>
+          <p class="mt-3 text-[11px] text-muted">{syncPhaseLabel(library.syncProgress)}</p>
         {/if}
       {/if}
     </div>
