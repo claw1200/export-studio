@@ -10,7 +10,7 @@
 
   const ZOOM_STEP = 1.5
   const MODES: { id: WaveformMode; label: string }[] = [
-    { id: 'rgb', label: 'RGB' },
+    { id: 'rgb', label: 'Color' },
     { id: '3band', label: '3-Band' }
   ]
 </script>

@@ -21,12 +21,35 @@ function storedQuality(mode: WaveformMode): Percent {
 export const MAX_FALL_BLOCKS_PER_QUALITY = 10
 export const FALL_BLOCKS_PER_QUALITY_STEP = 0.05
 
+export type WaveformView = 'detail' | 'overview'
+
+const HEIGHT_SCALE_KEYS: Record<WaveformView, string> = {
+  detail: 'waveHeightScaleDetail',
+  overview: 'waveHeightScaleOverview'
+}
+export const MIN_HEIGHT_SCALE = 0.5
+const DEFAULT_HEIGHT_SCALE = 0.85
+export const HEIGHT_SCALE_STEP = 0.05
+
+function storedHeightScale(view: WaveformView): number {
+  return storedNumber(HEIGHT_SCALE_KEYS[view], DEFAULT_HEIGHT_SCALE, MIN_HEIGHT_SCALE, 1)
+}
+
+function snapToStep(value: number, min: number, max: number, step: number): number {
+  const steps = Math.round(Math.min(max, Math.max(min, value)) / step)
+  return Number((steps * step).toFixed(2))
+}
+
 /** How every deck's waveforms are drawn, kept between sessions. */
 export class WaveformPrefs {
   mode = $state<WaveformMode>((getSetting('waveformMode') as WaveformMode) || '3band')
   qualities = $state<Record<WaveformMode, Percent>>({ rgb: storedQuality('rgb'), '3band': storedQuality('3band') })
   fallBlocksPerQuality = $state(storedNumber('fallBlocksPerQuality', 1.3, 0, MAX_FALL_BLOCKS_PER_QUALITY))
   customRgbColors = $state(storedFlag('waveformCustomRgbColors', true))
+  heightScales = $state<Record<WaveformView, number>>({
+    detail: storedHeightScale('detail'),
+    overview: storedHeightScale('overview')
+  })
   zoom = $state(Number(getSetting('waveformZoom')) || 1)
 
   private changed = new Listeners<[change: WaveformChange]>()
@@ -83,8 +106,7 @@ export class WaveformPrefs {
   }
 
   setFallBlocksPerQuality(scale: number): void {
-    const steps = Math.round(Math.min(MAX_FALL_BLOCKS_PER_QUALITY, Math.max(0, scale)) / FALL_BLOCKS_PER_QUALITY_STEP)
-    const snapped = Number((steps * FALL_BLOCKS_PER_QUALITY_STEP).toFixed(2))
+    const snapped = snapToStep(scale, 0, MAX_FALL_BLOCKS_PER_QUALITY, FALL_BLOCKS_PER_QUALITY_STEP)
     if (this.fallBlocksPerQuality === snapped) return
     this.fallBlocksPerQuality = snapped
     setSetting('fallBlocksPerQuality', String(snapped))
@@ -95,6 +117,13 @@ export class WaveformPrefs {
     this.customRgbColors = on
     storeFlag('waveformCustomRgbColors', on)
     this.emit({ kind: 'rgbColorSource' })
+  }
+
+  setHeightScale(view: WaveformView, scale: number): void {
+    const snapped = snapToStep(scale, MIN_HEIGHT_SCALE, 1, HEIGHT_SCALE_STEP)
+    if (this.heightScales[view] === snapped) return
+    this.heightScales[view] = snapped
+    setSetting(HEIGHT_SCALE_KEYS[view], String(snapped))
   }
 
   setZoom(zoom: number): void {
@@ -142,6 +171,10 @@ export class WaveformDisplay {
 
   get zoom(): number {
     return this.prefs.zoom
+  }
+
+  get heightScales(): Record<WaveformView, number> {
+    return this.prefs.heightScales
   }
 
   get samples(): WaveSamples | null {

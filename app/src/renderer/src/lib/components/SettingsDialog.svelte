@@ -64,7 +64,14 @@
   } from '$lib/keymap'
   import type { BrowserTrackStyle } from '$lib/library.svelte'
   import type { CuePlacement, TempoReadout } from '$lib/deck/prefs.svelte'
-  import { FALL_BLOCKS_PER_QUALITY_STEP, MAX_FALL_BLOCKS_PER_QUALITY, MAX_QUALITY } from '$lib/deck/display.svelte'
+  import {
+    FALL_BLOCKS_PER_QUALITY_STEP,
+    HEIGHT_SCALE_STEP,
+    MAX_FALL_BLOCKS_PER_QUALITY,
+    MAX_QUALITY,
+    MIN_HEIGHT_SCALE,
+    type WaveformView
+  } from '$lib/deck/display.svelte'
   import type { WaveformMode } from '$lib/waveform/data'
   import type { Backup, BackupProgress, BackupReason, ConvertFormat, ConvertPreset } from '$lib/types'
   import type { GridMode } from '../../../../preload/analysis'
@@ -371,10 +378,19 @@
             () => prefs.setSnapPlayhead(!prefs.snapPlayhead)
           )}
           <section class="mt-5">
-            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">RGB waveform</h3>
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Waveform height</h3>
+            {@render heightScaleSlider('Player waveform', 'Height of the scrolling waveform on each deck.', 'detail')}
+            {@render heightScaleSlider(
+              'Overview waveforms',
+              'Height of the whole-track waveform on each deck and in the browser.',
+              'overview'
+            )}
+          </section>
+          <section class="mt-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Color waveform</h3>
             {@render toggle(
-              'Custom RGB colors',
-              'Color RGB waveforms ourselves: each moment sits on a gradient from the low to the high color by where its sound lies. Decks read the audio; the browser reads the rekordbox 3-band preview. Off uses the rekordbox colors.',
+              'Custom colors',
+              'Color the waveform ourselves: each moment sits on a gradient from the low to the high color by where its sound lies. Decks read the audio; the browser reads the rekordbox 3-band preview. Off uses the rekordbox colors.',
               prefs.waveform.customRgbColors,
               () => prefs.waveform.setCustomRgbColors(!prefs.waveform.customRgbColors)
             )}
@@ -481,8 +497,8 @@
           <section class="mb-5">
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Waveforms</h3>
             {@render qualitySlider(
-              'RGB quality',
-              'Draw the RGB detail waveform from the audio. Off uses the rekordbox analysis. Higher keeps more detail.',
+              'Color quality',
+              'Draw the color detail waveform from the audio. Off uses the rekordbox analysis. Higher keeps more detail.',
               'rgb'
             )}
             {@render qualitySlider(
@@ -1020,6 +1036,18 @@
     quality,
     quality === 0 ? 'Off' : `${quality}%`,
     (q) => prefs.waveform.setQuality(mode, q)
+  )}
+{/snippet}
+
+{#snippet heightScaleSlider(label: string, description: string, view: WaveformView)}
+  {@const scale = prefs.waveform.heightScales[view]}
+  {@render slider(
+    label,
+    description,
+    { min: MIN_HEIGHT_SCALE, max: 1, step: HEIGHT_SCALE_STEP },
+    scale,
+    `${Math.round(scale * 100)}%`,
+    (s) => prefs.waveform.setHeightScale(view, s)
   )}
 {/snippet}
 

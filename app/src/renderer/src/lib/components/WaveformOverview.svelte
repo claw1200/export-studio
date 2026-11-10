@@ -59,7 +59,8 @@
         canvas.width,
         canvas.height,
         player.display.prepared ? player.display.samples : null,
-        player.display.rgbColors(player.waveform)
+        player.display.rgbColors(player.waveform),
+        player.display.heightScales.overview
       )
     else ctx.clearRect(0, 0, canvas.width, canvas.height)
   }

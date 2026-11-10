@@ -8,7 +8,7 @@ export function softClip(drive: number, scale: number): LevelCurve {
 const unchanged: LevelCurve = (inputLevel) => inputLevel
 
 // const BAND_CURVES_LOW_TO_HIGH: readonly LevelCurve[] = [unchanged, softClip(1.3), unchanged]
-const BAND_CURVES_LOW_TO_HIGH: readonly LevelCurve[] = [softClip(1, 1.4), softClip(1.3, 1.4), softClip(0.01, 1.4)]
+const BAND_CURVES_LOW_TO_HIGH: readonly LevelCurve[] = [softClip(1, 1), softClip(1.3, 1), softClip(0.01, 1)]
 
 export function shapeBandLevel(band: number, level: number): number {
   return BAND_CURVES_LOW_TO_HIGH[band](level)

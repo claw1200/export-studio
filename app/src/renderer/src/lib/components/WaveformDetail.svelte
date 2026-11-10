@@ -76,7 +76,8 @@
       player.display.paintSamples,
       player.display.paintQuality,
       player.display.paintFall,
-      player.display.rgbColors(wf)
+      player.display.rgbColors(wf),
+      player.display.heightScales.detail
     )
   }
 
