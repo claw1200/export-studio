@@ -30,11 +30,11 @@ export const DEFAULT_BAND_STYLE: Readonly<BandStyleValues> = {
 const KEY = 'waveformBandStyle'
 const HEX = /^#[0-9a-f]{6}$/
 
-function isBandList<T>(value: unknown, valid: (item: unknown) => item is T): value is T[] {
+export function isBandList<T>(value: unknown, valid: (item: unknown) => item is T): value is T[] {
   return Array.isArray(value) && value.length === BAND_NAMES_LOW_TO_HIGH.length && value.every(valid)
 }
 
-const isHex = (value: unknown): value is string => typeof value === 'string' && HEX.test(value)
+export const isHex = (value: unknown): value is string => typeof value === 'string' && HEX.test(value)
 const isOpacity = (value: unknown): value is number => typeof value === 'number' && value >= 0 && value <= 1
 const isBlend = (value: unknown): value is GlobalCompositeOperation => BLEND_MODES.some((mode) => mode.id === value)
 

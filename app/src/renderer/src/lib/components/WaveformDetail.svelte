@@ -75,7 +75,8 @@
       window.devicePixelRatio || 1,
       player.display.paintSamples,
       player.display.paintQuality,
-      player.display.paintFall
+      player.display.paintFall,
+      player.display.rgbColors(wf)
     )
   }
 

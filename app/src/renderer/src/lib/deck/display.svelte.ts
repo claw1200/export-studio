@@ -1,11 +1,14 @@
 import { Listeners } from '../listeners'
 import { getSetting, setSetting } from '../settings'
-import type { WaveformMode } from '../waveform/data'
-import { type Percent, storedNumber, storedPercent } from './stored'
+import type { Waveform, WaveformMode } from '../waveform/data'
+import { gradientColors } from '../waveform/gradientColors'
+import { rgbGradient } from '../waveform/rgbGradient.svelte'
+import { type Percent, storedFlag, storeFlag, storedNumber, storedPercent } from './stored'
 import { WaveLoader, type WaveSamples } from './waves.svelte'
 
 /** What changed in the waveform preferences, so each deck can decide whether to fetch again. */
-type WaveformChange = { kind: 'mode' } | { kind: 'quality'; mode: WaveformMode; wasOff: boolean }
+type WaveformChange =
+  { kind: 'mode' } | { kind: 'rgbColorSource' } | { kind: 'quality'; mode: WaveformMode; wasOff: boolean }
 
 const QUALITY_KEYS: Record<WaveformMode, string> = { rgb: 'waveQualityRgb', '3band': 'waveQuality3band' }
 const DEFAULT_QUALITY = storedPercent('waveQuality', 30)
@@ -23,6 +26,7 @@ export class WaveformPrefs {
   mode = $state<WaveformMode>((getSetting('waveformMode') as WaveformMode) || '3band')
   qualities = $state<Record<WaveformMode, Percent>>({ rgb: storedQuality('rgb'), '3band': storedQuality('3band') })
   fallBlocksPerQuality = $state(storedNumber('fallBlocksPerQuality', 1.3, 0, MAX_FALL_BLOCKS_PER_QUALITY))
+  customRgbColors = $state(storedFlag('waveformCustomRgbColors'))
   zoom = $state(Number(getSetting('waveformZoom')) || 1)
 
   private changed = new Listeners<[change: WaveformChange]>()
@@ -37,6 +41,27 @@ export class WaveformPrefs {
 
   get fallBlocks(): number {
     return Math.round(this.fallBlocksPerQuality * this.qualities['3band'])
+  }
+
+  get rgbColorsFromAudio(): boolean {
+    return this.mode === 'rgb' && this.customRgbColors
+  }
+
+  get needsBands(): boolean {
+    return this.mode === '3band' || this.rgbColorsFromAudio
+  }
+
+  /** One colour per waveform entry: rekordbox's, or with custom colours on, the gradient over `bands` once they are in. */
+  rgbColors(
+    rekordboxColors: Uint8Array | undefined,
+    entriesPerSecond: number,
+    entries: number,
+    bands: Uint8Array | undefined,
+    bandsPerSecond: number | undefined
+  ): Uint8Array | undefined {
+    if (!this.customRgbColors || !bands || !bandsPerSecond) return rekordboxColors
+    const { stopsLowToHigh } = rgbGradient
+    return gradientColors(bands, bandsPerSecond, entriesPerSecond, entries, stopsLowToHigh) ?? rekordboxColors
   }
 
   setMode(mode: WaveformMode): void {
@@ -61,6 +86,13 @@ export class WaveformPrefs {
     if (this.fallBlocksPerQuality === snapped) return
     this.fallBlocksPerQuality = snapped
     setSetting('fallBlocksPerQuality', String(snapped))
+  }
+
+  setCustomRgbColors(on: boolean): void {
+    if (this.customRgbColors === on) return
+    this.customRgbColors = on
+    storeFlag('waveformCustomRgbColors', on)
+    this.emit({ kind: 'rgbColorSource' })
   }
 
   setZoom(zoom: number): void {
@@ -88,7 +120,7 @@ export class WaveformDisplay {
     this.trackId = trackId
     this.isLoose = isLoose
     prefs.subscribe((change) => {
-      if (change.kind === 'mode') this.reload()
+      if (change.kind === 'mode' || change.kind === 'rgbColorSource') this.reload()
       else if (change.mode !== prefs.mode) return
       else if (this.isLoose() || prefs.quality <= 0 || change.wasOff) this.reload()
     })
@@ -112,6 +144,11 @@ export class WaveformDisplay {
 
   get samples(): WaveSamples | null {
     return this.waves.samples
+  }
+
+  rgbColors(wf: Waveform): Uint8Array | undefined {
+    const samples = this.waves.samples
+    return this.prefs.rgbColors(wf.rgbColors, wf.rate, wf.length, samples?.bands, samples?.bandRate)
   }
 
   /** True when the samples were generated at the resolution they should be drawn at. */
@@ -155,10 +192,10 @@ export class WaveformDisplay {
       return
     }
     if (this.isLoose()) {
-      this.waves.loadLoose(id, this.mode === '3band', this.quality)
+      this.waves.loadLoose(id, this.prefs.needsBands, this.quality)
       return
     }
-    if (this.quality <= 0) this.waves.clear()
-    else this.waves.load(id, this.mode === '3band')
+    if (this.quality <= 0 && !this.prefs.rgbColorsFromAudio) this.waves.clear()
+    else this.waves.load(id, this.prefs.needsBands)
   }
 }

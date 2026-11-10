@@ -101,10 +101,14 @@ function decayAfterPeaks(peaks: Uint8Array, timeConstantBlocks: number): Uint8Ar
   return out
 }
 
+export function heldBandPeaks(bands: Uint8Array, stride: number, blocksPerSecond: number): Uint8Array {
+  return holdOverHalfCycle(peaksPerStride(bands, stride), blocksPerSecond)
+}
+
 function cachedHeldPeaks(bands: Uint8Array, stride: number, blocksPerSecond: number): Uint8Array {
   const kept = peaksByTrack.get(bands)
   if (kept && kept.stride === stride && kept.blocksPerSecond === blocksPerSecond) return kept.data
-  const data = holdOverHalfCycle(peaksPerStride(bands, stride), blocksPerSecond)
+  const data = heldBandPeaks(bands, stride, blocksPerSecond)
   peaksByTrack.set(bands, { stride, blocksPerSecond, data })
   return data
 }

@@ -48,6 +48,7 @@
   import { resetSettings } from '$lib/settings'
   import { PLAYERS } from '$lib/hardware/players'
   import { BAND_NAMES_LOW_TO_HIGH, BLEND_MODES, bandStyle, DEFAULT_BAND_STYLE } from '$lib/waveform/bandStyle.svelte'
+  import { DEFAULT_RGB_GRADIENT, rgbGradient } from '$lib/waveform/rgbGradient.svelte'
   import { formatSize } from '$lib/format'
   import {
     ACTION_IDS,
@@ -369,6 +370,26 @@
             prefs.snapPlayhead,
             () => prefs.setSnapPlayhead(!prefs.snapPlayhead)
           )}
+          <section class="mt-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">RGB waveform</h3>
+            {@render toggle(
+              'Custom RGB colors',
+              'Color RGB waveforms ourselves: each moment sits on a gradient from the low to the high color by where its sound lies. Decks read the audio; the browser reads the rekordbox 3-band preview. Off uses the rekordbox colors.',
+              prefs.waveform.customRgbColors,
+              () => prefs.waveform.setCustomRgbColors(!prefs.waveform.customRgbColors)
+            )}
+            {#if prefs.waveform.customRgbColors}
+              {#each BAND_NAMES_LOW_TO_HIGH as name, band (name)}
+                {@render colorPicker(
+                  `${name} color`,
+                  `Where the sound is mostly ${name.toLowerCase()}.`,
+                  rgbGradient.stopsLowToHigh[band],
+                  DEFAULT_RGB_GRADIENT[band],
+                  (color) => rgbGradient.setStop(band, color)
+                )}
+              {/each}
+            {/if}
+          </section>
           <section class="mt-5">
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">3-band waveform</h3>
             {#each BAND_NAMES_LOW_TO_HIGH as name, band (name)}

@@ -27,14 +27,15 @@ function paintWave(
   mode: WaveformMode,
   samples: WaveSamples | null | undefined,
   quality: number,
-  fallBlocks: number
+  fallBlocks: number,
+  rgbColors: Uint8Array | undefined
 ): void {
   const { ctx, wf, from, to, pw, ph, dpr } = frame
   const waveH = ph - 18 * dpr
   ctx.save()
   ctx.translate(0, 9 * dpr)
   const custom = quality > 0 ? samples : null
-  if (mode === 'rgb' && custom) drawSampleWave(ctx, wf, custom, from, to, pw, waveH, quality)
+  if (mode === 'rgb' && custom) drawSampleWave(ctx, wf, custom, rgbColors, from, to, pw, waveH, quality)
   else if (mode === '3band' && custom?.bands && custom.bandRate) {
     const stride = waveStride(quality)
     const blocksPerSecond = custom.bandRate / stride
@@ -42,8 +43,7 @@ function paintWave(
     const fall = fallBlocks >= 1 ? { blocksPerSecond, timeConstantBlocks: fallBlocks } : null
     drawAnalysisBands(ctx, custom.bands, from * scale, to * scale, pw, waveH, 'center', stride, fall)
   } else if (mode === '3band' && wf.bands) drawAnalysisBands(ctx, wf.bands, from, to, pw, waveH, 'center')
-  else if (wf.rgbHeights && wf.rgbColors)
-    drawAnalysisRgb(ctx, wf.rgbHeights, wf.rgbColors, from, to, pw, waveH, 'center')
+  else if (wf.rgbHeights && rgbColors) drawAnalysisRgb(ctx, wf.rgbHeights, rgbColors, from, to, pw, waveH, 'center')
   ctx.restore()
 }
 
@@ -57,7 +57,8 @@ export function drawDetail(
   dpr: number,
   samples?: WaveSamples | null,
   quality = 0,
-  fallBlocks = 0
+  fallBlocks = 0,
+  rgbColors = wf.rgbColors
 ): void {
   ctx.clearRect(0, 0, pw, ph)
   const [from, to] = visibleRange(wf, view, pw / dpr)
@@ -73,7 +74,7 @@ export function drawDetail(
     toX: (seconds) => ((seconds * wf.rate - from) / (to - from)) * pw
   }
   paintLoops(frame)
-  paintWave(frame, mode, samples, quality, fallBlocks)
+  paintWave(frame, mode, samples, quality, fallBlocks, rgbColors)
   paintLoopEdges(frame)
   paintBeatGrid(frame)
   paintCues(frame)

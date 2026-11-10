@@ -33,14 +33,22 @@
     }
   }
 
+  function rgbColors(wave: BrowserWave): Uint8Array | undefined {
+    const seconds = track.duration
+    if (!(seconds > 0)) return wave.colors
+    const { rgbLength, bands, bandLength } = wave
+    return decks.prefs.waveform.rgbColors(wave.colors, rgbLength / seconds, rgbLength, bands, bandLength / seconds)
+  }
+
   function paint(canvas: HTMLCanvasElement): void {
     if (!width || !height || !wave) return
     const ctx = setupCanvas(canvas, width, height)
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     const bands = decks.prefs.waveform.mode === '3band' ? wave.bands : null
+    const colors = rgbColors(wave)
     if (bands) drawStackedBands(ctx, bands, canvas.width, canvas.height)
-    else if (wave.heights && wave.colors)
-      drawAnalysisRgb(ctx, wave.heights, wave.colors, 0, wave.rgbLength, canvas.width, canvas.height, 'bottom')
+    else if (wave.heights && colors)
+      drawAnalysisRgb(ctx, wave.heights, colors, 0, wave.rgbLength, canvas.width, canvas.height, 'bottom')
     else if (wave.bands) drawStackedBands(ctx, wave.bands, canvas.width, canvas.height)
     if (!live) drawCueMarks(ctx, cues, span, width, height, window.devicePixelRatio || 1)
   }
