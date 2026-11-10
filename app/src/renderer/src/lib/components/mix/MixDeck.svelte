@@ -33,7 +33,7 @@
   setPlayer(player)
   // svelte-ignore state_referenced_locally
   const label = mixer.label(player)
-  setDeckInfo({ label, shifted: label === 'B' })
+  setDeckInfo({ label, modifiedKeys: label === 'B' })
 
   const track = $derived(player.track)
   const isMaster = $derived(mixer.master === player)

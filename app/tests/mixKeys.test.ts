@@ -7,20 +7,37 @@ register(new URL('./resolve-ts.mjs', import.meta.url).href)
 // keymap reads the platform as it loads.
 ;(globalThis as { window?: unknown }).window = { api: { platform: 'darwin' } }
 
-const { withShift, withoutShift } = await import('../src/renderer/src/lib/keymap.ts')
+const { withModifier, withoutModifier, shortcutHint } = await import('../src/renderer/src/lib/keymap.ts')
 const { deckKeys, playOnlyKeys } = await import('../src/renderer/src/lib/deck/keys.ts')
 
-describe('withShift / withoutShift', () => {
-  it('adds Shift just before the key, after the other modifiers', () => {
-    assert.equal(withShift('ArrowLeft'), 'Shift+ArrowLeft')
-    assert.equal(withShift('Mod+Alt+KeyZ'), 'Mod+Alt+Shift+KeyZ')
-    assert.equal(withShift('Shift+ArrowLeft'), null)
+describe('withModifier / withoutModifier', () => {
+  it('adds the modifier in the order chordFromEvent writes it', () => {
+    assert.equal(withModifier('ArrowLeft', 'Shift'), 'Shift+ArrowLeft')
+    assert.equal(withModifier('Mod+Alt+KeyZ', 'Shift'), 'Mod+Alt+Shift+KeyZ')
+    assert.equal(withModifier('Shift+KeyC', 'Alt'), 'Alt+Shift+KeyC')
+    assert.equal(withModifier('Mod+KeyC', 'Ctrl'), 'Mod+Ctrl+KeyC')
+    assert.equal(withModifier('Shift+ArrowLeft', 'Shift'), null)
   })
 
-  it('takes Shift off, keeping the rest', () => {
-    assert.equal(withoutShift('Shift+KeyC'), 'KeyC')
-    assert.equal(withoutShift('Mod+Shift+KeyZ'), 'Mod+KeyZ')
-    assert.equal(withoutShift('KeyC'), null)
+  it('takes the modifier off, keeping the rest', () => {
+    assert.equal(withoutModifier('Shift+KeyC', 'Shift'), 'KeyC')
+    assert.equal(withoutModifier('Mod+Alt+KeyZ', 'Alt'), 'Mod+KeyZ')
+    assert.equal(withoutModifier('KeyC', 'Alt'), null)
+  })
+
+  it('round-trips every chord', () => {
+    for (const modifier of ['Shift', 'Alt', 'Ctrl'] as const)
+      for (const chord of ['KeyC', 'Mod+KeyZ', 'Alt+ArrowLeft', 'Shift+Space']) {
+        const added = withModifier(chord, modifier)
+        if (added) assert.equal(withoutModifier(added, modifier), chord)
+      }
+  })
+})
+
+describe('shortcutHint', () => {
+  it('shows the chord with the layer modifier for deck B', () => {
+    assert.equal(shortcutHint(['KeyC']), ' (C)')
+    assert.equal(shortcutHint(['KeyC'], 'Alt'), ' (⌥C)')
   })
 })
 

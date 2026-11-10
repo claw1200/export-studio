@@ -162,19 +162,49 @@ function splitChord(chord: string): { modifiers: string[]; code: string } {
   return { modifiers: parts.slice(0, -1), code: parts[parts.length - 1] }
 }
 
-/** `chord` with Shift added, in the order `chordFromEvent` writes it. Null if it already has Shift. */
-export function withShift(chord: string): string | null {
-  const parts = chord.split('+')
-  if (parts.includes('Shift')) return null
-  parts.splice(-1, 0, 'Shift')
-  return parts.join('+')
+export type LayerModifier = 'Shift' | 'Alt' | 'Ctrl'
+
+export const DEFAULT_LAYER_MODIFIER: LayerModifier = 'Shift'
+
+export const LAYER_MODIFIERS: readonly LayerModifier[] = isMac ? ['Shift', 'Alt', 'Ctrl'] : ['Shift', 'Alt']
+
+const LAYER_MODIFIER_NAMES: Record<LayerModifier, string> = isMac
+  ? { Shift: 'Shift', Alt: 'Option', Ctrl: 'Control' }
+  : { Shift: 'Shift', Alt: 'Alt', Ctrl: 'Ctrl' }
+
+const LAYER_MODIFIER_FLAGS: Record<LayerModifier, 'shiftKey' | 'altKey' | 'ctrlKey'> = {
+  Shift: 'shiftKey',
+  Alt: 'altKey',
+  Ctrl: 'ctrlKey'
 }
 
-/** `chord` without Shift. Null if it has none. */
-export function withoutShift(chord: string): string | null {
+const CHORD_MODIFIER_ORDER = ['Mod', 'Ctrl', 'Meta', 'Alt', 'Shift']
+
+export function layerModifierName(modifier: LayerModifier): string {
+  return LAYER_MODIFIER_NAMES[modifier]
+}
+
+export function layerModifierPressed(e: KeyboardEvent, modifier: LayerModifier): boolean {
+  return e[LAYER_MODIFIER_FLAGS[modifier]]
+}
+
+export function isLayerModifier(value: unknown): value is LayerModifier {
+  return LAYER_MODIFIERS.includes(value as LayerModifier)
+}
+
+/** `chord` with `modifier` added, in the order `chordFromEvent` writes it. Null if it already has it. */
+export function withModifier(chord: string, modifier: LayerModifier): string | null {
+  const { modifiers, code } = splitChord(chord)
+  if (modifiers.includes(modifier)) return null
+  const ordered = CHORD_MODIFIER_ORDER.filter((m) => m === modifier || modifiers.includes(m))
+  return [...ordered, code].join('+')
+}
+
+/** `chord` without `modifier`. Null if it has none. */
+export function withoutModifier(chord: string, modifier: LayerModifier): string | null {
   const parts = chord.split('+')
-  if (!parts.includes('Shift')) return null
-  return parts.filter((part) => part !== 'Shift').join('+')
+  if (!parts.slice(0, -1).includes(modifier)) return null
+  return parts.filter((part) => part !== modifier).join('+')
 }
 
 const NON_TEXT_KEYS = /^(Arrow|F\d|Page|Home$|End$|Enter$|NumpadEnter$|Escape$|Tab$|Insert$)/
@@ -237,7 +267,7 @@ export function chordLabel(chord: string): string {
 }
 
 /** " (⌘Z)" for the end of a title, or nothing when the action is unbound. */
-export function shortcutHint(chords: readonly string[], shifted = false): string {
-  const chord = chords.map((c) => (shifted ? withShift(c) : c)).find((c) => c != null)
+export function shortcutHint(chords: readonly string[], layerModifier: LayerModifier | null = null): string {
+  const chord = chords.map((c) => (layerModifier ? withModifier(c, layerModifier) : c)).find((c) => c != null)
   return chord ? ` (${chordLabel(chord)})` : ''
 }

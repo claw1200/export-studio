@@ -4,12 +4,14 @@
 
 <script lang="ts">
   import { Minus, Plus } from '@lucide/svelte'
-  import { shiftHeld } from '$lib/shiftHeld.svelte'
+  import { getApp } from '$lib/context'
+  import { layerModifierName } from '$lib/keymap'
+  import { layerModifierHeld } from '$lib/layerModifierHeld.svelte'
 
   let {
     name,
     reading,
-    shiftReading,
+    modifiedReading,
     valueClass = null,
     color = null,
     title,
@@ -19,7 +21,7 @@
   }: {
     name: string
     reading: Reading
-    shiftReading: Reading
+    modifiedReading: Reading
     valueClass?: string | null
     color?: string | null
     title: string
@@ -30,9 +32,10 @@
 
   const DRAG_PX_PER_STEP = 8
   const asSentence = (text: string): string => text.replace(/\.?$/, '.')
-  const shown = $derived(shiftHeld() ? shiftReading : reading)
+  const { keybinds } = getApp()
+  const shown = $derived(layerModifierHeld(keybinds.layerModifier) ? modifiedReading : reading)
   const tooltip = $derived(
-    `${name}: ${asSentence(title)} Drag up or down to change it. Hold Shift to see and change ${shiftReading.meaning}.`
+    `${name}: ${asSentence(title)} Drag up or down to change it. Hold ${layerModifierName(keybinds.layerModifier)} to see and change ${modifiedReading.meaning}.`
   )
   let drag: { pointer: number; y: number; moved: boolean } | null = null
 
@@ -80,7 +83,7 @@
     ]}
     style:color={color ?? undefined}
     {disabled}
-    aria-label="{name} {reading.text}, {shiftReading.text}"
+    aria-label="{name} {reading.text}, {modifiedReading.text}"
     title={tooltip}
     onpointerdown={dragStart}
     onpointermove={dragMove}

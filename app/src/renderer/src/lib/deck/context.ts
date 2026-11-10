@@ -10,8 +10,8 @@ export const [getPlayer, setPlayer] = createContext<Player>()
 export interface DeckInfo {
   /** Mix mode's "A" or "B"; edit mode's single deck has none. */
   label: string | null
-  /** Deck B in mix mode takes deck A's shortcuts with Shift added. */
-  shifted: boolean
+  /** Deck B in mix mode takes deck A's shortcuts with the layer modifier added. */
+  modifiedKeys: boolean
 }
 
 export const [getDeckInfo, setDeckInfo] = createContext<DeckInfo>()

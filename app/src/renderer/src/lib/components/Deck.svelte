@@ -24,7 +24,7 @@
   const { library, decks, keybinds } = getApp()
   // svelte-ignore state_referenced_locally
   setPlayer(player)
-  setDeckInfo({ label: null, shifted: false })
+  setDeckInfo({ label: null, modifiedKeys: false })
   const shortcut = useShortcut()
   // svelte-ignore state_referenced_locally
   const grid = player.grid

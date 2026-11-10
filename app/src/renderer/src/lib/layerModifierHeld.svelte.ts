@@ -1,23 +1,23 @@
 import { on } from 'svelte/events'
 import { createSubscriber } from 'svelte/reactivity'
+import { type LayerModifier, layerModifierPressed } from './keymap'
 
-let held = false
+let lastEvent: KeyboardEvent | null = null
 
 const subscribe = createSubscriber((update) => {
   const follow = (e: KeyboardEvent): void => {
-    if (held === e.shiftKey) return
-    held = e.shiftKey
+    lastEvent = e
     update()
   }
   const release = (): void => {
-    held = false
+    lastEvent = null
     update()
   }
   const listeners = [on(window, 'keydown', follow), on(window, 'keyup', follow), on(window, 'blur', release)]
   return () => listeners.forEach((stop) => stop())
 })
 
-export function shiftHeld(): boolean {
+export function layerModifierHeld(modifier: LayerModifier): boolean {
   subscribe()
-  return held
+  return lastEvent != null && layerModifierPressed(lastEvent, modifier)
 }

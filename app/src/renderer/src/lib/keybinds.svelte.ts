@@ -6,22 +6,26 @@ import {
   chordFromEvent,
   chordTypesText,
   DEFAULT_BINDINGS,
-  withoutShift
+  DEFAULT_LAYER_MODIFIER,
+  isLayerModifier,
+  type LayerModifier,
+  withoutModifier
 } from './keymap'
 import { getSetting, setSetting } from './settings'
 
 export type ActionHandler = (() => void) | { down: () => void; up: () => void }
 
 /**
- * `plain` handlers answer an action's own chords. `shift` handlers answer the same chords with
- * Shift added, ahead of whatever action that Shift chord is bound to itself: mix mode puts deck B
- * there, so every deck shortcut works on either deck.
+ * `plain` handlers answer an action's own chords. `modified` handlers answer the same chords with
+ * the layer modifier added, ahead of whatever action that chord is bound to itself: mix mode puts
+ * deck B there, so every deck shortcut works on either deck.
  */
-export type KeyLayer = 'plain' | 'shift'
+export type KeyLayer = 'plain' | 'modified'
 
 type Overrides = Partial<Record<ActionId, string[]>>
 
 const STORAGE_KEY = 'keybinds'
+const LAYER_MODIFIER_KEY = 'layerModifier'
 const TEXT_INPUTS = new Set(['text', 'search', 'email', 'password', 'url', 'number'])
 
 function storedOverrides(): Overrides {
@@ -36,6 +40,11 @@ function storedOverrides(): Overrides {
   } catch {
     return {}
   }
+}
+
+function storedLayerModifier(): LayerModifier {
+  const stored = getSetting(LAYER_MODIFIER_KEY)
+  return isLayerModifier(stored) ? stored : DEFAULT_LAYER_MODIFIER
 }
 
 function sameChords(a: readonly string[], b: readonly string[]): boolean {
@@ -60,6 +69,7 @@ function firesIn(spec: ActionSpec, chord: string, target: EventTarget | null): b
 
 export class Keybinds {
   overrides = $state<Overrides>(storedOverrides())
+  layerModifier = $state<LayerModifier>(storedLayerModifier())
   readonly bindings: Record<ActionId, readonly string[]> = $derived({ ...DEFAULT_BINDINGS, ...this.overrides })
   private readonly actionByChord = $derived.by(() => {
     const map = new Map<string, ActionId>()
@@ -67,14 +77,14 @@ export class Keybinds {
     return map
   })
   private handlers = new Map<ActionId, ActionHandler>()
-  private shifted = new Map<ActionId, ActionHandler>()
+  private modified = new Map<ActionId, ActionHandler>()
   /** The handler each held key went down on, so its release reaches the same one. */
   private held = new Map<string, ActionHandler>()
   private swallowed = new Set<string>()
   private suspended = 0
 
   register(handlers: Partial<Record<ActionId, ActionHandler>>, layer: KeyLayer = 'plain'): () => void {
-    const map = layer === 'shift' ? this.shifted : this.handlers
+    const map = layer === 'modified' ? this.modified : this.handlers
     const entries = Object.entries(handlers) as [ActionId, ActionHandler][]
     for (const [id, handler] of entries) map.set(id, handler)
     return () => {
@@ -82,12 +92,12 @@ export class Keybinds {
     }
   }
 
-  /** The action and handler a chord reaches: the Shift layer first, then the chord's own action. */
+  /** The action and handler a chord reaches: the modified layer first, then the chord's own action. */
   private resolve(chord: string): [ActionId, ActionHandler] | null {
-    const unshifted = this.shifted.size ? withoutShift(chord) : null
-    if (unshifted) {
-      const id = this.actionFor(unshifted)
-      const handler = id && this.shifted.get(id)
+    const unmodified = this.modified.size ? withoutModifier(chord, this.layerModifier) : null
+    if (unmodified) {
+      const id = this.actionFor(unmodified)
+      const handler = id && this.modified.get(id)
       if (id && handler) return [id, handler]
     }
     const id = this.actionFor(chord)
@@ -104,7 +114,13 @@ export class Keybinds {
   }
 
   get customised(): boolean {
-    return ACTION_IDS.some((id) => this.isCustomised(id))
+    return this.layerModifier !== DEFAULT_LAYER_MODIFIER || ACTION_IDS.some((id) => this.isCustomised(id))
+  }
+
+  setLayerModifier(modifier: LayerModifier): void {
+    this.releaseAll()
+    this.layerModifier = modifier
+    setSetting(LAYER_MODIFIER_KEY, modifier)
   }
 
   /** Returns the action the chord was taken from, if any. */
@@ -140,6 +156,7 @@ export class Keybinds {
   resetAll(): void {
     this.overrides = {}
     this.save()
+    this.setLayerModifier(DEFAULT_LAYER_MODIFIER)
   }
 
   private override(id: ActionId, chords: string[]): void {

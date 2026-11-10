@@ -28,10 +28,10 @@
 
   const CHANGE_MEANING = 'the change from the track'
 
-  function inReadoutOrder(absolute: Reading, relative: Reading): { reading: Reading; shiftReading: Reading } {
+  function inReadoutOrder(absolute: Reading, relative: Reading): { reading: Reading; modifiedReading: Reading } {
     return prefs.tempoReadout === 'relative'
-      ? { reading: relative, shiftReading: absolute }
-      : { reading: absolute, shiftReading: relative }
+      ? { reading: relative, modifiedReading: absolute }
+      : { reading: absolute, modifiedReading: relative }
   }
 </script>
 
