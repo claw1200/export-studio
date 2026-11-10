@@ -3,6 +3,8 @@
   import type { NoticeLevel } from '$lib/library.svelte'
   import { getApp } from '$lib/context'
   import { formatSize, formatTotal } from '$lib/format'
+  import { syncFraction, syncPhaseLabel } from '$lib/syncProgress'
+  import type { Snippet } from 'svelte'
   import type { Update } from '../../../../shared/updates'
 
   const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
@@ -19,7 +21,10 @@
     return () => clearInterval(timer)
   })
 
-  const showingProgress = $derived(analysis.running || !!backups.progress || !!library.convertProgress)
+  const showingProgress = $derived(
+    analysis.running || !!backups.progress || !!library.convertProgress || library.syncing
+  )
+  const syncDevice = $derived(library.devices.find((device) => device.id === library.syncVolumeId))
 
   const totals = $derived.by(() => {
     let duration = 0
@@ -45,6 +50,34 @@
     error: 'border-danger/60 bg-danger/10 text-danger'
   }
 </script>
+
+{#snippet task(label: string, fraction: number | null, controls?: Snippet)}
+  <span class="ml-auto flex min-w-0 items-center gap-2 text-muted" role="status">
+    <LoaderCircle class="size-3 shrink-0 animate-spin text-accent" />
+    <span class="truncate" title={label}>{label}</span>
+    {#if fraction !== null}
+      <span class="h-1 w-20 shrink-0 overflow-hidden rounded-full bg-line">
+        <span class="block h-full rounded-full bg-accent transition-[width]" style:width="{100 * fraction}%"></span>
+      </span>
+    {/if}
+    {@render controls?.()}
+  </span>
+{/snippet}
+
+{#snippet analysisControls()}
+  {#if analysis.progress?.failed}
+    <span class="shrink-0 text-warn" title={analysis.lastError ?? undefined}>{analysis.progress.failed} failed</span>
+  {/if}
+  <button
+    type="button"
+    class="grid size-4 shrink-0 place-items-center rounded text-faint hover:bg-hover hover:text-fg"
+    title="Stop analysing"
+    aria-label="Stop analysing"
+    onclick={() => analysis.cancel()}
+  >
+    <X class="size-3" />
+  </button>
+{/snippet}
 
 <footer
   class="tabular relative flex h-7 shrink-0 items-center gap-4 border-t border-line-soft bg-bg px-3 text-[11px] text-faint"
@@ -79,58 +112,31 @@
     </span>
   {/if}
 
+  {#if library.syncing}
+    {@const label = syncPhaseLabel(library.syncProgress)}
+    {@render task(syncDevice ? `${syncDevice.name} · ${label}` : label, syncFraction(library.syncProgress))}
+  {/if}
+
   {#if backups.progress}
     {@const { reason, done = 0, total = 0 } = backups.progress}
-    <span class="ml-auto flex items-center gap-2 text-muted" role="status">
-      <LoaderCircle class="size-3 animate-spin text-accent" />
-      <span>{reason === 'restore' ? 'Restoring backup' : 'Backing up library'}</span>
-      {#if total}
-        <span class="h-1 w-20 overflow-hidden rounded-full bg-line">
-          <span class="block h-full rounded-full bg-accent transition-[width]" style:width="{(100 * done) / total}%"
-          ></span>
-        </span>
-      {/if}
-    </span>
+    {@render task(reason === 'restore' ? 'Restoring backup' : 'Backing up library', total ? done / total : null)}
   {/if}
 
   {#if library.convertProgress}
     {@const { done, total } = library.convertProgress}
-    <span class="ml-auto flex items-center gap-2 text-muted" role="status">
-      <LoaderCircle class="size-3 animate-spin text-accent" />
-      <span>Converting {Math.min(done + 1, total).toLocaleString()} of {total.toLocaleString()}</span>
-      <span class="h-1 w-20 overflow-hidden rounded-full bg-line">
-        <span
-          class="block h-full rounded-full bg-accent transition-[width]"
-          style:width="{(100 * done) / Math.max(total, 1)}%"
-        ></span>
-      </span>
-    </span>
+    {@render task(
+      `Converting ${Math.min(done + 1, total).toLocaleString()} of ${total.toLocaleString()}`,
+      done / Math.max(total, 1)
+    )}
   {/if}
 
   {#if analysis.running && analysis.progress}
     {@const { total, done, failed } = analysis.progress}
-    <span class="ml-auto flex items-center gap-2 text-muted" role="status">
-      <LoaderCircle class="size-3 animate-spin text-accent" />
-      <span>Analysing {Math.min(done + failed + 1, total).toLocaleString()} of {total.toLocaleString()}</span>
-      <span class="h-1 w-20 overflow-hidden rounded-full bg-line">
-        <span
-          class="block h-full rounded-full bg-accent transition-[width]"
-          style:width="{(100 * (done + failed)) / Math.max(total, 1)}%"
-        ></span>
-      </span>
-      {#if failed}
-        <span class="text-warn" title={analysis.lastError ?? undefined}>{failed} failed</span>
-      {/if}
-      <button
-        type="button"
-        class="grid size-4 place-items-center rounded text-faint hover:bg-hover hover:text-fg"
-        title="Stop analysing"
-        aria-label="Stop analysing"
-        onclick={() => analysis.cancel()}
-      >
-        <X class="size-3" />
-      </button>
-    </span>
+    {@render task(
+      `Analysing ${Math.min(done + failed + 1, total).toLocaleString()} of ${total.toLocaleString()}`,
+      (done + failed) / Math.max(total, 1),
+      analysisControls
+    )}
   {/if}
 
   {#if update}

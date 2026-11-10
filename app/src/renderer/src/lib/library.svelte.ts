@@ -30,6 +30,14 @@ import type {
   Volume
 } from './types'
 import { DEVICE_TRACKS_READ_ONLY, isDeviceTrack, isLooseFile } from './trackIds'
+import type { SyncDecisions } from '../../../preload/engine'
+
+export interface SyncOptions {
+  review?: SyncDecisions
+  /** Tracks not already in its format go onto the USB converted. */
+  convert?: ConvertPreset
+  ejectAfter: boolean
+}
 
 export const TRACK_DRAG_TYPE = 'application/x-exportstudio-tracks'
 export const PLAYLIST_TREE_DRAG_TYPE = 'application/x-exportstudio-playlist-tree'
@@ -99,7 +107,9 @@ export class Library {
   private contentsGeneration = 0
   /** Files under the open file view, in directory order. */
   fileEntries = $state.raw<FileEntry[]>([])
-  syncing = $state(false)
+  /** The device being synced, imported from or formatted. */
+  syncVolumeId = $state<string | null>(null)
+  syncing = $derived(this.syncVolumeId !== null)
   syncProgress = $state<SyncProgress | null>(null)
   syncError = $state<string | null>(null)
 
@@ -923,35 +933,52 @@ export class Library {
     this.deviceHistories = histories
   }
 
-  /** Sync playlists to a USB. With `convert`, tracks not already in its format go onto the USB converted. */
+  private async runDeviceJob<T>(volumeId: string, phase: string, run: () => Promise<T>): Promise<T | null> {
+    if (this.syncing) return null
+    this.syncVolumeId = volumeId
+    this.syncError = null
+    this.syncProgress = { phase }
+    try {
+      return await run()
+    } catch (e) {
+      this.syncError = (e as Error).message
+      return null
+    } finally {
+      this.syncVolumeId = null
+    }
+  }
+
+  private async reloadDevice(volumeId: string): Promise<void> {
+    const refreshPlaylists = volumeId in this.devicePlaylists
+    this.forgetDeviceLists(volumeId)
+    await this.refreshDevices()
+    if (refreshPlaylists) await this.devicePlaylistTree(volumeId)
+    if (this.source.type === 'device' && this.source.volumeId === volumeId) await this.setSource(this.source)
+  }
+
+  /** Resolves to a summary, or null with `syncError` set. Either way the outcome also shows as a notice. */
   async syncTo(
     volumeId: string,
     playlistIds: string[],
-    review?: import('../../../preload/engine').SyncDecisions,
-    convert?: ConvertPreset
-  ): Promise<boolean> {
-    if (this.syncing) return false
+    { review, convert, ejectAfter }: SyncOptions
+  ): Promise<string | null> {
+    if (this.syncing) return null
     if (!playlistIds.length) {
       this.syncError = 'Select a playlist to sync'
-      return false
+      return null
     }
-    this.syncing = true
-    this.syncError = null
-    this.syncProgress = { phase: 'reading' }
-    try {
+    const summary = await this.runDeviceJob(volumeId, 'reading', async () => {
       await api.usbSync(volumeId, playlistIds, review, convert)
-      const refreshPlaylists = volumeId in this.devicePlaylists
-      this.forgetDeviceLists(volumeId)
-      await this.refreshDevices()
-      if (refreshPlaylists) await this.devicePlaylistTree(volumeId)
-      if (this.source.type === 'device' && this.source.volumeId === volumeId) await this.setSource(this.source)
-      return true
-    } catch (e) {
-      this.syncError = (e as Error).message
-      return false
-    } finally {
-      this.syncing = false
-    }
+      await this.reloadDevice(volumeId)
+      const ejectable = this.devices.some((device) => device.id === volumeId && device.ejectable)
+      if (!ejectAfter || !ejectable) return 'Sync finished'
+      this.syncProgress = { phase: 'eject' }
+      await this.ejectDevice(volumeId)
+      return 'Sync finished and the device was ejected'
+    })
+    if (summary) this.notify(summary)
+    else if (this.syncError) this.notify(this.syncError, 'error')
+    return summary
   }
 
   async importDevice(
@@ -965,38 +992,23 @@ export class Library {
       this.notify(this.syncError)
       return null
     }
-    this.syncing = true
-    this.syncError = null
-    this.syncProgress = { phase: 'import' }
-    try {
+    return this.runDeviceJob(volumeId, 'import', async () => {
       const result = await api.usbImport(volumeId, folder, policy)
       await this.refreshContents()
       return result
-    } catch (e) {
-      this.syncError = (e as Error).message
-      return null
-    } finally {
-      this.syncing = false
-    }
+    })
   }
 
   async formatDevice(volumeId: string): Promise<boolean> {
-    if (this.syncing) return false
-    this.syncing = true
-    this.syncError = null
-    this.syncProgress = { phase: 'format' }
-    try {
+    const formatted = await this.runDeviceJob(volumeId, 'format', async () => {
       await api.usbFormat(volumeId)
       this.forgetDeviceLists(volumeId)
       await this.refreshDevices()
-      if (this.source.type === 'device' && this.source.volumeId === volumeId) await this.setSource({ type: 'collection' })
+      if (this.source.type === 'device' && this.source.volumeId === volumeId)
+        await this.setSource({ type: 'collection' })
       return true
-    } catch (e) {
-      this.syncError = (e as Error).message
-      return false
-    } finally {
-      this.syncing = false
-    }
+    })
+    return formatted ?? false
   }
 
   saveView(view: View): void {
