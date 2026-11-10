@@ -610,7 +610,7 @@
 <nav class="flex h-full w-full flex-col overflow-y-auto border-r border-line-soft bg-bg px-2 py-3">
   <button
     class={[
-      'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] font-medium',
+      'flex h-7 w-full shrink-0 items-center gap-1.5 rounded-md px-2 text-left text-[12.5px]',
       dropKey === 'collection'
         ? 'bg-accent-soft text-fg ring-1 ring-accent/70 ring-inset'
         : library.source.type === 'collection'
@@ -623,7 +623,7 @@
     ondragleave={(e) => dragLeave(e, 'collection')}
     ondrop={collectionDrop}
   >
-    <LibraryIcon class="size-4 text-accent" />
+    <LibraryIcon class="size-3.5 shrink-0 text-accent" />
     <span class="flex-1">Collection</span>
     <span class="tabular text-[11px] text-faint">{library.collectionSize}</span>
   </button>
