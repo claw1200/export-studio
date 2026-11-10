@@ -73,8 +73,13 @@ export function keyMatchColor(match: KeyMatch): string {
   return `oklch(0.78 0.15 ${MATCH_HUES[match]})`
 }
 
-/** The key a deck is heard in: its key shift, plus the tempo's pitch change unless master tempo holds it. */
-export function heardKey(key: string, tempo: { rate: number; keyShift: number; masterTempo: boolean }): string {
+type HeardTempo = { rate: number; keyShift: number; masterTempo: boolean }
+
+export function heardSemitones(tempo: HeardTempo): number {
+  return tempo.keyShift + (tempo.masterTempo ? 0 : pitchSemitones(tempo.rate))
+}
+
+export function heardKey(key: string, tempo: HeardTempo): string {
   if (!key) return ''
-  return shiftKey(key, tempo.keyShift + (tempo.masterTempo ? 0 : pitchSemitones(tempo.rate)))
+  return shiftKey(key, Math.round(heardSemitones(tempo)))
 }

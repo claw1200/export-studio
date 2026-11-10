@@ -1,30 +1,52 @@
 <script lang="ts">
+  import { getApp } from '$lib/context'
   import { getPlayer } from '$lib/deck/context'
-  import { formatBpm, keyColor } from '$lib/format'
-  import { heardKey } from '$lib/mix/harmonic'
+  import { formatBpm, formatKeyChange, formatTempoChange, keyColor } from '$lib/format'
+  import { heardKey, heardSemitones } from '$lib/mix/harmonic'
   import { stepTempo } from '$lib/mix/sync'
-  import Stepper from './Stepper.svelte'
+  import Stepper, { type Reading } from './Stepper.svelte'
 
-  let { stepperClass }: { stepperClass?: string } = $props()
-
+  const { prefs } = getApp().decks
   const player = getPlayer()
   const tempo = player.tempo
   const track = $derived(player.track)
   const bpm = $derived(player.trackBpmAtPlayhead)
   const key = $derived(heardKey(track?.key ?? '', tempo))
   const atTrackTempo = $derived(tempo.rate === 1)
-  const signed = (n: number): string => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : '')
+  const TEMPO_PERCENT_STEP = 0.1
 
   function stepBpm(step: number): void {
     const rate = stepTempo(tempo.rate, bpm, step)
     if (rate != null) tempo.setRate(rate)
   }
+
+  function stepTempoPercent(steps: number): void {
+    tempo.setPercent(Math.round(tempo.percent / TEMPO_PERCENT_STEP + steps) * TEMPO_PERCENT_STEP)
+  }
+
+  const stepKey = (steps: number): void => tempo.setKeyShift(tempo.keyShift + steps)
+
+  const CHANGE_MEANING = 'the change from the track'
+
+  function inReadoutOrder(absolute: Reading, relative: Reading): { reading: Reading; shiftReading: Reading } {
+    return prefs.tempoReadout === 'relative'
+      ? { reading: relative, shiftReading: absolute }
+      : { reading: absolute, shiftReading: relative }
+  }
 </script>
 
 <Stepper
-  class={stepperClass}
+  class="w-[120px]"
   name="BPM"
-  value={track && bpm ? formatBpm(bpm * tempo.rate) : '—'}
+  {...inReadoutOrder(
+    { text: track && bpm ? formatBpm(bpm * tempo.rate) : '—', meaning: 'the BPM', stepSize: '1', onstep: stepBpm },
+    {
+      text: formatTempoChange(tempo.percent),
+      meaning: CHANGE_MEANING,
+      stepSize: `${TEMPO_PERCENT_STEP}%`,
+      onstep: stepTempoPercent
+    }
+  )}
   valueClass={atTrackTempo ? 'text-fg' : 'text-accent'}
   title={tempo.lockedToMaster
     ? 'Following the master deck'
@@ -32,13 +54,15 @@
       ? 'At the track’s own tempo'
       : `${formatBpm(bpm)} BPM at the track’s own tempo. Click to go back to it.`}
   disabled={!track || tempo.lockedToMaster || !(bpm > 0)}
-  onstep={stepBpm}
   onreset={() => tempo.reset()}
 />
 <Stepper
-  class={stepperClass}
+  class="w-[104px]"
   name="Key"
-  value={key || '—'}
+  {...inReadoutOrder(
+    { text: key || '—', meaning: 'the key', stepSize: '1', onstep: stepKey },
+    { text: formatKeyChange(heardSemitones(tempo)), meaning: CHANGE_MEANING, stepSize: '1', onstep: stepKey }
+  )}
   color={key ? keyColor(key) : null}
   title={!track?.key
     ? 'No key detected'
@@ -46,7 +70,5 @@
       ? 'At the track’s own key'
       : `${track.key} at the track’s own pitch. Click to clear the key shift.`}
   disabled={!track}
-  onstep={(step) => tempo.setKeyShift(tempo.keyShift + step)}
   onreset={() => tempo.setKeyShift(0)}
-  badge={signed(tempo.keyShift)}
 />

@@ -8,6 +8,7 @@
   import DeckShell from '../deck/DeckShell.svelte'
   import HotCueBar from '../deck/HotCueBar.svelte'
   import LoopControls from '../deck/LoopControls.svelte'
+  import MasterTempoButton from '../deck/MasterTempoButton.svelte'
   import TempoSteppers from '../deck/TempoSteppers.svelte'
   import TrackInfo from '../deck/TrackInfo.svelte'
   import Transport from '../deck/Transport.svelte'
@@ -37,7 +38,6 @@
   const track = $derived(player.track)
   const isMaster = $derived(mixer.master === player)
   const following = $derived(mixer.following(player))
-  const masterTempo = $derived(player.tempo.masterTempo)
 </script>
 
 <DeckShell
@@ -87,17 +87,7 @@
         >
       </div>
       <TempoSteppers />
-      <div class={segmentGroup}>
-        <button
-          class={segmentButton(masterTempo, 'accent')}
-          disabled={!track}
-          aria-pressed={masterTempo}
-          title={masterTempo
-            ? 'Master tempo on: the key holds when the tempo moves'
-            : 'Master tempo off: the key moves with the tempo'}
-          onclick={() => player.tempo.setMasterTempo(!masterTempo)}>MT</button
-        >
-      </div>
+      <MasterTempoButton />
     </div>
   </div>
 
