@@ -6,6 +6,7 @@
   import type { Track } from '$lib/types'
   import WaveformOverview from '../WaveformOverview.svelte'
   import DeckShell from '../deck/DeckShell.svelte'
+  import EjectButton from '../deck/EjectButton.svelte'
   import HotCueBar from '../deck/HotCueBar.svelte'
   import LoopControls from '../deck/LoopControls.svelte'
   import MasterTempoButton from '../deck/MasterTempoButton.svelte'
@@ -38,6 +39,7 @@
   const track = $derived(player.track)
   const isMaster = $derived(mixer.master === player)
   const following = $derived(mixer.following(player))
+  const overlayButton = 'rounded bg-raised/80 text-muted transition-colors enabled:hover:bg-hover enabled:hover:text-fg'
 </script>
 
 <DeckShell
@@ -61,12 +63,15 @@
       ]}>{label}</span
     >
     {#if track}
-      <button
-        class="absolute top-2 right-2 z-10 grid size-6 place-items-center rounded bg-raised/80 text-muted transition-colors hover:bg-hover hover:text-fg"
-        aria-label="Open deck {label}’s track in edit mode"
-        title="Open in edit mode"
-        onclick={() => onedit(track)}><SquarePen class="size-3.5" /></button
-      >
+      <div class="absolute top-2 right-2 z-10 flex gap-1">
+        <EjectButton class={overlayButton} />
+        <button
+          class={['grid size-6 place-items-center', overlayButton]}
+          aria-label="Open deck {label}’s track in edit mode"
+          title="Open in edit mode"
+          onclick={() => onedit(track)}><SquarePen class="size-3.5" /></button
+        >
+      </div>
     {/if}
   {/snippet}
 

@@ -3,6 +3,7 @@
   import type { Component } from 'svelte'
   import { getPlayer } from '$lib/deck/context'
   import type { WaveformMode } from '$lib/waveform/data'
+  import EjectButton from './EjectButton.svelte'
 
   const player = getPlayer()
   const display = player.display
@@ -39,4 +40,5 @@
     {@render zoomButton('Zoom out', Minus, 1 / ZOOM_STEP)}
     {@render zoomButton('Zoom in', Plus, ZOOM_STEP)}
   </div>
+  <EjectButton class="rounded-md border border-line bg-bg/80 text-faint backdrop-blur enabled:hover:text-fg" />
 </div>
