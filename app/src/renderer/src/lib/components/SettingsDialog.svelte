@@ -65,9 +65,12 @@
     type ActionId,
     type LayerModifier
   } from '$lib/keymap'
-  import type { BrowserTrackStyle } from '$lib/library.svelte'
-  import type { CuePlacement, TempoReadout } from '$lib/deck/prefs.svelte'
+  import { DEFAULT_LIBRARY_PREFS, type BrowserTrackStyle } from '$lib/library.svelte'
+  import { DEFAULT_DECK_PREFS, type CuePlacement, type TempoReadout } from '$lib/deck/prefs.svelte'
   import {
+    DEFAULT_CUSTOM_RGB_COLORS,
+    DEFAULT_FALL_BLOCKS_PER_QUALITY,
+    DEFAULT_QUALITIES,
     FALL_BLOCKS_PER_QUALITY_STEP,
     HEIGHT_SCALE_STEP,
     MAX_FALL_BLOCKS_PER_QUALITY,
@@ -84,6 +87,10 @@
   import MixCurvePreview from './mix/MixCurvePreview.svelte'
   import {
     CURVES,
+    DEFAULT_AUTO_MASTER,
+    DEFAULT_CURVE_ID,
+    DEFAULT_KEY_HIGHLIGHT_ID,
+    DEFAULT_SWAP_TIMING_ID,
     KEY_HIGHLIGHTS,
     SWAP_TIMINGS,
     type CurveId,
@@ -175,26 +182,164 @@
   let confirming = $state.raw<{ kind: 'restore' | 'delete'; backup: Backup } | null>(null)
   let confirmingFactoryReset = $state(false)
   let confirmingDevOptions = $state<'on' | 'off' | null>(null)
-  const devSettingsAreDefault = $derived(prefs.developerOptionsAreDefault && bandStyle.layeringIsDefault)
+
+  type Resettable = { isDefault: () => boolean; reset: () => void }
+
+  function setting<T>(current: () => T, initial: T, set: (value: T) => void): Resettable {
+    return { isDefault: () => current() === initial, reset: () => set(initial) }
+  }
+
+  function allOf(...settings: Resettable[]): Resettable {
+    return {
+      isDefault: () => settings.every((s) => s.isDefault()),
+      reset: () => settings.forEach((s) => s.reset())
+    }
+  }
+
+  const waveform = prefs.waveform
+  const DEVELOPER_DEFAULTS = allOf(
+    { isDefault: () => prefs.developerOptionsAreDefault, reset: () => prefs.resetDeveloperOptions() },
+    { isDefault: () => bandStyle.layeringIsDefault, reset: () => bandStyle.resetLayering() }
+  )
+  const TAB_DEFAULTS: Partial<Record<SettingsSection, Resettable>> = {
+    general: allOf(
+      setting(
+        () => library.doubleClickToLoad,
+        DEFAULT_LIBRARY_PREFS.doubleClickToLoad,
+        (on) => library.setDoubleClickToLoad(on)
+      ),
+      setting(
+        () => prefs.quantise,
+        DEFAULT_DECK_PREFS.quantise,
+        (on) => prefs.setQuantise(on)
+      ),
+      setting(
+        () => prefs.cuePlacement,
+        DEFAULT_DECK_PREFS.cuePlacement,
+        (p) => prefs.setCuePlacement(p)
+      ),
+      setting(
+        () => prefs.tempoReadout,
+        DEFAULT_DECK_PREFS.tempoReadout,
+        (r) => prefs.setTempoReadout(r)
+      )
+    ),
+    display: allOf(
+      setting(
+        () => library.browserTrackStyle,
+        DEFAULT_LIBRARY_PREFS.browserTrackStyle,
+        (style) => library.setBrowserTrackStyle(style)
+      ),
+      setting(
+        () => library.browserRowHeight,
+        DEFAULT_LIBRARY_PREFS.browserRowHeight,
+        (height) => library.setBrowserRowHeight(height)
+      ),
+      setting(
+        () => library.hideStreaming,
+        DEFAULT_LIBRARY_PREFS.hideStreaming,
+        (on) => library.setHideStreaming(on)
+      ),
+      setting(
+        () => library.hidePresetTracks,
+        DEFAULT_LIBRARY_PREFS.hidePresetTracks,
+        (on) => library.setHidePresetTracks(on)
+      ),
+      setting(
+        () => library.hardwareGreen,
+        DEFAULT_LIBRARY_PREFS.hardwareGreen,
+        (id) => library.setHardwareGreen(id)
+      ),
+      setting(
+        () => waveform.qualities.rgb,
+        DEFAULT_QUALITIES.rgb,
+        (q) => waveform.setQuality('rgb', q)
+      ),
+      setting(
+        () => waveform.qualities['3band'],
+        DEFAULT_QUALITIES['3band'],
+        (q) => waveform.setQuality('3band', q)
+      ),
+      setting(
+        () => waveform.fallBlocksPerQuality,
+        DEFAULT_FALL_BLOCKS_PER_QUALITY,
+        (blocks) => waveform.setFallBlocksPerQuality(blocks)
+      )
+    ),
+    theme: allOf(
+      setting(
+        () => accent.color,
+        DEFAULT_ACCENT,
+        (color) => accent.set(color)
+      ),
+      setting(
+        () => waveform.customRgbColors,
+        DEFAULT_CUSTOM_RGB_COLORS,
+        (on) => waveform.setCustomRgbColors(on)
+      ),
+      { isDefault: () => rgbGradient.isDefault, reset: () => rgbGradient.reset() },
+      { isDefault: () => bandStyle.colorsAreDefault, reset: () => bandStyle.resetColors() }
+    ),
+    mix: allOf(
+      setting(
+        () => mixPrefs.curveId,
+        DEFAULT_CURVE_ID,
+        (id) => mixPrefs.setCurve(id)
+      ),
+      setting(
+        () => mixPrefs.swapTimingId,
+        DEFAULT_SWAP_TIMING_ID,
+        (id) => mixPrefs.setSwapTiming(id)
+      ),
+      setting(
+        () => mixPrefs.autoMaster,
+        DEFAULT_AUTO_MASTER,
+        (on) => mixPrefs.setAutoMaster(on)
+      ),
+      setting(
+        () => mixPrefs.keyHighlightId,
+        DEFAULT_KEY_HIGHLIGHT_ID,
+        (id) => mixPrefs.setKeyHighlight(id)
+      )
+    ),
+    analysis: allOf(
+      { isDefault: () => analysis.settingsAreDefault, reset: () => analysis.resetSettings() },
+      setting(
+        () => library.importArtwork,
+        DEFAULT_LIBRARY_PREFS.importArtwork,
+        (on) => library.setImportArtwork(on)
+      )
+    ),
+    database: allOf(
+      setting(
+        () => library.writeFileTags,
+        DEFAULT_LIBRARY_PREFS.writeFileTags,
+        (on) => library.setWriteFileTags(on)
+      ),
+      { isDefault: () => backups.settingsAreDefault, reset: () => void backups.resetSettings() }
+    ),
+    convert: {
+      isDefault: () => presets.map(presetKey).join() === DEFAULT_PRESETS.map(presetKey).join(),
+      reset: () => setPresets(DEFAULT_PRESETS)
+    },
+    keyboard: { isDefault: () => !keybinds.customised, reset: () => resetKeybinds() },
+    developer: DEVELOPER_DEFAULTS
+  }
+  const tabDefaults = $derived(TAB_DEFAULTS[section])
+
   function flipDevOptions(): void {
     if (!devOptions.enabled) confirmingDevOptions = 'on'
-    else if (!devSettingsAreDefault) confirmingDevOptions = 'off'
+    else if (!DEVELOPER_DEFAULTS.isDefault()) confirmingDevOptions = 'off'
     else turnOffDevOptions()
   }
   function turnOffDevOptions(): void {
     devOptions.setEnabled(false)
-    prefs.resetDeveloperOptions()
-    bandStyle.resetLayering()
+    DEVELOPER_DEFAULTS.reset()
   }
 
   async function factoryReset(): Promise<void> {
-    const { auto, keep, interval } = backups.settings
-    const backupsChanged =
-      auto !== DEFAULT_BACKUP_SETTINGS.auto ||
-      keep !== DEFAULT_BACKUP_SETTINGS.keep ||
-      interval !== DEFAULT_BACKUP_SETTINGS.interval
     // Straight to the engine: backups.setSettings also re-lists every backup, which only slows the quit.
-    if (backupsChanged) await api.setBackupSettings(DEFAULT_BACKUP_SETTINGS).catch(() => {})
+    if (!backups.settingsAreDefault) await api.setBackupSettings(DEFAULT_BACKUP_SETTINGS).catch(() => {})
     resetSettings()
   }
 
@@ -255,7 +400,7 @@
     e.preventDefault()
   }
 
-  function resetAll(): void {
+  function resetKeybinds(): void {
     recording = null
     notice = null
     keybinds.resetAll()
@@ -432,22 +577,6 @@
                 bandStyle.blend,
                 (id) => bandStyle.setBlend(id)
               )}
-              <div class="flex items-start gap-3 rounded-md px-2 py-2">
-                <span class="min-w-0 flex-1">
-                  <span class="block text-[12.5px] font-medium">Default look</span>
-                  <span class="mt-0.5 block text-[11px] leading-snug text-faint">
-                    Put the band colors, opacities and blend back to their defaults.
-                  </span>
-                </span>
-                <button
-                  class="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-line px-3 text-[12px] font-medium text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
-                  disabled={bandStyle.isDefault}
-                  onclick={() => bandStyle.reset()}
-                >
-                  <RotateCcw class="size-3.5" />
-                  Reset
-                </button>
-              </div>
             </section>
           </fieldset>
         {:else if section === 'theme'}
@@ -912,13 +1041,6 @@
               </button>
             </div>
           </section>
-
-          <button
-            class="mx-2 flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] text-muted hover:bg-hover hover:text-fg"
-            onclick={() => setPresets(DEFAULT_PRESETS)}
-          >
-            <RotateCcw class="size-3.5" /> Restore defaults
-          </button>
         {:else}
           <div class="mb-4 flex items-start gap-3 rounded-md px-2 py-2">
             <span class="min-w-0 flex-1">
@@ -952,22 +1074,24 @@
         {/if}
       </div>
 
-      {#if section === 'keyboard'}
+      {#if tabDefaults}
         <footer class="flex h-11 shrink-0 items-center gap-3 border-t border-line-soft px-5 text-[11.5px]">
-          {#if recording}
-            <span class="text-accent">Press a key combination. Esc cancels.</span>
-          {:else if notice}
-            <span class="truncate text-warn" title={notice}>{notice}</span>
-          {:else}
-            <span class="text-faint">Click + to add a shortcut. Hover a shortcut to remove it.</span>
+          {#if section === 'keyboard'}
+            {#if recording}
+              <span class="text-accent">Press a key combination. Esc cancels.</span>
+            {:else if notice}
+              <span class="truncate text-warn" title={notice}>{notice}</span>
+            {:else}
+              <span class="text-faint">Click + to add a shortcut. Hover a shortcut to remove it.</span>
+            {/if}
           {/if}
           <button
             class="ml-auto flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-muted hover:bg-hover hover:text-fg disabled:pointer-events-none disabled:opacity-40"
-            disabled={!keybinds.customised}
-            onclick={resetAll}
+            disabled={tabDefaults.isDefault()}
+            onclick={tabDefaults.reset}
           >
             <RotateCcw class="size-3" />
-            Reset all to defaults
+            Reset to defaults
           </button>
         </footer>
       {/if}

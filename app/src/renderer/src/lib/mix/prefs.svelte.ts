@@ -34,6 +34,7 @@ export const KEY_HIGHLIGHTS: { id: KeyHighlightId; label: string }[] = [
 export const DEFAULT_CURVE_ID: CurveId = 'normal'
 export const DEFAULT_SWAP_TIMING_ID: SwapTimingId = 'centre'
 export const DEFAULT_KEY_HIGHLIGHT_ID: KeyHighlightId = 'adjacent'
+export const DEFAULT_AUTO_MASTER = true
 
 function stored<T extends string>(key: string, ids: { id: T }[], fallback: T): T {
   const raw = getSetting(key)
@@ -45,7 +46,7 @@ export class MixPrefs {
   curveId = $state<CurveId>(stored('mix.curve', CURVES, DEFAULT_CURVE_ID))
   swapTimingId = $state<SwapTimingId>(stored('mix.swapTiming', SWAP_TIMINGS, DEFAULT_SWAP_TIMING_ID))
   /** The deck that alone has sound becomes the master. See `Mixer.makeSoleAudibleDeckMaster`. */
-  autoMaster = $state(getSetting('mix.autoMaster') !== 'false')
+  autoMaster = $state((getSetting('mix.autoMaster') ?? String(DEFAULT_AUTO_MASTER)) !== 'false')
   keyHighlightId = $state<KeyHighlightId>(stored('mix.keyHighlight', KEY_HIGHLIGHTS, DEFAULT_KEY_HIGHLIGHT_ID))
 
   get curve(): number {

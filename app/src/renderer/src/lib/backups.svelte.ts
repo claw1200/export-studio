@@ -56,6 +56,16 @@ export class Backups {
     }
   }
 
+  get settingsAreDefault(): boolean {
+    return (Object.keys(DEFAULT_BACKUP_SETTINGS) as (keyof BackupSettings)[]).every(
+      (key) => this.settings[key] === DEFAULT_BACKUP_SETTINGS[key]
+    )
+  }
+
+  resetSettings(): Promise<void> {
+    return this.setSettings(DEFAULT_BACKUP_SETTINGS)
+  }
+
   async setSettings(change: Partial<BackupSettings>): Promise<void> {
     try {
       this.settings = await api.setBackupSettings(change)

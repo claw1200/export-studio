@@ -11,11 +11,15 @@ type WaveformChange =
   { kind: 'mode' } | { kind: 'rgbColorSource' } | { kind: 'quality'; mode: WaveformMode; wasOff: boolean }
 
 const QUALITY_KEYS: Record<WaveformMode, string> = { rgb: 'waveQualityRgb', '3band': 'waveQuality3band' }
-const DEFAULT_QUALITY = storedPercent('waveQuality', 30)
 export const MAX_QUALITY: Record<WaveformMode, Percent> = { rgb: 100, '3band': 25 }
+export const DEFAULT_QUALITIES: Record<WaveformMode, Percent> = { rgb: 30, '3band': 25 }
+export const DEFAULT_FALL_BLOCKS_PER_QUALITY = 1.3
+export const DEFAULT_CUSTOM_RGB_COLORS = true
+const LEGACY_QUALITY_KEY = 'waveQuality'
 
 function storedQuality(mode: WaveformMode): Percent {
-  return Math.min(MAX_QUALITY[mode], storedPercent(QUALITY_KEYS[mode], DEFAULT_QUALITY))
+  const fallback = storedPercent(LEGACY_QUALITY_KEY, DEFAULT_QUALITIES[mode])
+  return Math.min(MAX_QUALITY[mode], storedPercent(QUALITY_KEYS[mode], fallback))
 }
 
 export const MAX_FALL_BLOCKS_PER_QUALITY = 10
@@ -44,8 +48,10 @@ function snapToStep(value: number, min: number, max: number, step: number): numb
 export class WaveformPrefs {
   mode = $state<WaveformMode>((getSetting('waveformMode') as WaveformMode) || '3band')
   qualities = $state<Record<WaveformMode, Percent>>({ rgb: storedQuality('rgb'), '3band': storedQuality('3band') })
-  fallBlocksPerQuality = $state(storedNumber('fallBlocksPerQuality', 1.3, 0, MAX_FALL_BLOCKS_PER_QUALITY))
-  customRgbColors = $state(storedFlag('waveformCustomRgbColors', true))
+  fallBlocksPerQuality = $state(
+    storedNumber('fallBlocksPerQuality', DEFAULT_FALL_BLOCKS_PER_QUALITY, 0, MAX_FALL_BLOCKS_PER_QUALITY)
+  )
+  customRgbColors = $state(storedFlag('waveformCustomRgbColors', DEFAULT_CUSTOM_RGB_COLORS))
   heightScales = $state<Record<WaveformView, number>>({
     detail: storedHeightScale('detail'),
     overview: storedHeightScale('overview')

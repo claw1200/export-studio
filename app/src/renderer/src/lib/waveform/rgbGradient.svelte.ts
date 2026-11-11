@@ -1,5 +1,5 @@
 import { getSetting, setSetting } from '../settings'
-import { isBandList, isHex } from './bandStyle.svelte'
+import { isBandList, isHex, sameBands } from './bandStyle.svelte'
 
 export const DEFAULT_RGB_GRADIENT: readonly string[] = ['#0054ff', '#02cff7', '#ffffff']
 
@@ -27,6 +27,19 @@ class RgbGradient {
     const hex = color.toLowerCase()
     if (!isHex(hex)) return
     this.stops[band] = hex
+    this.save()
+  }
+
+  get isDefault(): boolean {
+    return sameBands(this.stops, DEFAULT_RGB_GRADIENT)
+  }
+
+  reset(): void {
+    this.stops = [...DEFAULT_RGB_GRADIENT]
+    this.save()
+  }
+
+  private save(): void {
     setSetting(KEY, JSON.stringify(this.stops))
   }
 }
