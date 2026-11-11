@@ -7,6 +7,7 @@ export type TempoReadout = 'absolute' | 'relative'
 
 export const DEFAULT_DECK_PREFS = {
   quantise: true,
+  loadAtFirstCue: true,
   cuePlacement: 'cuePoint' as CuePlacement,
   tempoReadout: 'absolute' as TempoReadout
 }
@@ -19,6 +20,7 @@ function stored<T extends string>(key: string, ids: readonly T[], fallback: T): 
 /** Deck preferences that hold for every deck at once, kept between sessions. */
 export class DeckPrefs {
   quantise = $state(storedFlag('quantise', DEFAULT_DECK_PREFS.quantise))
+  loadAtFirstCue = $state(storedFlag('loadAtFirstCue', DEFAULT_DECK_PREFS.loadAtFirstCue))
   cuePlacement = $state(stored<CuePlacement>('cuePlacement', ['playhead', 'cuePoint'], DEFAULT_DECK_PREFS.cuePlacement))
   snapPlayhead = $state(storedFlag('snapPlayhead'))
   unlimitedMemoryCues = $state(storedFlag('unlimitedMemoryCues'))
@@ -28,6 +30,11 @@ export class DeckPrefs {
   setQuantise(on: boolean): void {
     this.quantise = on
     storeFlag('quantise', on)
+  }
+
+  setLoadAtFirstCue(on: boolean): void {
+    this.loadAtFirstCue = on
+    storeFlag('loadAtFirstCue', on)
   }
 
   setSnapPlayhead(on: boolean): void {
