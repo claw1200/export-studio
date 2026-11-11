@@ -67,10 +67,14 @@ export class Backups {
   }
 
   async setSettings(change: Partial<BackupSettings>): Promise<void> {
+    const previous = this.settings
+    this.settings = { ...previous, ...change }
     try {
       this.settings = await api.setBackupSettings(change)
-      await this.refresh()
+      const mayHavePruned = change.keep !== undefined && change.keep < previous.keep
+      if (mayHavePruned) this.list = await api.backupList()
     } catch (e) {
+      this.settings = previous
       this.error = (e as Error).message
     }
   }

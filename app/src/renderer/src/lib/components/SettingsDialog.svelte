@@ -338,7 +338,7 @@
   }
 
   async function factoryReset(): Promise<void> {
-    // Straight to the engine: backups.setSettings also re-lists every backup, which only slows the quit.
+    // Straight to the engine: backups.setSettings can re-list every backup, which only slows the quit.
     if (!backups.settingsAreDefault) await api.setBackupSettings(DEFAULT_BACKUP_SETTINGS).catch(() => {})
     resetSettings()
   }
