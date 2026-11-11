@@ -21,7 +21,7 @@
   import ConvertDialog from '$lib/components/ConvertDialog.svelte'
   import AnalysisDialog from '$lib/components/AnalysisDialog.svelte'
   import type { AnalysisSettings } from '$lib/analysis.svelte'
-  import type { SettingsSection } from '$lib/components/SettingsDialog.svelte'
+  import type { SettingsSection } from '$lib/components/settings/sections'
 
   const library = new Library()
   const decks = new Decks()

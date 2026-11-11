@@ -19,7 +19,8 @@
   import { chordLabel, shortcutHint } from '$lib/keymap'
   import type { MenuRequest } from '$lib/menu'
   import ContextMenu from './ContextMenu.svelte'
-  import SettingsDialog, { type SettingsSection } from './SettingsDialog.svelte'
+  import SettingsDialog from './settings/SettingsDialog.svelte'
+  import type { SettingsSection } from './settings/sections'
 
   let {
     modes = [],
