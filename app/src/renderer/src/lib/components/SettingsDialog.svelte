@@ -45,6 +45,7 @@
   import { loadPresets, savePresets } from '$lib/convertPresetStore'
   import { api } from '$lib/api'
   import { getApp } from '$lib/context'
+  import { devOptions } from '$lib/devOptions.svelte'
   import { suspendModal } from '$lib/modal'
   import { resetSettings } from '$lib/settings'
   import { PLAYERS } from '$lib/hardware/players'
@@ -173,6 +174,18 @@
   let recording = $state<ActionId | null>(null)
   let confirming = $state.raw<{ kind: 'restore' | 'delete'; backup: Backup } | null>(null)
   let confirmingFactoryReset = $state(false)
+  let confirmingDevOptions = $state<'on' | 'off' | null>(null)
+  const devSettingsAreDefault = $derived(prefs.developerOptionsAreDefault && bandStyle.layeringIsDefault)
+  function flipDevOptions(): void {
+    if (!devOptions.enabled) confirmingDevOptions = 'on'
+    else if (!devSettingsAreDefault) confirmingDevOptions = 'off'
+    else turnOffDevOptions()
+  }
+  function turnOffDevOptions(): void {
+    devOptions.setEnabled(false)
+    prefs.resetDeveloperOptions()
+    bandStyle.resetLayering()
+  }
 
   async function factoryReset(): Promise<void> {
     const { auto, keep, interval } = backups.settings
@@ -368,64 +381,75 @@
           </div>
         {:else if section === 'developer'}
           {@render toggle(
-            'Snap playhead',
-            'Draw the playhead exactly where the audio engine reports it, instead of easing small corrections. Can look less smooth.',
-            prefs.snapPlayhead,
-            () => prefs.setSnapPlayhead(!prefs.snapPlayhead)
+            'Enable developer options',
+            'Settings for testing and troubleshooting.',
+            devOptions.enabled,
+            flipDevOptions
           )}
-          {@render toggle(
-            'Unlimited memory cues',
-            `Place more than ${MEMORY_CUE_LIMIT} memory cues on a track.`,
-            prefs.unlimitedMemoryCues,
-            () => prefs.setUnlimitedMemoryCues(!prefs.unlimitedMemoryCues)
-          )}
-          <section class="mt-5">
-            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Waveform height</h3>
-            {@render heightScaleSlider('Player waveform', 'Height of the scrolling waveform on each deck.', 'detail')}
-            {@render heightScaleSlider(
-              'Overview waveforms',
-              'Height of the whole-track waveform on each deck and in the browser.',
-              'overview'
+          <fieldset
+            class="mt-3 min-w-0 border-t border-line-soft pt-3 disabled:opacity-40"
+            disabled={!devOptions.enabled}
+          >
+            {@render toggle(
+              'Snap playhead',
+              'Draw the playhead exactly where the audio engine reports it, instead of easing small corrections. Can look less smooth.',
+              prefs.snapPlayhead,
+              () => prefs.setSnapPlayhead(!prefs.snapPlayhead)
             )}
-          </section>
-          <section class="mt-5">
-            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Waveform colors</h3>
-            {#each BAND_NAMES_LOW_TO_HIGH as name, band (name)}
-              {#if band > 0}
-                {@render slider(
-                  `${name} opacity`,
-                  `How much of the bands beneath show through the ${name.toLowerCase()} band where they overlap.`,
-                  { min: 0, max: 1, step: 0.05 },
-                  bandStyle.layeredOpacities[band],
-                  `${Math.round(bandStyle.layeredOpacities[band] * 100)}%`,
-                  (opacity) => bandStyle.setLayeredOpacity(band, opacity)
-                )}
-              {/if}
-            {/each}
-            {@render menu(
-              'Blend',
-              'How each band mixes with the bands beneath it where they overlap.',
-              BLEND_MODES,
-              bandStyle.blend,
-              (id) => bandStyle.setBlend(id)
+            {@render toggle(
+              'Unlimited memory cues',
+              `Place more than ${MEMORY_CUE_LIMIT} memory cues on a track.`,
+              prefs.unlimitedMemoryCues,
+              () => prefs.setUnlimitedMemoryCues(!prefs.unlimitedMemoryCues)
             )}
-            <div class="flex items-start gap-3 rounded-md px-2 py-2">
-              <span class="min-w-0 flex-1">
-                <span class="block text-[12.5px] font-medium">Default look</span>
-                <span class="mt-0.5 block text-[11px] leading-snug text-faint">
-                  Put the band colors, opacities and blend back to their defaults.
+            <section class="mt-5">
+              <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Waveform height</h3>
+              {@render heightScaleSlider('Player waveform', 'Height of the scrolling waveform on each deck.', 'detail')}
+              {@render heightScaleSlider(
+                'Overview waveforms',
+                'Height of the whole-track waveform on each deck and in the browser.',
+                'overview'
+              )}
+            </section>
+            <section class="mt-5">
+              <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Waveform colors</h3>
+              {#each BAND_NAMES_LOW_TO_HIGH as name, band (name)}
+                {#if band > 0}
+                  {@render slider(
+                    `${name} opacity`,
+                    `How much of the bands beneath show through the ${name.toLowerCase()} band where they overlap.`,
+                    { min: 0, max: 1, step: 0.05 },
+                    bandStyle.layeredOpacities[band],
+                    `${Math.round(bandStyle.layeredOpacities[band] * 100)}%`,
+                    (opacity) => bandStyle.setLayeredOpacity(band, opacity)
+                  )}
+                {/if}
+              {/each}
+              {@render menu(
+                'Blend',
+                'How each band mixes with the bands beneath it where they overlap.',
+                BLEND_MODES,
+                bandStyle.blend,
+                (id) => bandStyle.setBlend(id)
+              )}
+              <div class="flex items-start gap-3 rounded-md px-2 py-2">
+                <span class="min-w-0 flex-1">
+                  <span class="block text-[12.5px] font-medium">Default look</span>
+                  <span class="mt-0.5 block text-[11px] leading-snug text-faint">
+                    Put the band colors, opacities and blend back to their defaults.
+                  </span>
                 </span>
-              </span>
-              <button
-                class="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-line px-3 text-[12px] font-medium text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
-                disabled={bandStyle.isDefault}
-                onclick={() => bandStyle.reset()}
-              >
-                <RotateCcw class="size-3.5" />
-                Reset
-              </button>
-            </div>
-          </section>
+                <button
+                  class="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-line px-3 text-[12px] font-medium text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
+                  disabled={bandStyle.isDefault}
+                  onclick={() => bandStyle.reset()}
+                >
+                  <RotateCcw class="size-3.5" />
+                  Reset
+                </button>
+              </div>
+            </section>
+          </fieldset>
         {:else if section === 'theme'}
           {@render colorPicker(
             'Accent color',
@@ -471,14 +495,14 @@
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Browser</h3>
             {@render choice(
               'Track style',
-              'Standard shows one line per track. Alternative combines the title and artist in a single line.',
+              'Standard shows more tracks. Alternative combines the title and artist, but shows the full artwork.',
               TRACK_STYLES,
               library.browserTrackStyle,
               (id) => library.setBrowserTrackStyle(id as BrowserTrackStyle)
             )}
             {@render slider(
               'Track height',
-              'Height of each track in the browser. Text, artwork and waveforms scale with it. Lower fits more tracks, higher is easier to read.',
+              'Height of each track in the browser. Text, artwork and waveforms scale with it.',
               { min: ROW_HEIGHT_MIN, max: ROW_HEIGHT_MAX, step: ROW_HEIGHT_STEP },
               library.browserRowHeight,
               `${library.browserRowHeight}px`,
@@ -579,7 +603,7 @@
               <span class="min-w-0 flex-1">
                 <span class="block text-[12.5px] font-medium">Place new cues at</span>
                 <span class="mt-0.5 block text-[11px] leading-snug text-faint">
-                  Where new hot cues and memory cues go, from the buttons or the keyboard.
+                  Where to place hotcues and memory cues.
                 </span>
               </span>
               <div
@@ -604,7 +628,7 @@
             </div>
             {@render choice(
               'BPM and key readout',
-              `Whether the deck steppers show the BPM and key, or how far they have moved from the track. Hold ${layerModifierName(keybinds.layerModifier)} to see and change the other.`,
+              `Whether the deck show the current BPM and key, or the amount changed. Hold ${layerModifierName(keybinds.layerModifier)} to switch.`,
               TEMPO_READOUTS,
               prefs.tempoReadout,
               (id) => prefs.setTempoReadout(id as TempoReadout)
@@ -977,11 +1001,31 @@
 {#if confirmingFactoryReset}
   <ConfirmDialog
     title="Restart to reset settings"
-    message="Export Studio needs to restart to reset every setting, shortcut, column and layout. Quit now, then open it again to start on the defaults. Your rekordbox library and backups are kept."
+    message="Quit to reset all settings to their defaults. Your rekordbox library and backups are kept."
     confirmLabel="Quit"
     danger
     onconfirm={() => void factoryReset()}
     onclose={() => (confirmingFactoryReset = false)}
+  />
+{/if}
+
+{#if confirmingDevOptions === 'on'}
+  <ConfirmDialog
+    title="Turn on developer options?"
+    message="Developer options are for testing and troubleshooting, and may allow you to cause damage to your library if you are not careful."
+    confirmLabel="Turn on"
+    danger
+    onconfirm={() => devOptions.setEnabled(true)}
+    onclose={() => (confirmingDevOptions = null)}
+  />
+{:else if confirmingDevOptions === 'off'}
+  <ConfirmDialog
+    title="Reset developer options?"
+    message="Turning off developer options will reset all settings in this category to their defaults."
+    confirmLabel="Turn off and reset"
+    danger
+    onconfirm={turnOffDevOptions}
+    onclose={() => (confirmingDevOptions = null)}
   />
 {/if}
 
@@ -1068,7 +1112,7 @@
 
 {#snippet toggle(label: string, description: string, on: boolean, flip: () => void)}
   <button
-    class="flex w-full items-start gap-3 rounded-md px-2 py-2 text-left hover:bg-hover"
+    class="flex w-full items-start gap-3 rounded-md px-2 py-2 text-left enabled:hover:bg-hover"
     role="switch"
     aria-checked={on}
     onclick={flip}

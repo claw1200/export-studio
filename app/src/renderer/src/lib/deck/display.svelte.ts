@@ -126,6 +126,15 @@ export class WaveformPrefs {
     setSetting(HEIGHT_SCALE_KEYS[view], String(snapped))
   }
 
+  get heightScalesAreDefault(): boolean {
+    return Object.values(this.heightScales).every((scale) => scale === DEFAULT_HEIGHT_SCALE)
+  }
+
+  resetHeightScales(): void {
+    this.setHeightScale('detail', DEFAULT_HEIGHT_SCALE)
+    this.setHeightScale('overview', DEFAULT_HEIGHT_SCALE)
+  }
+
   setZoom(zoom: number): void {
     this.zoom = Math.max(0.25, Math.min(64, zoom))
     setSetting('waveformZoom', String(this.zoom))

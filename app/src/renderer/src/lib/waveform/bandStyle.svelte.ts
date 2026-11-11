@@ -93,6 +93,19 @@ class BandStyle {
     this.save()
   }
 
+  get layeringIsDefault(): boolean {
+    return (
+      this.values.blend === DEFAULT_BAND_STYLE.blend &&
+      this.values.layeredOpacities.every((opacity, band) => opacity === DEFAULT_BAND_STYLE.layeredOpacities[band])
+    )
+  }
+
+  resetLayering(): void {
+    this.values.layeredOpacities = [...DEFAULT_BAND_STYLE.layeredOpacities]
+    this.values.blend = DEFAULT_BAND_STYLE.blend
+    this.save()
+  }
+
   reset(): void {
     this.values = structuredClone(DEFAULT_BAND_STYLE)
     this.save()

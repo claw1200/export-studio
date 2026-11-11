@@ -29,6 +29,16 @@ export class DeckPrefs {
     storeFlag('unlimitedMemoryCues', on)
   }
 
+  get developerOptionsAreDefault(): boolean {
+    return !this.snapPlayhead && !this.unlimitedMemoryCues && this.waveform.heightScalesAreDefault
+  }
+
+  resetDeveloperOptions(): void {
+    this.setSnapPlayhead(false)
+    this.setUnlimitedMemoryCues(false)
+    this.waveform.resetHeightScales()
+  }
+
   setCuePlacement(placement: CuePlacement): void {
     this.cuePlacement = placement
     setSetting('cuePlacement', placement)
