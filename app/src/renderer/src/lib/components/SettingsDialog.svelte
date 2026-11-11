@@ -48,6 +48,7 @@
   import { suspendModal } from '$lib/modal'
   import { resetSettings } from '$lib/settings'
   import { PLAYERS } from '$lib/hardware/players'
+  import { MEMORY_CUE_LIMIT } from '$lib/player.svelte'
   import { BAND_NAMES_LOW_TO_HIGH, BLEND_MODES, bandStyle, DEFAULT_BAND_STYLE } from '$lib/waveform/bandStyle.svelte'
   import { DEFAULT_RGB_GRADIENT, rgbGradient } from '$lib/waveform/rgbGradient.svelte'
   import { formatSize } from '$lib/format'
@@ -371,6 +372,12 @@
             'Draw the playhead exactly where the audio engine reports it, instead of easing small corrections. Can look less smooth.',
             prefs.snapPlayhead,
             () => prefs.setSnapPlayhead(!prefs.snapPlayhead)
+          )}
+          {@render toggle(
+            'Unlimited memory cues',
+            `Place more than ${MEMORY_CUE_LIMIT} memory cues on a track.`,
+            prefs.unlimitedMemoryCues,
+            () => prefs.setUnlimitedMemoryCues(!prefs.unlimitedMemoryCues)
           )}
           <section class="mt-5">
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Waveform height</h3>

@@ -29,6 +29,7 @@ import type { Waveform } from './waveform/data'
 const CUE_HIT_TOLERANCE: Seconds = 0.05
 const END_MARGIN: Seconds = 0.001
 const SAME_LOOP_LENGTH_TOLERANCE: Seconds = 0.002
+export const MEMORY_CUE_LIMIT = 10
 /** Rekordbox's detail rate, so zoom covers the same time for a file that has no analysis. */
 const LOOSE_WAVE_RATE = 150
 /** Matches the error the audio bridge sends when a track's file can't be resolved. */
@@ -497,7 +498,16 @@ export class Player {
     return this.cues.setHotCue(kind, ...this.newCueMs())
   }
 
+  private get memoryCueLimitReached(): boolean {
+    if (this.prefs.unlimitedMemoryCues) return false
+    return this.displayCues.filter((c) => c.kind === 'memory').length >= MEMORY_CUE_LIMIT
+  }
+
   addMemoryCue(): Promise<void> {
+    if (this.memoryCueLimitReached) {
+      this.session.editError = `A track can have up to ${MEMORY_CUE_LIMIT} memory cues`
+      return Promise.resolve()
+    }
     return this.cues.addMemoryCue(...this.newCueMs())
   }
 

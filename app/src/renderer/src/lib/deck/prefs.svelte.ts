@@ -10,6 +10,7 @@ export class DeckPrefs {
   quantise = $state(storedFlag('quantise', true))
   cuePlacement = $state<CuePlacement>(getSetting('cuePlacement') === 'playhead' ? 'playhead' : 'cuePoint')
   snapPlayhead = $state(storedFlag('snapPlayhead'))
+  unlimitedMemoryCues = $state(storedFlag('unlimitedMemoryCues'))
   tempoReadout = $state<TempoReadout>(getSetting('tempoReadout') === 'relative' ? 'relative' : 'absolute')
   readonly waveform = new WaveformPrefs()
 
@@ -21,6 +22,11 @@ export class DeckPrefs {
   setSnapPlayhead(on: boolean): void {
     this.snapPlayhead = on
     storeFlag('snapPlayhead', on)
+  }
+
+  setUnlimitedMemoryCues(on: boolean): void {
+    this.unlimitedMemoryCues = on
+    storeFlag('unlimitedMemoryCues', on)
   }
 
   setCuePlacement(placement: CuePlacement): void {
