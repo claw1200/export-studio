@@ -16,11 +16,10 @@ import {
 } from './markers'
 import { drawSampleWave, waveStride } from './samples'
 
-/** The analysis entries in view: `cssWidth` pixels centred on the playhead. */
 function visibleRange(wf: Waveform, view: DetailView, cssWidth: number): [number, number] {
-  const center = view.position * wf.rate
-  const halfEntries = cssWidth / 2 / view.zoom
-  return [center - halfEntries, center + halfEntries]
+  const playheadEntry = view.position * wf.rate
+  const entriesInView = cssWidth / view.zoom
+  return [playheadEntry - entriesInView * view.playheadAt, playheadEntry + entriesInView * (1 - view.playheadAt)]
 }
 
 function paintWave(
@@ -75,6 +74,7 @@ export function drawDetail(
     dpr,
     from,
     to,
+    playheadX: Math.round(pw * view.playheadAt),
     toX: (seconds) => ((seconds * wf.rate - from) / (to - from)) * pw
   }
   paintLoops(frame)

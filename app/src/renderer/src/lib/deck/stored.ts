@@ -23,6 +23,11 @@ export function storeFlag(key: string, on: boolean): void {
   setSetting(key, on ? '1' : '0')
 }
 
+export function storedChoice<T extends string>(key: string, ids: readonly T[], fallback: T): T {
+  const raw = getSetting(key)
+  return ids.find((id) => id === raw) ?? fallback
+}
+
 export function storedNumber(key: string, fallback: number, min: number, max: number): number {
   const raw = getSetting(key)
   if (raw == null) return fallback
