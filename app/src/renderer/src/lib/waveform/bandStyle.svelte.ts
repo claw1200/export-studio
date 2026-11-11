@@ -34,6 +34,10 @@ export function isBandList<T>(value: unknown, valid: (item: unknown) => item is 
   return Array.isArray(value) && value.length === BAND_NAMES_LOW_TO_HIGH.length && value.every(valid)
 }
 
+export function sameBands<T>(a: readonly T[], b: readonly T[]): boolean {
+  return a.every((item, band) => item === b[band])
+}
+
 export const isHex = (value: unknown): value is string => typeof value === 'string' && HEX.test(value)
 const isOpacity = (value: unknown): value is number => typeof value === 'number' && value >= 0 && value <= 1
 const isBlend = (value: unknown): value is GlobalCompositeOperation => BLEND_MODES.some((mode) => mode.id === value)
@@ -71,10 +75,6 @@ class BandStyle {
     return this.values.blend
   }
 
-  get isDefault(): boolean {
-    return JSON.stringify(this.values) === JSON.stringify(DEFAULT_BAND_STYLE)
-  }
-
   setColor(band: number, color: string): void {
     const hex = color.toLowerCase()
     if (!isHex(hex)) return
@@ -93,8 +93,25 @@ class BandStyle {
     this.save()
   }
 
-  reset(): void {
-    this.values = structuredClone(DEFAULT_BAND_STYLE)
+  get colorsAreDefault(): boolean {
+    return sameBands(this.values.colors, DEFAULT_BAND_STYLE.colors)
+  }
+
+  resetColors(): void {
+    this.values.colors = [...DEFAULT_BAND_STYLE.colors]
+    this.save()
+  }
+
+  get layeringIsDefault(): boolean {
+    return (
+      this.values.blend === DEFAULT_BAND_STYLE.blend &&
+      sameBands(this.values.layeredOpacities, DEFAULT_BAND_STYLE.layeredOpacities)
+    )
+  }
+
+  resetLayering(): void {
+    this.values.layeredOpacities = [...DEFAULT_BAND_STYLE.layeredOpacities]
+    this.values.blend = DEFAULT_BAND_STYLE.blend
     this.save()
   }
 

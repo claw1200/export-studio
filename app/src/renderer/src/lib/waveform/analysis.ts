@@ -57,7 +57,7 @@ export function drawRgbDetail(
  * Column levels, scaled to the loudest column, are raised to this power. A whole track squeezed
  * into a few hundred pixels is otherwise loud nearly everywhere; this lets the quieter passages sink.
  */
-const OVERVIEW_DYNAMICS_EXPONENT = 2
+const OVERVIEW_DYNAMICS_EXPONENT = 1
 
 /**
  * The first `entries` of an RGB waveform from the bottom across `pw` pixels. Each column is the

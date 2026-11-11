@@ -30,7 +30,7 @@ export interface AnalysisSettings {
 
 const STORAGE_KEY = 'analysisSettings'
 
-const DEFAULTS: AnalysisSettings = {
+export const DEFAULT_ANALYSIS_SETTINGS: Readonly<AnalysisSettings> = {
   auto: true,
   gridMode: 'normal',
   minBpm: 88,
@@ -40,23 +40,24 @@ const DEFAULTS: AnalysisSettings = {
   key: true,
   concurrency: 3
 }
+const SETTING_KEYS = Object.keys(DEFAULT_ANALYSIS_SETTINGS) as (keyof AnalysisSettings)[]
 
 function load(): AnalysisSettings {
   try {
     const stored = JSON.parse(getSetting(STORAGE_KEY) ?? '{}') as Partial<AnalysisSettings>
-    const out = { ...DEFAULTS }
-    for (const key of Object.keys(DEFAULTS) as (keyof AnalysisSettings)[]) {
-      if (typeof stored[key] === typeof DEFAULTS[key]) Object.assign(out, { [key]: stored[key] })
+    const out = { ...DEFAULT_ANALYSIS_SETTINGS }
+    for (const key of SETTING_KEYS) {
+      if (typeof stored[key] === typeof DEFAULT_ANALYSIS_SETTINGS[key]) Object.assign(out, { [key]: stored[key] })
     }
     if (!BPM_RANGES.some(([lo, hi]) => lo === out.minBpm && hi === out.maxBpm)) {
-      out.minBpm = DEFAULTS.minBpm
-      out.maxBpm = DEFAULTS.maxBpm
+      out.minBpm = DEFAULT_ANALYSIS_SETTINGS.minBpm
+      out.maxBpm = DEFAULT_ANALYSIS_SETTINGS.maxBpm
     }
-    if (out.gridMode !== 'normal' && out.gridMode !== 'dynamic') out.gridMode = DEFAULTS.gridMode
+    if (out.gridMode !== 'normal' && out.gridMode !== 'dynamic') out.gridMode = DEFAULT_ANALYSIS_SETTINGS.gridMode
     out.concurrency = Math.max(1, Math.min(MAX_CONCURRENCY, Math.round(out.concurrency)))
     return out
   } catch {
-    return { ...DEFAULTS }
+    return { ...DEFAULT_ANALYSIS_SETTINGS }
   }
 }
 
@@ -93,7 +94,20 @@ export class Analysis {
 
   set<K extends keyof AnalysisSettings>(key: K, value: AnalysisSettings[K]): void {
     this.settings[key] = value
+    this.save()
+  }
+
+  private save(): void {
     setSetting(STORAGE_KEY, JSON.stringify($state.snapshot(this.settings)))
+  }
+
+  get settingsAreDefault(): boolean {
+    return SETTING_KEYS.every((key) => this.settings[key] === DEFAULT_ANALYSIS_SETTINGS[key])
+  }
+
+  resetSettings(): void {
+    this.settings = { ...DEFAULT_ANALYSIS_SETTINGS }
+    this.save()
   }
 
   setRange(minBpm: number, maxBpm: number): void {

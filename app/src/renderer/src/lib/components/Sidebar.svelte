@@ -143,11 +143,8 @@
     if (!draggedId || draggedId === node.id) return null
     const bounds = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const position = (e.clientY - bounds.top) / bounds.height
-    const placement = node.kind === 'folder' && position >= 0.25 && position <= 0.75
-      ? 'inside'
-      : position < 0.5
-        ? 'before'
-        : 'after'
+    const placement =
+      node.kind === 'folder' && position >= 0.25 && position <= 0.75 ? 'inside' : position < 0.5 ? 'before' : 'after'
     const parent = placement === 'inside' ? node.id : node.parentId
     const siblings = library.playlists
       .filter((item) => item.parentId === parent && item.id !== draggedId)
@@ -437,7 +434,7 @@
     <button
       class={[
         'flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-left text-[12.5px]',
-        active ? 'bg-select text-fg' : 'text-muted hover:bg-hover hover:text-fg'
+        active ? 'selected-row' : 'text-muted hover:bg-hover hover:text-fg'
       ]}
       style:padding-left="{8 + depth * 14}px"
       onclick={() => (isFolder ? toggle(key) : setSource(source))}
@@ -522,12 +519,10 @@
       <button
         class={[
           'group relative flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-left text-[12.5px]',
-          treeDrop?.key === key && treeDrop.placement === 'inside'
-            ? 'bg-accent-soft text-fg ring-1 ring-accent/70 ring-inset'
-            : dropKey === key
+          (treeDrop?.key === key && treeDrop.placement === 'inside') || dropKey === key
             ? 'bg-accent-soft text-fg ring-1 ring-accent/70 ring-inset'
             : active
-              ? 'bg-select text-fg'
+              ? 'selected-row'
               : 'text-muted hover:bg-hover hover:text-fg'
         ]}
         style:padding-left="{8 + depth * 14}px"
@@ -614,7 +609,7 @@
       dropKey === 'collection'
         ? 'bg-accent-soft text-fg ring-1 ring-accent/70 ring-inset'
         : library.source.type === 'collection'
-          ? 'bg-select text-fg'
+          ? 'selected-row'
           : 'text-muted hover:bg-hover hover:text-fg'
     ]}
     onclick={() => setSource({ type: 'collection' })}
@@ -643,7 +638,7 @@
         {@const active = library.isSource({ type: 'device', volumeId: volume.id, playlistId: null })}
         <div
           class="flex h-7 items-center gap-1 rounded-md pr-2"
-          class:bg-select={active && volume.hasLibrary}
+          class:selected-row={active && volume.hasLibrary}
           role="presentation"
           oncontextmenu={(e) => deviceMenu(e, volume)}
         >
@@ -742,7 +737,7 @@
         <button
           class={[
             'flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-[12.5px]',
-            active ? 'bg-select text-fg' : 'text-muted hover:bg-hover hover:text-fg'
+            active ? 'selected-row' : 'text-muted hover:bg-hover hover:text-fg'
           ]}
           onclick={() => setSource({ type: 'view', id: view.id })}
           oncontextmenu={(e) => viewMenu(e, view)}

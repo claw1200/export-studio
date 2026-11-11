@@ -1,5 +1,5 @@
 import { api } from './api'
-import { BROWSER_ROW_HEIGHT_KEY, clampRowHeight, readRowHeight } from './browserColumns'
+import { BROWSER_ROW_HEIGHT_KEY, clampRowHeight, readRowHeight, ROW_HEIGHT_DEFAULT } from './browserColumns'
 import { browserPreviews } from './browserPreview.svelte'
 import { clearDetailCache } from './deck/session.svelte'
 import { clearWaveCache } from './deck/waves.svelte'
@@ -11,6 +11,7 @@ import { DEFAULT_GREEN, playerById } from './hardware/players'
 import { isRekordboxPresetTrack } from './library/factory'
 import { loadViews, looseTrack, matchesTrack, pathKey, saveViews, type FileEntry } from './library/views'
 import { Listeners } from './listeners'
+import { storedFlag, storeFlag } from './deck/stored'
 import { getSetting, setSetting } from './settings'
 import type {
   ConvertMode,
@@ -48,15 +49,22 @@ export const PLAYLIST_TREE_DRAG_TYPE = 'application/x-exportstudio-playlist-tree
  */
 export type BrowserTrackStyle = 'standard' | 'alternative'
 
+export const DEFAULT_LIBRARY_PREFS = {
+  writeFileTags: false,
+  importArtwork: true,
+  hideStreaming: true,
+  hidePresetTracks: true,
+  doubleClickToLoad: true,
+  browserTrackStyle: 'standard' as BrowserTrackStyle,
+  browserRowHeight: ROW_HEIGHT_DEFAULT,
+  hardwareGreen: DEFAULT_GREEN
+}
+
 function storedTrackStyle(): BrowserTrackStyle {
   const stored = getSetting('browserTrackStyle')
   if (stored === 'standard' || stored === 'alternative') return stored
   // Earlier versions only had an artwork setting; whole artwork maps to the alternative style.
-  return getSetting('browserArtwork') === 'whole' ? 'alternative' : 'standard'
-}
-
-function storedHidePresetTracks(): boolean {
-  return getSetting('hidePresetTracks') !== '0'
+  return getSetting('browserArtwork') === 'whole' ? 'alternative' : DEFAULT_LIBRARY_PREFS.browserTrackStyle
 }
 
 function storedPlayer(key: string, fallback: string): string {
@@ -133,14 +141,14 @@ export class Library {
 
   editError = $state<string | null>(null)
   editLevel = $state<NoticeLevel>('info')
-  writeFileTags = $state(getSetting('writeFileTags') === '1')
-  importArtwork = $state(getSetting('importArtwork') !== '0')
-  hideStreaming = $state(getSetting('hideStreaming') !== '0')
-  hidePresetTracks = $state(storedHidePresetTracks())
-  doubleClickToLoad = $state(getSetting('doubleClickToLoad') !== '0')
+  writeFileTags = $state(storedFlag('writeFileTags', DEFAULT_LIBRARY_PREFS.writeFileTags))
+  importArtwork = $state(storedFlag('importArtwork', DEFAULT_LIBRARY_PREFS.importArtwork))
+  hideStreaming = $state(storedFlag('hideStreaming', DEFAULT_LIBRARY_PREFS.hideStreaming))
+  hidePresetTracks = $state(storedFlag('hidePresetTracks', DEFAULT_LIBRARY_PREFS.hidePresetTracks))
+  doubleClickToLoad = $state(storedFlag('doubleClickToLoad', DEFAULT_LIBRARY_PREFS.doubleClickToLoad))
   browserTrackStyle = $state<BrowserTrackStyle>(storedTrackStyle())
   browserRowHeight = $state(readRowHeight(getSetting(BROWSER_ROW_HEIGHT_KEY)))
-  hardwareGreen = $state(storedPlayer('hardwareGreen', DEFAULT_GREEN))
+  hardwareGreen = $state(storedPlayer('hardwareGreen', DEFAULT_LIBRARY_PREFS.hardwareGreen))
   importing = $state(false)
   converting = $state(false)
   convertProgress = $state.raw<{ done: number; total: number } | null>(null)
@@ -424,27 +432,27 @@ export class Library {
 
   setWriteFileTags(on: boolean): void {
     this.writeFileTags = on
-    setSetting('writeFileTags', on ? '1' : '0')
+    storeFlag('writeFileTags', on)
   }
 
   setImportArtwork(on: boolean): void {
     this.importArtwork = on
-    setSetting('importArtwork', on ? '1' : '0')
+    storeFlag('importArtwork', on)
   }
 
   setHideStreaming(on: boolean): void {
     this.hideStreaming = on
-    setSetting('hideStreaming', on ? '1' : '0')
+    storeFlag('hideStreaming', on)
   }
 
   setHidePresetTracks(on: boolean): void {
     this.hidePresetTracks = on
-    setSetting('hidePresetTracks', on ? '1' : '0')
+    storeFlag('hidePresetTracks', on)
   }
 
   setDoubleClickToLoad(on: boolean): void {
     this.doubleClickToLoad = on
-    setSetting('doubleClickToLoad', on ? '1' : '0')
+    storeFlag('doubleClickToLoad', on)
   }
 
   /** A row the browser lists. File-list rows that are not in the collection always stay. */

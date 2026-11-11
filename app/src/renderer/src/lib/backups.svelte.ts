@@ -56,11 +56,25 @@ export class Backups {
     }
   }
 
+  get settingsAreDefault(): boolean {
+    return (Object.keys(DEFAULT_BACKUP_SETTINGS) as (keyof BackupSettings)[]).every(
+      (key) => this.settings[key] === DEFAULT_BACKUP_SETTINGS[key]
+    )
+  }
+
+  resetSettings(): Promise<void> {
+    return this.setSettings(DEFAULT_BACKUP_SETTINGS)
+  }
+
   async setSettings(change: Partial<BackupSettings>): Promise<void> {
+    const previous = this.settings
+    this.settings = { ...previous, ...change }
     try {
       this.settings = await api.setBackupSettings(change)
-      await this.refresh()
+      const mayHavePruned = change.keep !== undefined && change.keep < previous.keep
+      if (mayHavePruned) this.list = await api.backupList()
     } catch (e) {
+      this.settings = previous
       this.error = (e as Error).message
     }
   }

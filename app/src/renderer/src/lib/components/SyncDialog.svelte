@@ -647,7 +647,7 @@
                       </button>
                       <button
                         type="button"
-                        class="h-7 rounded-md bg-danger px-3 text-[12.5px] font-medium text-bg hover:bg-danger/90"
+                        class="h-7 rounded-md bg-danger px-3 text-[12.5px] font-medium text-white hover:bg-danger/90"
                         onclick={() => void runFormat()}
                       >
                         Format USB
