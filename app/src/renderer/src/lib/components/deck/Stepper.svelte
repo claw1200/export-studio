@@ -12,8 +12,7 @@
     name,
     reading,
     modifiedReading,
-    valueClass = null,
-    color = null,
+    edited,
     title,
     disabled = false,
     onreset,
@@ -22,8 +21,7 @@
     name: string
     reading: Reading
     modifiedReading: Reading
-    valueClass?: string | null
-    color?: string | null
+    edited: boolean
     title: string
     disabled?: boolean
     onreset: () => void
@@ -79,9 +77,8 @@
   <button
     class={[
       'tabular flex h-full min-w-0 flex-1 cursor-ns-resize touch-none items-center justify-center gap-1 px-1 font-mono text-[11.5px] font-semibold hover:bg-hover disabled:pointer-events-none',
-      valueClass
+      edited ? 'text-accent' : 'text-fg'
     ]}
-    style:color={color ?? undefined}
     {disabled}
     aria-label="{name} {reading.text}, {modifiedReading.text}"
     title={tooltip}

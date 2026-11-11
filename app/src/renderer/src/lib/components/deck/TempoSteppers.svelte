@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getApp } from '$lib/context'
   import { getPlayer } from '$lib/deck/context'
-  import { formatBpm, formatKeyChange, formatTempoChange, keyColor } from '$lib/format'
+  import { formatBpm, formatKeyChange, formatTempoChange } from '$lib/format'
   import { heardKey, heardSemitones } from '$lib/mix/harmonic'
   import { stepTempo } from '$lib/mix/sync'
   import Stepper, { type Reading } from './Stepper.svelte'
@@ -11,8 +11,10 @@
   const tempo = player.tempo
   const track = $derived(player.track)
   const bpm = $derived(player.trackBpmAtPlayhead)
+  const semitones = $derived(heardSemitones(tempo))
   const key = $derived(heardKey(track?.key ?? '', tempo))
   const atTrackTempo = $derived(tempo.rate === 1)
+  const atTrackKey = $derived(Math.round(semitones) === 0)
   const TEMPO_PERCENT_STEP = 0.1
 
   function stepBpm(step: number): void {
@@ -47,7 +49,7 @@
       onstep: stepTempoPercent
     }
   )}
-  valueClass={atTrackTempo ? 'text-fg' : 'text-accent'}
+  edited={!atTrackTempo}
   title={tempo.lockedToMaster
     ? 'Following the master deck'
     : atTrackTempo
@@ -61,12 +63,12 @@
   name="Key"
   {...inReadoutOrder(
     { text: key || '—', meaning: 'the key', stepSize: '1', onstep: stepKey },
-    { text: formatKeyChange(heardSemitones(tempo)), meaning: CHANGE_MEANING, stepSize: '1', onstep: stepKey }
+    { text: formatKeyChange(semitones), meaning: CHANGE_MEANING, stepSize: '1', onstep: stepKey }
   )}
-  color={key ? keyColor(key) : null}
+  edited={!atTrackKey}
   title={!track?.key
     ? 'No key detected'
-    : key === track.key
+    : atTrackKey
       ? 'At the track’s own key'
       : `${track.key} at the track’s own pitch. Click to clear the key shift.`}
   disabled={!track}
