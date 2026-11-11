@@ -1,7 +1,11 @@
 export class Lru<K, V> {
   private entries = new Map<K, V>()
 
-  constructor(private readonly capacity: number) {}
+  private readonly capacity: number
+
+  constructor(capacity: number) {
+    this.capacity = capacity
+  }
 
   get(key: K): V | undefined {
     if (!this.entries.has(key)) return undefined

@@ -1,25 +1,92 @@
 import { Listeners } from '../listeners'
 import { getSetting, setSetting } from '../settings'
-import type { WaveformMode } from '../waveform/data'
-import { storedPercent } from './stored'
+import type { Waveform, WaveformMode } from '../waveform/data'
+import { gradientColors, pendingColors } from '../waveform/gradientColors'
+import { rgbGradient } from '../waveform/rgbGradient.svelte'
+import { type Percent, storedFlag, storeFlag, storedNumber, storedPercent } from './stored'
 import { WaveLoader, type WaveSamples } from './waves.svelte'
 
 /** What changed in the waveform preferences, so each deck can decide whether to fetch again. */
-type WaveformChange = { kind: 'mode' } | { kind: 'quality'; wasOff: boolean }
+type WaveformChange =
+  { kind: 'mode' } | { kind: 'rgbColorSource' } | { kind: 'quality'; mode: WaveformMode; wasOff: boolean }
+
+const QUALITY_KEYS: Record<WaveformMode, string> = { rgb: 'waveQualityRgb', '3band': 'waveQuality3band' }
+const DEFAULT_QUALITY = storedPercent('waveQuality', 30)
+export const MAX_QUALITY: Record<WaveformMode, Percent> = { rgb: 100, '3band': 25 }
+
+function storedQuality(mode: WaveformMode): Percent {
+  return Math.min(MAX_QUALITY[mode], storedPercent(QUALITY_KEYS[mode], DEFAULT_QUALITY))
+}
+
+export const MAX_FALL_BLOCKS_PER_QUALITY = 10
+export const FALL_BLOCKS_PER_QUALITY_STEP = 0.05
+
+export type WaveformView = 'detail' | 'overview'
+
+const HEIGHT_SCALE_KEYS: Record<WaveformView, string> = {
+  detail: 'waveHeightScaleDetail',
+  overview: 'waveHeightScaleOverview'
+}
+export const MIN_HEIGHT_SCALE = 0.5
+const DEFAULT_HEIGHT_SCALE = 0.85
+export const HEIGHT_SCALE_STEP = 0.05
+
+function storedHeightScale(view: WaveformView): number {
+  return storedNumber(HEIGHT_SCALE_KEYS[view], DEFAULT_HEIGHT_SCALE, MIN_HEIGHT_SCALE, 1)
+}
+
+function snapToStep(value: number, min: number, max: number, step: number): number {
+  const steps = Math.round(Math.min(max, Math.max(min, value)) / step)
+  return Number((steps * step).toFixed(2))
+}
 
 /** How every deck's waveforms are drawn, kept between sessions. */
 export class WaveformPrefs {
   mode = $state<WaveformMode>((getSetting('waveformMode') as WaveformMode) || '3band')
-  /** Detail of the engine's own waveform, 0 to 100; 0 draws rekordbox's analysis instead. */
-  quality = $state(storedPercent('waveQuality', 30))
-  /** How far the 3-band levels fall after a peak, 0 to 100 blocks. */
-  fallBlocks = $state(storedPercent('fallBlocks', 40))
+  qualities = $state<Record<WaveformMode, Percent>>({ rgb: storedQuality('rgb'), '3band': storedQuality('3band') })
+  fallBlocksPerQuality = $state(storedNumber('fallBlocksPerQuality', 1.3, 0, MAX_FALL_BLOCKS_PER_QUALITY))
+  customRgbColors = $state(storedFlag('waveformCustomRgbColors', true))
+  heightScales = $state<Record<WaveformView, number>>({
+    detail: storedHeightScale('detail'),
+    overview: storedHeightScale('overview')
+  })
   zoom = $state(Number(getSetting('waveformZoom')) || 1)
 
   private changed = new Listeners<[change: WaveformChange]>()
 
   subscribe(listener: (change: WaveformChange) => void): () => void {
     return this.changed.add(listener)
+  }
+
+  get quality(): Percent {
+    return this.qualities[this.mode]
+  }
+
+  get fallBlocks(): number {
+    return Math.round(this.fallBlocksPerQuality * this.qualities['3band'])
+  }
+
+  get rgbColorsFromAudio(): boolean {
+    return this.mode === 'rgb' && this.customRgbColors
+  }
+
+  get needsBands(): boolean {
+    return this.mode === '3band' || this.rgbColorsFromAudio
+  }
+
+  /** One colour per waveform entry: rekordbox's, or with custom colours on, the gradient over `bands` (grey until in). */
+  rgbColors(
+    rekordboxColors: Uint8Array | undefined,
+    entriesPerSecond: number,
+    entries: number,
+    bands: Uint8Array | undefined,
+    bandsPerSecond: number | undefined
+  ): Uint8Array | undefined {
+    if (!this.customRgbColors) return rekordboxColors
+    const { stopsLowToHigh } = rgbGradient
+    const computed =
+      bands && bandsPerSecond ? gradientColors(bands, bandsPerSecond, entriesPerSecond, entries, stopsLowToHigh) : null
+    return computed ?? pendingColors(entries)
   }
 
   setMode(mode: WaveformMode): void {
@@ -29,20 +96,34 @@ export class WaveformPrefs {
     this.emit({ kind: 'mode' })
   }
 
-  setQuality(quality: number): void {
-    const q = Math.min(100, Math.max(0, Math.round(quality)))
-    if (this.quality === q) return
-    const wasOff = this.quality <= 0
-    this.quality = q
-    setSetting('waveQuality', String(q))
-    this.emit({ kind: 'quality', wasOff })
+  setQuality(mode: WaveformMode, quality: Percent): void {
+    const q = Math.min(MAX_QUALITY[mode], Math.max(0, Math.round(quality)))
+    if (this.qualities[mode] === q) return
+    const wasOff = this.qualities[mode] <= 0
+    this.qualities[mode] = q
+    setSetting(QUALITY_KEYS[mode], String(q))
+    this.emit({ kind: 'quality', mode, wasOff })
   }
 
-  setFallBlocks(blocks: number): void {
-    const n = Math.min(100, Math.max(0, Math.round(blocks)))
-    if (this.fallBlocks === n) return
-    this.fallBlocks = n
-    setSetting('fallBlocks', String(n))
+  setFallBlocksPerQuality(scale: number): void {
+    const snapped = snapToStep(scale, 0, MAX_FALL_BLOCKS_PER_QUALITY, FALL_BLOCKS_PER_QUALITY_STEP)
+    if (this.fallBlocksPerQuality === snapped) return
+    this.fallBlocksPerQuality = snapped
+    setSetting('fallBlocksPerQuality', String(snapped))
+  }
+
+  setCustomRgbColors(on: boolean): void {
+    if (this.customRgbColors === on) return
+    this.customRgbColors = on
+    storeFlag('waveformCustomRgbColors', on)
+    this.emit({ kind: 'rgbColorSource' })
+  }
+
+  setHeightScale(view: WaveformView, scale: number): void {
+    const snapped = snapToStep(scale, MIN_HEIGHT_SCALE, 1, HEIGHT_SCALE_STEP)
+    if (this.heightScales[view] === snapped) return
+    this.heightScales[view] = snapped
+    setSetting(HEIGHT_SCALE_KEYS[view], String(snapped))
   }
 
   setZoom(zoom: number): void {
@@ -70,7 +151,8 @@ export class WaveformDisplay {
     this.trackId = trackId
     this.isLoose = isLoose
     prefs.subscribe((change) => {
-      if (change.kind === 'mode') this.reload()
+      if (change.kind === 'mode' || change.kind === 'rgbColorSource') this.reload()
+      else if (change.mode !== prefs.mode) return
       else if (this.isLoose() || prefs.quality <= 0 || change.wasOff) this.reload()
     })
   }
@@ -91,8 +173,17 @@ export class WaveformDisplay {
     return this.prefs.zoom
   }
 
+  get heightScales(): Record<WaveformView, number> {
+    return this.prefs.heightScales
+  }
+
   get samples(): WaveSamples | null {
     return this.waves.samples
+  }
+
+  rgbColors(wf: Waveform): Uint8Array | undefined {
+    const samples = this.waves.samples
+    return this.prefs.rgbColors(wf.rgbColors, wf.rate, wf.length, samples?.bands, samples?.bandRate)
   }
 
   /** True when the samples were generated at the resolution they should be drawn at. */
@@ -124,14 +215,6 @@ export class WaveformDisplay {
     this.prefs.setMode(mode)
   }
 
-  setQuality(quality: number): void {
-    this.prefs.setQuality(quality)
-  }
-
-  setFallBlocks(blocks: number): void {
-    this.prefs.setFallBlocks(blocks)
-  }
-
   setZoom(zoom: number): void {
     this.prefs.setZoom(zoom)
   }
@@ -144,10 +227,10 @@ export class WaveformDisplay {
       return
     }
     if (this.isLoose()) {
-      this.waves.loadLoose(id, this.mode === '3band', this.quality)
+      this.waves.loadLoose(id, this.prefs.needsBands, this.quality)
       return
     }
-    if (this.quality <= 0) this.waves.clear()
-    else this.waves.load(id, this.mode === '3band')
+    if (this.quality <= 0 && !this.prefs.rgbColorsFromAudio) this.waves.clear()
+    else this.waves.load(id, this.prefs.needsBands)
   }
 }

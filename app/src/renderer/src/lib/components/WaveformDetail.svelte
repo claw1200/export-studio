@@ -3,7 +3,6 @@
   import type { TempoMap } from '$lib/tempo-map'
   import { setupCanvas } from '$lib/waveform/canvas'
   import { drawDetail } from '$lib/waveform/detail'
-  import { trackBandFall } from '$lib/waveform/fall'
   import { gridHandleIndex } from '$lib/waveform/markers'
 
   const player = getPlayer()
@@ -49,7 +48,6 @@
   const hotGridIndex = $derived(scrubbing ? -1 : handleAt(pointer))
 
   function paint(canvas: HTMLCanvasElement): void {
-    trackBandFall()
     if (!width || !height) return
     const ctx = setupCanvas(canvas, width, height)
     const wf = player.waveform
@@ -77,7 +75,9 @@
       window.devicePixelRatio || 1,
       player.display.paintSamples,
       player.display.paintQuality,
-      player.display.paintFall
+      player.display.paintFall,
+      player.display.rgbColors(wf),
+      player.display.heightScales.detail
     )
   }
 

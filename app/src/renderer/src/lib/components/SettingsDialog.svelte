@@ -1,6 +1,6 @@
 <script module lang="ts">
   export type SettingsSection =
-    'general' | 'display' | 'mix' | 'analysis' | 'convert' | 'database' | 'keyboard' | 'developer' | 'about'
+    'general' | 'display' | 'theme' | 'mix' | 'analysis' | 'convert' | 'database' | 'keyboard' | 'developer' | 'about'
 </script>
 
 <script lang="ts">
@@ -17,6 +17,7 @@
     Keyboard,
     LoaderCircle,
     Monitor,
+    Palette,
     Plus,
     RotateCcw,
     Search,
@@ -47,6 +48,8 @@
   import { suspendModal } from '$lib/modal'
   import { resetSettings } from '$lib/settings'
   import { PLAYERS } from '$lib/hardware/players'
+  import { BAND_NAMES_LOW_TO_HIGH, BLEND_MODES, bandStyle, DEFAULT_BAND_STYLE } from '$lib/waveform/bandStyle.svelte'
+  import { DEFAULT_RGB_GRADIENT, rgbGradient } from '$lib/waveform/rgbGradient.svelte'
   import { formatSize } from '$lib/format'
   import {
     ACTION_IDS,
@@ -62,6 +65,15 @@
   } from '$lib/keymap'
   import type { BrowserTrackStyle } from '$lib/library.svelte'
   import type { CuePlacement, TempoReadout } from '$lib/deck/prefs.svelte'
+  import {
+    FALL_BLOCKS_PER_QUALITY_STEP,
+    HEIGHT_SCALE_STEP,
+    MAX_FALL_BLOCKS_PER_QUALITY,
+    MAX_QUALITY,
+    MIN_HEIGHT_SCALE,
+    type WaveformView
+  } from '$lib/deck/display.svelte'
+  import type { WaveformMode } from '$lib/waveform/data'
   import type { Backup, BackupProgress, BackupReason, ConvertFormat, ConvertPreset } from '$lib/types'
   import type { GridMode } from '../../../../preload/analysis'
   import { REPO_URL, type Update } from '../../../../shared/updates'
@@ -84,9 +96,11 @@
   const mixPrefs = decks.mixPrefs
 
   type Choice = { id: string; label: string }
+  const PLAYER_CHOICES: Choice[] = PLAYERS.map((player) => ({ id: player.id, label: player.name }))
   const SECTIONS: { id: SettingsSection; label: string; icon: typeof Keyboard }[] = [
     { id: 'general', label: 'General', icon: SlidersHorizontal },
     { id: 'display', label: 'Display', icon: Monitor },
+    { id: 'theme', label: 'Theme & colors', icon: Palette },
     { id: 'mix', label: 'Mix', icon: Blend },
     { id: 'analysis', label: 'Import & analysis', icon: AudioWaveform },
     { id: 'convert', label: 'Convert formats', icon: FileAudio },
@@ -352,60 +366,99 @@
             </div>
           </div>
         {:else if section === 'developer'}
-          <div class="flex items-center gap-3 rounded-md px-2 py-2">
-            <span class="min-w-0 flex-1">
-              <span class="block text-[12.5px] font-medium">Accent color</span>
-              <span class="mt-0.5 block text-[11px] leading-snug text-faint"> Buttons, highlights, and progress. </span>
-            </span>
-            <input
-              class="h-7 w-10 shrink-0 cursor-pointer overflow-hidden rounded-md border border-line bg-transparent p-0 [&::-webkit-color-swatch]:border-none [&::-webkit-color-swatch-wrapper]:p-0"
-              type="color"
-              aria-label="Accent color"
-              value={accent.color}
-              oninput={(e) => accent.set(e.currentTarget.value)}
-              onchange={(e) => accent.set(e.currentTarget.value)}
-            />
-            <span class="w-16 shrink-0 text-right font-mono text-[11px] text-muted uppercase tabular-nums">
-              {accent.color}
-            </span>
-            <button
-              class="grid size-6 shrink-0 place-items-center rounded text-faint hover:bg-hover hover:text-fg disabled:invisible"
-              disabled={accent.color === DEFAULT_ACCENT}
-              onclick={() => accent.reset()}
-              aria-label="Reset accent color"
-              title="Reset to default"
-            >
-              <RotateCcw class="size-3" />
-            </button>
-          </div>
-          <div class="flex items-center gap-3 rounded-md px-2 py-2">
-            <span class="min-w-0 flex-1">
-              <span class="block text-[12.5px] font-medium">Fall blocks</span>
-              <span class="mt-0.5 block text-[11px] leading-snug text-faint">
-                How many blocks a 3-band fall slopes across. 0 keeps the steps.
-              </span>
-            </span>
-            <input
-              class="h-4 w-28 shrink-0 cursor-pointer accent-accent"
-              type="range"
-              min="0"
-              max="100"
-              step="1"
-              aria-label="Fall blocks"
-              aria-valuetext={String(prefs.waveform.fallBlocks)}
-              value={prefs.waveform.fallBlocks}
-              oninput={(e) => prefs.waveform.setFallBlocks(Number(e.currentTarget.value))}
-            />
-            <span class="w-9 shrink-0 text-right font-mono text-[11px] text-muted tabular-nums">
-              {prefs.waveform.fallBlocks}
-            </span>
-          </div>
           {@render toggle(
             'Snap playhead',
             'Draw the playhead exactly where the audio engine reports it, instead of easing small corrections. Can look less smooth.',
             prefs.snapPlayhead,
             () => prefs.setSnapPlayhead(!prefs.snapPlayhead)
           )}
+          <section class="mt-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Waveform height</h3>
+            {@render heightScaleSlider('Player waveform', 'Height of the scrolling waveform on each deck.', 'detail')}
+            {@render heightScaleSlider(
+              'Overview waveforms',
+              'Height of the whole-track waveform on each deck and in the browser.',
+              'overview'
+            )}
+          </section>
+          <section class="mt-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Waveform colors</h3>
+            {#each BAND_NAMES_LOW_TO_HIGH as name, band (name)}
+              {#if band > 0}
+                {@render slider(
+                  `${name} opacity`,
+                  `How much of the bands beneath show through the ${name.toLowerCase()} band where they overlap.`,
+                  { min: 0, max: 1, step: 0.05 },
+                  bandStyle.layeredOpacities[band],
+                  `${Math.round(bandStyle.layeredOpacities[band] * 100)}%`,
+                  (opacity) => bandStyle.setLayeredOpacity(band, opacity)
+                )}
+              {/if}
+            {/each}
+            {@render menu(
+              'Blend',
+              'How each band mixes with the bands beneath it where they overlap.',
+              BLEND_MODES,
+              bandStyle.blend,
+              (id) => bandStyle.setBlend(id)
+            )}
+            <div class="flex items-start gap-3 rounded-md px-2 py-2">
+              <span class="min-w-0 flex-1">
+                <span class="block text-[12.5px] font-medium">Default look</span>
+                <span class="mt-0.5 block text-[11px] leading-snug text-faint">
+                  Put the band colors, opacities and blend back to their defaults.
+                </span>
+              </span>
+              <button
+                class="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-line px-3 text-[12px] font-medium text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
+                disabled={bandStyle.isDefault}
+                onclick={() => bandStyle.reset()}
+              >
+                <RotateCcw class="size-3.5" />
+                Reset
+              </button>
+            </div>
+          </section>
+        {:else if section === 'theme'}
+          {@render colorPicker(
+            'Accent color',
+            'Buttons, highlights, and progress.',
+            accent.color,
+            DEFAULT_ACCENT,
+            (color) => accent.set(color)
+          )}
+          <section class="mt-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Color waveform</h3>
+            {@render toggle(
+              'Custom colors',
+              'Color the waveform by sound, from low to high. Off uses the rekordbox colors.',
+              prefs.waveform.customRgbColors,
+              () => prefs.waveform.setCustomRgbColors(!prefs.waveform.customRgbColors)
+            )}
+            {#if prefs.waveform.customRgbColors}
+              {#each BAND_NAMES_LOW_TO_HIGH as name, band (name)}
+                {@render colorPicker(
+                  `${name} color`,
+                  `The color for the ${name.toLowerCase()} band.`,
+                  rgbGradient.stopsLowToHigh[band],
+                  DEFAULT_RGB_GRADIENT[band],
+                  (color) => rgbGradient.setStop(band, color)
+                )}
+              {/each}
+            {/if}
+          </section>
+          <section class="mt-5">
+            <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">3-band waveform</h3>
+            {#each BAND_NAMES_LOW_TO_HIGH as name, band (name)}
+              {@render colorPicker(
+                `${name} color`,
+                `Fill color for the ${name.toLowerCase()} band.`,
+                bandStyle.colors[band],
+                DEFAULT_BAND_STYLE.colors[band],
+                (color) => bandStyle.setColor(band, color)
+              )}
+            {/each}
+          </section>
         {:else if section === 'display'}
           <section class="mb-5">
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Browser</h3>
@@ -416,29 +469,14 @@
               library.browserTrackStyle,
               (id) => library.setBrowserTrackStyle(id as BrowserTrackStyle)
             )}
-            <div class="flex items-center gap-3 rounded-md px-2 py-2">
-              <span class="min-w-0 flex-1">
-                <span class="block text-[12.5px] font-medium">Track height</span>
-                <span class="mt-0.5 block text-[11px] leading-snug text-faint">
-                  Height of each track in the browser. Text, artwork and waveforms scale with it. Lower fits more
-                  tracks, higher is easier to read.
-                </span>
-              </span>
-              <input
-                class="h-4 w-28 shrink-0 cursor-pointer accent-accent"
-                type="range"
-                min={ROW_HEIGHT_MIN}
-                max={ROW_HEIGHT_MAX}
-                step={ROW_HEIGHT_STEP}
-                aria-label="Track height"
-                aria-valuetext="{library.browserRowHeight} pixels"
-                value={library.browserRowHeight}
-                oninput={(e) => library.setBrowserRowHeight(Number(e.currentTarget.value))}
-              />
-              <span class="w-9 shrink-0 text-right font-mono text-[11px] text-muted tabular-nums">
-                {library.browserRowHeight}px
-              </span>
-            </div>
+            {@render slider(
+              'Track height',
+              'Height of each track in the browser. Text, artwork and waveforms scale with it. Lower fits more tracks, higher is easier to read.',
+              { min: ROW_HEIGHT_MIN, max: ROW_HEIGHT_MAX, step: ROW_HEIGHT_STEP },
+              library.browserRowHeight,
+              `${library.browserRowHeight}px`,
+              (height) => library.setBrowserRowHeight(height)
+            )}
             {@render toggle(
               'Hide streaming tracks',
               'Leave tracks from streaming services out of the collection, playlists, histories and tags. They stay in rekordbox.',
@@ -455,9 +493,10 @@
 
           <section class="mb-5">
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Hardware</h3>
-            {@render playerMenu(
+            {@render menu(
               'Target',
               'Green plays on this player and every newer one. Yellow plays here, but not on a newer player. Red will not play here.',
+              PLAYER_CHOICES,
               library.hardwareGreen,
               (id) => library.setHardwareGreen(id)
             )}
@@ -465,28 +504,24 @@
 
           <section class="mb-5">
             <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">Waveforms</h3>
-            <div class="flex items-center gap-3 rounded-md px-2 py-2">
-              <span class="min-w-0 flex-1">
-                <span class="block text-[12.5px] font-medium">High quality waveforms</span>
-                <span class="mt-0.5 block text-[11px] leading-snug text-faint">
-                  Draw the detail waveform from the audio. Off uses the rekordbox analysis. Higher keeps more detail.
-                </span>
-              </span>
-              <input
-                class="h-4 w-28 shrink-0 cursor-pointer accent-accent"
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                aria-label="High quality waveforms"
-                aria-valuetext={prefs.waveform.quality === 0 ? 'Off' : `${prefs.waveform.quality}%`}
-                value={prefs.waveform.quality}
-                oninput={(e) => prefs.waveform.setQuality(Number(e.currentTarget.value))}
-              />
-              <span class="w-9 shrink-0 text-right font-mono text-[11px] text-muted tabular-nums">
-                {prefs.waveform.quality === 0 ? 'Off' : `${prefs.waveform.quality}%`}
-              </span>
-            </div>
+            {@render qualitySlider(
+              'Color quality',
+              'Draw the color detail waveform from the audio. Off uses the rekordbox analysis. Higher keeps more detail.',
+              'rgb'
+            )}
+            {@render qualitySlider(
+              '3-band quality',
+              'Draw the 3-band detail waveform from the audio. Off uses the rekordbox analysis. Higher keeps more detail.',
+              '3band'
+            )}
+            {@render slider(
+              'Smoothing',
+              'How gently the 3-band waveform eases down after each peak. Off shows hard steps.',
+              { min: 0, max: MAX_FALL_BLOCKS_PER_QUALITY, step: FALL_BLOCKS_PER_QUALITY_STEP },
+              prefs.waveform.fallBlocksPerQuality,
+              prefs.waveform.fallBlocksPerQuality === 0 ? 'Off' : `${prefs.waveform.fallBlocksPerQuality.toFixed(2)}×`,
+              (blocks) => prefs.waveform.setFallBlocksPerQuality(blocks)
+            )}
           </section>
         {:else if section === 'mix'}
           <MixCurvePreview curve={mixPrefs.curve} range={mixPrefs.swapRange} />
@@ -972,6 +1007,58 @@
   </a>
 {/snippet}
 
+{#snippet slider(
+  label: string,
+  description: string,
+  range: { min: number; max: number; step: number },
+  value: number,
+  valueText: string,
+  set: (value: number) => void
+)}
+  <div class="flex items-center gap-3 rounded-md px-2 py-2">
+    <span class="min-w-0 flex-1">
+      <span class="block text-[12.5px] font-medium">{label}</span>
+      <span class="mt-0.5 block text-[11px] leading-snug text-faint">{description}</span>
+    </span>
+    <input
+      class="h-4 w-28 shrink-0 cursor-pointer accent-accent"
+      type="range"
+      min={range.min}
+      max={range.max}
+      step={range.step}
+      aria-label={label}
+      aria-valuetext={valueText}
+      {value}
+      oninput={(e) => set(Number(e.currentTarget.value))}
+    />
+    <span class="w-9 shrink-0 text-right font-mono text-[11px] text-muted tabular-nums">{valueText}</span>
+  </div>
+{/snippet}
+
+{#snippet qualitySlider(label: string, description: string, mode: WaveformMode)}
+  {@const quality = prefs.waveform.qualities[mode]}
+  {@render slider(
+    label,
+    description,
+    { min: 0, max: MAX_QUALITY[mode], step: 1 },
+    quality,
+    quality === 0 ? 'Off' : `${quality}%`,
+    (q) => prefs.waveform.setQuality(mode, q)
+  )}
+{/snippet}
+
+{#snippet heightScaleSlider(label: string, description: string, view: WaveformView)}
+  {@const scale = prefs.waveform.heightScales[view]}
+  {@render slider(
+    label,
+    description,
+    { min: MIN_HEIGHT_SCALE, max: 1, step: HEIGHT_SCALE_STEP },
+    scale,
+    `${Math.round(scale * 100)}%`,
+    (s) => prefs.waveform.setHeightScale(view, s)
+  )}
+{/snippet}
+
 {#snippet toggle(label: string, description: string, on: boolean, flip: () => void)}
   <button
     class="flex w-full items-start gap-3 rounded-md px-2 py-2 text-left hover:bg-hover"
@@ -997,7 +1084,7 @@
   </button>
 {/snippet}
 
-{#snippet playerMenu(label: string, description: string, current: string, pick: (id: string) => void)}
+{#snippet menu(label: string, description: string, options: Choice[], current: string, pick: (id: string) => void)}
   <label class="flex items-start gap-3 rounded-md px-2 py-2">
     <span class="min-w-0 flex-1">
       <span class="block text-[12.5px] font-medium">{label}</span>
@@ -1009,11 +1096,44 @@
       value={current}
       onchange={(e) => pick(e.currentTarget.value)}
     >
-      {#each PLAYERS as player (player.id)}
-        <option value={player.id}>{player.name}</option>
+      {#each options as o (o.id)}
+        <option value={o.id}>{o.label}</option>
       {/each}
     </select>
   </label>
+{/snippet}
+
+{#snippet colorPicker(
+  label: string,
+  description: string,
+  color: string,
+  defaultColor: string,
+  set: (color: string) => void
+)}
+  <div class="flex items-center gap-3 rounded-md px-2 py-2">
+    <span class="min-w-0 flex-1">
+      <span class="block text-[12.5px] font-medium">{label}</span>
+      <span class="mt-0.5 block text-[11px] leading-snug text-faint">{description}</span>
+    </span>
+    <input
+      class="h-7 w-10 shrink-0 cursor-pointer overflow-hidden rounded-md border border-line bg-transparent p-0 [&::-webkit-color-swatch]:border-none [&::-webkit-color-swatch-wrapper]:p-0"
+      type="color"
+      aria-label={label}
+      value={color}
+      oninput={(e) => set(e.currentTarget.value)}
+      onchange={(e) => set(e.currentTarget.value)}
+    />
+    <span class="w-16 shrink-0 text-right font-mono text-[11px] text-muted uppercase tabular-nums">{color}</span>
+    <button
+      class="grid size-6 shrink-0 place-items-center rounded text-faint hover:bg-hover hover:text-fg disabled:invisible"
+      disabled={color === defaultColor}
+      onclick={() => set(defaultColor)}
+      aria-label="Reset {label.toLowerCase()}"
+      title="Reset to default"
+    >
+      <RotateCcw class="size-3" />
+    </button>
+  </div>
 {/snippet}
 
 {#snippet choice(label: string, description: string, options: Choice[], current: string, pick: (id: string) => void)}

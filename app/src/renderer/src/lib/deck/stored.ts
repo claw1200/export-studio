@@ -23,10 +23,15 @@ export function storeFlag(key: string, on: boolean): void {
   setSetting(key, on ? '1' : '0')
 }
 
-/** A whole number from 0 to 100. */
-export function storedPercent(key: string, fallback: number): number {
+export function storedNumber(key: string, fallback: number, min: number, max: number): number {
   const raw = getSetting(key)
   if (raw == null) return fallback
   const n = Number(raw)
-  return Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : fallback
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback
+}
+
+export type Percent = number
+
+export function storedPercent(key: string, fallback: Percent): Percent {
+  return Math.round(storedNumber(key, fallback, 0, 100))
 }

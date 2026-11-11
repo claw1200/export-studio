@@ -11,13 +11,14 @@ export function waveStride(quality: number): number {
 }
 
 /**
- * Entries `from`–`to` of `wf` (its rate), drawn from `samples` in the analysis's colours.
+ * Entries `from`–`to` of `wf` (its rate), drawn from `samples` in `colors`, one per entry.
  * `headroom` is the share of the height left clear above a full-scale peak.
  */
 export function drawSampleWave(
   ctx: CanvasRenderingContext2D,
   wf: Waveform,
   samples: WaveSamples,
+  colors: Uint8Array | undefined,
   from: number,
   to: number,
   pw: number,
@@ -90,7 +91,6 @@ export function drawSampleWave(
     lower[x] = bot
   }
 
-  const colors = wf.rgbColors
   const colorAt = (x: number): number => {
     if (!colors || colors.length < 3) return -1
     const seconds = ((first + x + 0.5) * per) / samples.rate

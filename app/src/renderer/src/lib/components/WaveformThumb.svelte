@@ -2,8 +2,8 @@
   import type { BrowserWave } from '$lib/browserPreview.svelte'
   import { getApp } from '$lib/context'
   import type { Cue, Track } from '$lib/types'
-  import { drawAnalysisRgb, drawStackedBands } from '$lib/waveform/analysis'
-  import { setupCanvas } from '$lib/waveform/canvas'
+  import { drawRgbOverview, drawStackedBands } from '$lib/waveform/analysis'
+  import { drawAtHeightScale, setupCanvas } from '$lib/waveform/canvas'
   import { drawCueMarks } from '$lib/waveform/cueMarks'
   import WaveformMarks from './WaveformMarks.svelte'
 
@@ -33,15 +33,26 @@
     }
   }
 
+  function rgbColors(wave: BrowserWave): Uint8Array | undefined {
+    const seconds = track.duration
+    const { rgbLength, bands, bandLength } = wave
+    const timedBands = seconds > 0 ? bands : undefined
+    return decks.prefs.waveform.rgbColors(wave.colors, rgbLength / seconds, rgbLength, timedBands, bandLength / seconds)
+  }
+
   function paint(canvas: HTMLCanvasElement): void {
     if (!width || !height || !wave) return
     const ctx = setupCanvas(canvas, width, height)
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    const bands = decks.prefs.waveform.mode === '3band' ? wave.bands : null
-    if (bands) drawStackedBands(ctx, bands, canvas.width, canvas.height)
-    else if (wave.heights && wave.colors)
-      drawAnalysisRgb(ctx, wave.heights, wave.colors, 0, wave.rgbLength, canvas.width, canvas.height, 'bottom')
-    else if (wave.bands) drawStackedBands(ctx, wave.bands, canvas.width, canvas.height)
+    const { mode, heightScales } = decks.prefs.waveform
+    const bands = mode === '3band' ? wave.bands : null
+    const colors = rgbColors(wave)
+    const pw = canvas.width
+    drawAtHeightScale(ctx, canvas.height, heightScales.overview, 'bottom', (ph) => {
+      if (bands) drawStackedBands(ctx, bands, pw, ph)
+      else if (wave.heights && colors) drawRgbOverview(ctx, wave.heights, colors, wave.rgbLength, pw, ph)
+      else if (wave.bands) drawStackedBands(ctx, wave.bands, pw, ph)
+    })
     if (!live) drawCueMarks(ctx, cues, span, width, height, window.devicePixelRatio || 1)
   }
 
@@ -58,7 +69,7 @@
 
 {#if wave}
   <div
-    class="relative h-[85%] max-h-[85%] w-full min-w-0 cursor-pointer overflow-hidden bg-black/40"
+    class="relative h-full w-full min-w-0 cursor-pointer overflow-hidden bg-black/40"
     {@attach releaseOnRemove}
     bind:clientWidth={width}
     bind:clientHeight={height}

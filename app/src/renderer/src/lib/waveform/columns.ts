@@ -16,9 +16,17 @@ export function fitColumns(n: number): void {
   columns.color = new Int32Array(size)
 }
 
+export function packRgb(red: number, green: number, blue: number): number {
+  return (Math.round(red) << 16) | (Math.round(green) << 8) | Math.round(blue)
+}
+
 export function packColor(colors: Uint8Array, index: number): number {
   const o = index * 3
-  return (colors[o] << 16) | (colors[o + 1] << 8) | colors[o + 2]
+  return packRgb(colors[o], colors[o + 1], colors[o + 2])
+}
+
+export function cssColor(packed: number): string {
+  return `rgb(${(packed >> 16) & 255},${(packed >> 8) & 255},${packed & 255})`
 }
 
 /** Entries per pixel for `from`–`to` across `pw` pixels, and the pixel `from` falls in. */
