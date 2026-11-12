@@ -7,9 +7,12 @@ export interface TempoFlagMark {
   first: boolean
 }
 
+export type WidthFraction = number
+
 /** What the scrolling detail waveform shows around the playhead. */
 export interface DetailView {
   position: number
+  playheadAt: WidthFraction
   zoom: number
   cues: Cue[]
   beatgrid: Beatgrid | null
@@ -32,5 +35,6 @@ export interface Frame {
   dpr: number
   from: number
   to: number
+  playheadX: number
   toX: (seconds: number) => number
 }

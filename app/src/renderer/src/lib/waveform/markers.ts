@@ -4,7 +4,7 @@ import { cueColor, hotCueLetter } from '../format'
 import type { Beatgrid, Cue } from '../types'
 import { CUE_POINT_COLOR, LOOP_ACTIVE_COLOR, TEMPO_FLAG_COLOR } from './colors'
 import type { Waveform } from './data'
-import type { Frame } from './frame'
+import type { Frame, WidthFraction } from './frame'
 
 /** Beat handles, in CSS pixels. A vertical pill centered on each grid line, with a slightly larger hit box. */
 const HANDLE_W = 6
@@ -120,6 +120,7 @@ export function gridHandleIndex(
   wf: Waveform,
   position: number,
   zoom: number,
+  playheadAt: WidthFraction,
   grid: Beatgrid | null,
   cssWidth: number,
   cssHeight: number,
@@ -129,13 +130,13 @@ export function gridHandleIndex(
   if (!grid?.times.length || !(cssWidth > 0) || !(cssHeight > 0) || !(zoom > 0) || !(wf.rate > 0)) return -1
   if (Math.abs(y - cssHeight / 2) > HANDLE_HIT_Y) return -1
   const pxPerSecond = wf.rate * zoom
-  const half = cssWidth / 2
-  const startMs = (position - half / pxPerSecond) * 1000
-  const endMs = (position + half / pxPerSecond) * 1000
+  const playheadX = cssWidth * playheadAt
+  const startMs = (position - playheadX / pxPerSecond) * 1000
+  const endMs = (position + (cssWidth - playheadX) / pxPerSecond) * 1000
   let best = -1
   let bestDx = Infinity
   eachVisibleBeat(grid.times, startMs, endMs, (i) => {
-    const dx = Math.abs(x - (half + (grid.times[i] / 1000 - position) * pxPerSecond))
+    const dx = Math.abs(x - (playheadX + (grid.times[i] / 1000 - position) * pxPerSecond))
     if (dx <= HANDLE_HIT_X && dx < bestDx) {
       bestDx = dx
       best = i
@@ -231,8 +232,7 @@ export function paintCuePoint(frame: Frame): void {
 }
 
 export function paintPlayhead(frame: Frame): void {
-  const { ctx, pw, ph, dpr } = frame
-  const x = Math.round(pw / 2)
+  const { ctx, ph, dpr, playheadX: x } = frame
   ctx.fillStyle = 'rgba(0,0,0,0.5)'
   ctx.fillRect(x - dpr, 0, 3 * dpr, ph)
   ctx.fillStyle = '#ffffff'
@@ -249,14 +249,14 @@ function nextCue(cues: Cue[], seconds: number): Cue | null {
 }
 
 function paintPill(frame: Frame, y: number, text: string, cue: Cue | null): void {
-  const { ctx, pw, dpr } = frame
+  const { ctx, dpr, playheadX } = frame
   const height = Math.round(15 * dpr)
   const pad = Math.round(5 * dpr)
   const chip = cue ? Math.round(9 * dpr) : 0
   const gap = cue ? Math.round(4 * dpr) : 0
   const textWidth = Math.ceil(ctx.measureText(text).width)
   const width = pad * 2 + chip + gap + textWidth
-  const left = Math.round(pw / 2 - width / 2)
+  const left = Math.round(playheadX - width / 2)
   const mid = y + height / 2
 
   ctx.fillStyle = 'rgba(10,11,14,0.82)'

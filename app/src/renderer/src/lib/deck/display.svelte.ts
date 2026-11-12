@@ -1,9 +1,10 @@
 import { Listeners } from '../listeners'
 import { getSetting, setSetting } from '../settings'
 import type { Waveform, WaveformMode } from '../waveform/data'
+import type { WidthFraction } from '../waveform/frame'
 import { gradientColors, pendingColors } from '../waveform/gradientColors'
 import { rgbGradient } from '../waveform/rgbGradient.svelte'
-import { type Percent, storedFlag, storeFlag, storedNumber, storedPercent } from './stored'
+import { type Percent, storedChoice, storedFlag, storeFlag, storedNumber, storedPercent } from './stored'
 import { WaveLoader, type WaveSamples } from './waves.svelte'
 
 /** What changed in the waveform preferences, so each deck can decide whether to fetch again. */
@@ -26,6 +27,10 @@ export const MAX_FALL_BLOCKS_PER_QUALITY = 10
 export const FALL_BLOCKS_PER_QUALITY_STEP = 0.05
 
 export type WaveformView = 'detail' | 'overview'
+
+export type PlayheadPlacement = 'centre' | 'leftThird'
+export const DEFAULT_PLAYHEAD_PLACEMENT: PlayheadPlacement = 'centre'
+const PLAYHEAD_AT: Record<PlayheadPlacement, WidthFraction> = { centre: 1 / 2, leftThird: 1 / 3 }
 
 const HEIGHT_SCALE_KEYS: Record<WaveformView, string> = {
   detail: 'waveHeightScaleDetail',
@@ -57,6 +62,9 @@ export class WaveformPrefs {
     overview: storedHeightScale('overview')
   })
   zoom = $state(Number(getSetting('waveformZoom')) || 1)
+  playheadPlacement = $state(
+    storedChoice<PlayheadPlacement>('playheadPlacement', ['centre', 'leftThird'], DEFAULT_PLAYHEAD_PLACEMENT)
+  )
 
   private changed = new Listeners<[change: WaveformChange]>()
 
@@ -141,6 +149,15 @@ export class WaveformPrefs {
     this.setHeightScale('overview', DEFAULT_HEIGHT_SCALE)
   }
 
+  setPlayheadPlacement(placement: PlayheadPlacement): void {
+    this.playheadPlacement = placement
+    setSetting('playheadPlacement', placement)
+  }
+
+  get playheadAt(): WidthFraction {
+    return PLAYHEAD_AT[this.playheadPlacement]
+  }
+
   setZoom(zoom: number): void {
     this.zoom = Math.max(0.25, Math.min(64, zoom))
     setSetting('waveformZoom', String(this.zoom))
@@ -186,6 +203,10 @@ export class WaveformDisplay {
 
   get zoom(): number {
     return this.prefs.zoom
+  }
+
+  get playheadAt(): WidthFraction {
+    return this.prefs.playheadAt
   }
 
   get heightScales(): Record<WaveformView, number> {
