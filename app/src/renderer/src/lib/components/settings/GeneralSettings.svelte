@@ -42,6 +42,11 @@
       (on) => prefs.setQuantise(on)
     ),
     setting(
+      () => prefs.loadAtFirstCue,
+      DEFAULT_DECK_PREFS.loadAtFirstCue,
+      (on) => prefs.setLoadAtFirstCue(on)
+    ),
+    setting(
       () => prefs.cuePlacement,
       DEFAULT_DECK_PREFS.cuePlacement,
       (p) => prefs.setCuePlacement(p)
@@ -75,6 +80,12 @@
       description="Scrubbing, the cue point and new cues snap to the nearest beat."
       on={prefs.quantise}
       onflip={() => prefs.setQuantise(!prefs.quantise)}
+    />
+    <SettingToggle
+      label="Load at first cue"
+      description="Loaded tracks are cued to their first hot cue or memory cue."
+      on={prefs.loadAtFirstCue}
+      onflip={() => prefs.setLoadAtFirstCue(!prefs.loadAtFirstCue)}
     />
     <SettingChoice
       label="Place new cues at"
