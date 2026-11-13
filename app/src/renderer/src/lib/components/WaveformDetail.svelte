@@ -37,6 +37,7 @@
       wf,
       player.position,
       player.display.zoom,
+      player.display.playheadAt,
       player.displayGrid,
       width,
       height,
@@ -61,6 +62,7 @@
       player.display.mode,
       {
         position: player.position,
+        playheadAt: player.display.playheadAt,
         zoom: player.display.zoom,
         cues: player.displayCues,
         beatgrid: player.displayGrid,

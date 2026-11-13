@@ -37,8 +37,9 @@
   let flagShapes: FlagShape[] = []
 
   const pxPerSecond = (): number => (player.waveform?.rate ?? 0) * player.display.zoom
-  const xOf = (ms: number): number => width / 2 + (ms / 1000 - player.position) * pxPerSecond()
-  const msAt = (x: number): number => (player.position + (x - width / 2) / Math.max(pxPerSecond(), 1e-6)) * 1000
+  const playheadX = (): number => width * player.display.playheadAt
+  const xOf = (ms: number): number => playheadX() + (ms / 1000 - player.position) * pxPerSecond()
+  const msAt = (x: number): number => (player.position + (x - playheadX()) / Math.max(pxPerSecond(), 1e-6)) * 1000
   const localX = (e: MouseEvent): number => e.clientX - (e.currentTarget as HTMLElement).getBoundingClientRect().left
   const nearest = (values: number[], target: number): number =>
     values.reduce((best, value) => (Math.abs(value - target) < Math.abs(best - target) ? value : best))

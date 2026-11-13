@@ -3,10 +3,12 @@
   import { getApp } from '$lib/context'
   import {
     DEFAULT_FALL_BLOCKS_PER_QUALITY,
+    DEFAULT_PLAYHEAD_PLACEMENT,
     DEFAULT_QUALITIES,
     FALL_BLOCKS_PER_QUALITY_STEP,
     MAX_FALL_BLOCKS_PER_QUALITY,
-    MAX_QUALITY
+    MAX_QUALITY,
+    type PlayheadPlacement
   } from '$lib/deck/display.svelte'
   import { PLAYERS } from '$lib/hardware/players'
   import { DEFAULT_LIBRARY_PREFS, type BrowserTrackStyle } from '$lib/library.svelte'
@@ -29,6 +31,10 @@
   const TRACK_STYLES: Choice<BrowserTrackStyle>[] = [
     { id: 'standard', label: 'Standard' },
     { id: 'alternative', label: 'Alternative' }
+  ]
+  const PLAYHEAD_PLACEMENTS: Choice<PlayheadPlacement>[] = [
+    { id: 'centre', label: 'Centre' },
+    { id: 'leftThird', label: 'Left third' }
   ]
 
   const defaults = allOf(
@@ -71,6 +77,11 @@
       () => waveform.fallBlocksPerQuality,
       DEFAULT_FALL_BLOCKS_PER_QUALITY,
       (blocks) => waveform.setFallBlocksPerQuality(blocks)
+    ),
+    setting(
+      () => waveform.playheadPlacement,
+      DEFAULT_PLAYHEAD_PLACEMENT,
+      (placement) => waveform.setPlayheadPlacement(placement)
     )
   )
 </script>
@@ -119,6 +130,13 @@
   </SettingsGroup>
 
   <SettingsGroup title="Waveforms">
+    <SettingChoice
+      label="Playhead position"
+      description="Where the playhead sits in the scrolling waveform. Left third shows more of what is coming up."
+      options={PLAYHEAD_PLACEMENTS}
+      current={waveform.playheadPlacement}
+      onpick={(placement) => waveform.setPlayheadPlacement(placement)}
+    />
     {@render qualitySlider(
       'Color quality',
       'Draw the color detail waveform from the audio. Off uses the rekordbox analysis. Higher keeps more detail.',
