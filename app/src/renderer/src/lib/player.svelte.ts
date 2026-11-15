@@ -238,6 +238,17 @@ export class Player {
     const opened = this.session.open(track)
     this.display.reload()
     await opened
+    const stillThisTrack = this.track?.id === track.id
+    const cuePointUntouched = this.cuePoint === 0
+    if (this.prefs.loadAtFirstCue && stillThisTrack && cuePointUntouched) this.cueAtFirstCue()
+  }
+
+  private cueAtFirstCue(): void {
+    const first = this.displayCues.reduce<Cue | null>(
+      (earliest, cue) => (!earliest || cue.start < earliest.start ? cue : earliest),
+      null
+    )
+    if (first) this.cueAt(first.start / 1000)
   }
 
   private play(): void {
