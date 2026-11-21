@@ -414,6 +414,7 @@
     const loose = selected.filter((item) => item.collected === false)
     const owned = selected.filter((item) => item.collected !== false)
     if (owned.length) void library.loadPlaylistContents()
+    const exportZip = (): void => void library.exportTracksZip(library.sourceTitle, selected)
     // Read lazily, so playlist membership icons appear once the contents load.
     rowMenu = menuAt(e, loose.length && !owned.length ? 'File' : 'Track', () =>
       tidy([
@@ -424,6 +425,7 @@
               remove: onremove,
               analyse: onanalyse,
               convert: onconvert,
+              exportZip,
               shortcut
             })
           : []),
@@ -440,7 +442,8 @@
                     if (result?.tracks.length) analysis.analyse(result.tracks)
                   })
                 },
-                deleteFiles: (files) => (deletingFiles = files)
+                deleteFiles: (files) => (deletingFiles = files),
+                exportZip: owned.length ? undefined : exportZip
               },
               owned.length === 0
             )

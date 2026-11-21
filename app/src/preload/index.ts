@@ -3,6 +3,7 @@ import type { AudioApi, DeckEvent, Tick } from './audio'
 import type { AnalysisJob, AnalysisProgress, MenuCommand } from './analysis'
 import type { EngineCallArgs } from './engine'
 import type { Update } from '../shared/updates'
+import type { ZipProgress, ZipResult, ZipSource } from '../shared/zip'
 
 type CallResult = { ok: true; result: unknown } | { ok: false; error: { message: string; type: string } }
 
@@ -47,6 +48,14 @@ const api = {
 
   trash(paths: string[]): Promise<string[]> {
     return ipcRenderer.invoke('shell:trash', paths)
+  },
+
+  exportZip(name: string, sources: ZipSource[]): Promise<ZipResult | null> {
+    return ipcRenderer.invoke('zip:export', name, sources)
+  },
+
+  onZipProgress(listener: (progress: ZipProgress) => void): () => void {
+    return subscribe<ZipProgress>('zip:progress', listener)
   },
 
   onMenu(listener: (command: MenuCommand) => void): () => void {

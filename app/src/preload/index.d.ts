@@ -2,6 +2,7 @@ import type { AnalysisJob, AnalysisProgress, MenuCommand } from './analysis'
 import type { AudioApi } from './audio'
 import type { EngineCallArgs } from './engine'
 import type { Update } from '../shared/updates'
+import type { ZipProgress, ZipResult, ZipSource } from '../shared/zip'
 
 export interface Api {
   platform: string
@@ -20,6 +21,9 @@ export interface Api {
   pathForFile(file: File): string
   /** Moves files to the Trash and returns the ones that could not be moved. */
   trash(paths: string[]): Promise<string[]>
+  /** Asks where to save, then archives the sources there. Null when the save is cancelled. */
+  exportZip(name: string, sources: ZipSource[]): Promise<ZipResult | null>
+  onZipProgress(listener: (progress: ZipProgress) => void): () => void
   onMenu(listener: (command: MenuCommand) => void): () => void
   analyse(jobs: AnalysisJob[], concurrency: number): Promise<void>
   cancelAnalysis(): Promise<void>
