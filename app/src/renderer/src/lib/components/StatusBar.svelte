@@ -22,7 +22,7 @@
   })
 
   const showingProgress = $derived(
-    analysis.running || !!backups.progress || !!library.convertProgress || library.syncing
+    analysis.running || !!backups.progress || !!library.convertProgress || !!library.zipProgress || library.syncing
   )
   const syncDevice = $derived(library.devices.find((device) => device.id === library.syncVolumeId))
 
@@ -126,6 +126,14 @@
     {@const { done, total } = library.convertProgress}
     {@render task(
       `Converting ${Math.min(done + 1, total).toLocaleString()} of ${total.toLocaleString()}`,
+      done / Math.max(total, 1)
+    )}
+  {/if}
+
+  {#if library.zipProgress}
+    {@const { done, total } = library.zipProgress}
+    {@render task(
+      `Zipping ${Math.min(done + 1, total).toLocaleString()} of ${total.toLocaleString()}`,
       done / Math.max(total, 1)
     )}
   {/if}

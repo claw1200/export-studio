@@ -4,7 +4,7 @@ import { browserPreviews } from './browserPreview.svelte'
 import { clearDetailCache } from './deck/session.svelte'
 import { clearWaveCache } from './deck/waves.svelte'
 import { cueStats, newestFirst, type SortKey, sortTracks, type TrackSort } from './library/sort'
-import { buildTree } from './library/tree'
+import { buildTree, type TreeNode } from './library/tree'
 import { duplicateGroups, rankCopies } from './library/duplicates'
 import { verdictForTrack } from './hardware/compatibility'
 import { DEFAULT_GREEN, playerById } from './hardware/players'
@@ -24,6 +24,7 @@ import type {
   AudioProbe,
   Track,
   TrackEdit,
+  TrackViewFilters,
   TreeItem,
   PlaylistPolicy,
   UsbImportResult,
@@ -32,6 +33,7 @@ import type {
 } from './types'
 import { DEVICE_TRACKS_READ_ONLY, isDeviceTrack, isLooseFile } from './trackIds'
 import type { SyncDecisions } from '../../../preload/engine'
+import type { ZipProgress, ZipResult, ZipSource } from '../../../shared/zip'
 
 export interface SyncOptions {
   review?: SyncDecisions
@@ -97,6 +99,12 @@ function profileStage(name: string, started: number): void {
 
 export type NoticeLevel = 'info' | 'warning' | 'error'
 
+function zipSummary({ path, written, skipped }: ZipResult): string {
+  const file = path.split(/[\\/]/).pop()
+  const exported = `Exported ${written === 1 ? 'one file' : `${written.toLocaleString()} files`} to ${file}`
+  return skipped ? `${exported}. ${skipped.toLocaleString()} missing file(s) were left out` : exported
+}
+
 export class Library {
   tracks = $state.raw<Track[]>([])
   playlists = $state.raw<TreeItem[]>([])
@@ -150,6 +158,8 @@ export class Library {
   browserRowHeight = $state(readRowHeight(getSetting(BROWSER_ROW_HEIGHT_KEY)))
   hardwareGreen = $state(storedPlayer('hardwareGreen', DEFAULT_LIBRARY_PREFS.hardwareGreen))
   importing = $state(false)
+  exportingZip = $state(false)
+  zipProgress = $state.raw<ZipProgress | null>(null)
   converting = $state(false)
   convertProgress = $state.raw<{ done: number; total: number } | null>(null)
   renamingId = $state<string | null>(null)
@@ -712,6 +722,72 @@ export class Library {
     return parts.join(' ') || 'Nothing to import'
   }
 
+  exportTracksZip(name: string, tracks: Track[]): Promise<void> {
+    return this.exportZip(name, () => this.zipSources(tracks, []))
+  }
+
+  /** A folder's playlists each become a folder in the archive. */
+  exportPlaylistZip(node: TreeNode): Promise<void> {
+    return this.exportZip(node.name || 'Untitled', () => this.playlistZipSources(node, []))
+  }
+
+  exportViewZip(view: View): Promise<void> {
+    return this.exportZip(view.name, () => this.viewZipSources(view))
+  }
+
+  private async exportZip(name: string, collect: () => ZipSource[] | Promise<ZipSource[]>): Promise<void> {
+    if (this.exportingZip) return
+    this.exportingZip = true
+    const unsubscribe = window.api.onZipProgress((progress) => (this.zipProgress = progress))
+    try {
+      const sources = await collect()
+      if (!sources.length) {
+        this.notify('No files to export')
+        return
+      }
+      const result = await window.api.exportZip(name, sources)
+      if (result) this.notify(zipSummary(result), result.skipped ? 'warning' : 'info')
+    } catch (e) {
+      this.notify((e as Error).message, 'error')
+    } finally {
+      unsubscribe()
+      this.exportingZip = false
+      this.zipProgress = null
+    }
+  }
+
+  private zipSources(tracks: Track[], folders: string[]): ZipSource[] {
+    return tracks
+      .filter((track) => track.path && !track.streaming && this.shown(track))
+      .map((track) => ({ path: track.path, folders }))
+  }
+
+  private async playlistZipSources(node: TreeNode, folders: string[]): Promise<ZipSource[]> {
+    if (node.kind !== 'folder') {
+      const ids = await api.playlistTracks(node.id)
+      return this.zipSources(
+        ids.flatMap((id) => this.byId.get(id) ?? []),
+        folders
+      )
+    }
+    const children = await Promise.all(
+      node.children.map((child) => this.playlistZipSources(child, [...folders, child.name || 'Untitled']))
+    )
+    return children.flat()
+  }
+
+  private async viewZipSources(view: View): Promise<ZipSource[]> {
+    if (view.type === 'tracks') return this.zipSources(this.tracksMatching(view.filters), [])
+    if (view.type === 'duplicates') {
+      return this.zipSources(duplicateGroups(this.tracks, view.match, view.durationSlack).flat(), [])
+    }
+    const paths = await window.api.expandPaths([view.directory])
+    const collected = this.tracksByPath()
+    return paths
+      .filter((path) => view.showInCollection || !collected.has(pathKey(path)))
+      .map((path) => ({ path, folders: [] }))
+  }
+
   /** Remove tracks from the collection and every playlist, deleting cues and the beatgrid. */
   async removeFromCollection(ids: string[], trash = false): Promise<boolean> {
     const local = ids.filter((id) => !isDeviceTrack(id))
@@ -1117,12 +1193,14 @@ export class Library {
     return out
   }
 
+  private tracksMatching(filters: TrackViewFilters): Track[] {
+    return this.tracks.filter((track) => matchesTrack(track, filters, this.playlistMembers.has(track.id)))
+  }
+
   private viewTracks(id: string): Track[] {
     const view = this.viewById.get(id)
     if (!view) return []
-    if (view.type === 'tracks') {
-      return this.tracks.filter((track) => matchesTrack(track, view.filters, this.playlistMembers.has(track.id)))
-    }
+    if (view.type === 'tracks') return this.tracksMatching(view.filters)
     if (view.type === 'duplicates') return this.listedDuplicates?.tracks ?? []
     const byPath = this.tracksByPath()
     const out: Track[] = []

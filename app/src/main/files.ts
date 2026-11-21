@@ -2,6 +2,8 @@ import { BrowserWindow, dialog, ipcMain, Menu, shell, type MenuItemConstructorOp
 import { readdir, stat } from 'fs/promises'
 import { extname, join } from 'path'
 import type { MenuCommand } from '../preload/analysis'
+import type { ZipResult, ZipSource } from '../shared/zip'
+import { safeFileName, writeZip } from './zip'
 
 /** The file types rekordbox can hold in its collection. */
 export const IMPORT_EXTENSIONS = ['mp3', 'm4a', 'flac', 'wav', 'aif', 'aiff']
@@ -114,6 +116,18 @@ export function registerFiles(): void {
         : { title: 'Import a folder', properties: ['openDirectory', 'multiSelections'] }
     const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
     return result.canceled ? [] : expandPaths(result.filePaths)
+  })
+  ipcMain.handle('zip:export', async (e, name: string, sources: ZipSource[]): Promise<ZipResult | null> => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const options: Electron.SaveDialogOptions = {
+      title: 'Export as ZIP',
+      defaultPath: `${safeFileName(name)}.zip`,
+      filters: [{ name: 'ZIP archive', extensions: ['zip'] }]
+    }
+    const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
+    if (result.canceled || !result.filePath) return null
+    const summary = await writeZip(result.filePath, sources, (progress) => e.sender.send('zip:progress', progress))
+    return { path: result.filePath, ...summary }
   })
   ipcMain.handle('files:expand', (_e, paths: string[]) => expandPaths(paths))
   ipcMain.handle('shell:trash', async (_e, paths: string[]) => {

@@ -1,6 +1,7 @@
 import {
   AudioWaveform,
   Check,
+  FileArchive,
   FileAudio,
   FilePlus,
   FileSearch,
@@ -39,6 +40,7 @@ export interface TrackMenuActions {
   remove: (tracks: Track[]) => void
   analyse: (tracks: Track[]) => void
   convert: (tracks: Track[], preset: ConvertPreset) => void
+  exportZip: () => void
   shortcut: (id: TrackMenuShortcut) => string | undefined
 }
 
@@ -56,6 +58,11 @@ export function unlockEntry(library: Library, decks: Decks): MenuEntry {
       })
   }
 }
+
+export function exportZipEntry(library: Library, onselect: () => void): MenuEntry {
+  return { label: 'Export as ZIP…', icon: FileArchive, disabled: library.exportingZip, onselect }
+}
+
 const REVEAL_LABEL = window.api.platform === 'darwin' ? 'Show in Finder' : 'Show in Explorer'
 
 /** Icons for adding tracks to a playlist that holds none, some, or all of them. */
@@ -147,15 +154,17 @@ export function trackMenu(library: Library, decks: Decks, tracks: Track[], actio
         )
       ])
     },
-    !device && playlist?.kind === 'playlist' && {
-      label: 'Remove from playlist',
-      icon: ListMinus,
-      danger: true,
-      shortcut: actions.shortcut('library.removeFromPlaylist'),
-      disabled: locked,
-      onselect: () => void library.removeFromPlaylist(playlist.id, ids)
-    },
-    !device && library.tagTree.length > 0 && { label: 'My Tag', icon: Tag, disabled: locked, items: tagItems(library, tracks) },
+    !device &&
+      playlist?.kind === 'playlist' && {
+        label: 'Remove from playlist',
+        icon: ListMinus,
+        danger: true,
+        shortcut: actions.shortcut('library.removeFromPlaylist'),
+        disabled: locked,
+        onselect: () => void library.removeFromPlaylist(playlist.id, ids)
+      },
+    !device &&
+      library.tagTree.length > 0 && { label: 'My Tag', icon: Tag, disabled: locked, items: tagItems(library, tracks) },
     !device && {
       label: 'Colour',
       icon: Palette,
@@ -201,6 +210,7 @@ export function trackMenu(library: Library, decks: Decks, tracks: Track[], actio
         icon: FolderSearch,
         onselect: () => window.api.showItemInFolder(single.path)
       },
+    exportZipEntry(library, actions.exportZip),
     !device && SEPARATOR,
     !device && {
       label:
@@ -245,6 +255,8 @@ export function fileMenu(
     importFiles: (paths: string[], playlistId: string | null) => void
     importAndAnalyse: (paths: string[]) => void
     deleteFiles: (tracks: Track[]) => void
+    /** Left out when the files share a menu with collection tracks, whose menu already offers it. */
+    exportZip?: () => void
   },
   includeUnlock = true
 ): MenuEntry[] {
@@ -293,6 +305,7 @@ export function fileMenu(
       icon: FolderSearch,
       onselect: () => window.api.showItemInFolder(single.path)
     },
+    actions.exportZip && exportZipEntry(library, actions.exportZip),
     SEPARATOR,
     {
       label: count === 1 ? 'Delete file…' : `Delete ${count} files…`,
