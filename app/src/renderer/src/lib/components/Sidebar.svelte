@@ -31,7 +31,7 @@
   import { PLAYLIST_TREE_DRAG_TYPE } from '$lib/library.svelte'
   import { buildTree, type TreeNode } from '$lib/library/tree'
   import { menuAt, tidy, type MenuEntry, type MenuRequest } from '$lib/menu'
-  import { membershipIcon, SEPARATOR, unlockEntry } from '$lib/trackMenu'
+  import { exportZipEntry, membershipIcon, SEPARATOR, unlockEntry } from '$lib/trackMenu'
   import type { Source, View, Volume } from '$lib/types'
   import ConfirmDialog from './ConfirmDialog.svelte'
   import ContextMenu from './ContextMenu.svelte'
@@ -290,6 +290,8 @@
   function viewMenu(e: MouseEvent, view: View): void {
     e.preventDefault()
     menu = menuAt(e, 'View', [
+      exportZipEntry(library, () => void library.exportViewZip(view)),
+      SEPARATOR,
       { label: 'Edit', icon: Pencil, onselect: () => (viewDialog = view) },
       { label: 'Delete', icon: Trash2, danger: true, onselect: () => (deletingView = view) }
     ])
@@ -332,6 +334,7 @@
           icon: FolderSync,
           onselect: () => openSync(node.id, '')
         },
+        exportZipEntry(library, () => void library.exportPlaylistZip(node)),
         { label: 'Rename', icon: Pencil, disabled: locked, onselect: () => (library.renamingId = node.id) },
         { label: 'Delete', icon: Trash2, danger: true, disabled: locked, onselect: () => (deleting = node) },
         locked && SEPARATOR,
