@@ -133,6 +133,12 @@ jobs:
         working-directory: app
         run: npm ci
 
+      - name: Build ffmpeg
+        working-directory: app
+        run: |
+          brew install lame
+          npm run build:ffmpeg
+
       - name: Build macOS release
         working-directory: app
         run: |
@@ -196,6 +202,19 @@ jobs:
       - name: Install app dependencies
         working-directory: app
         run: npm ci
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          path-type: inherit
+          install: make diffutils tar xz
+          pacboy: toolchain:p nasm:p lame:p
+
+      - name: Build ffmpeg
+        working-directory: app
+        shell: msys2 {0}
+        run: npm run build:ffmpeg
 
       - name: Build Windows release
         working-directory: app

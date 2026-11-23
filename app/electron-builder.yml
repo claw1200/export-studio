@@ -47,3 +47,4 @@ dmg:
   sign: true
   artifactName: ${productName}-${version}-macOS-${arch}.${ext}
 npmRebuild: false
+beforePack: ./scripts/require-ffmpeg.mjs
