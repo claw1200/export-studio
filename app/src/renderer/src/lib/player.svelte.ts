@@ -59,6 +59,7 @@ export class Player {
   cuePoint = $state<Seconds>(0)
   previewAt = $state<Seconds | null>(null)
   private holding = $state.raw<(Hold & { key: HoldButton }) | null>(null)
+  private importAwaitingAnalysis = $state(false)
   private previewOwner: string | null = null
   private fileChecked = new Listeners<[id: string, missing: boolean]>()
 
@@ -71,7 +72,7 @@ export class Player {
     this.display = new WaveformDisplay(
       prefs.waveform,
       () => this.track?.id ?? null,
-      () => this.track?.collected === false
+      () => this.drawsOwnScan
     )
     this.deck.onLoadSettled = () => {
       const id = this.track?.id
@@ -105,13 +106,17 @@ export class Player {
     return this.session.detail
   }
 
+  private get drawsOwnScan(): boolean {
+    return this.track?.collected === false || this.importAwaitingAnalysis
+  }
+
   get waveform(): Waveform | null {
     if (this.session.waveform) return this.session.waveform
-    if (this.track?.collected !== false) return null
+    if (!this.drawsOwnScan) return null
     const samples = this.display.samples
     if (!samples || samples.rate <= 0 || samples.data.length < 2) return null
     const duration = samples.data.length / samples.rate
-    return { rate: LOOSE_WAVE_RATE, length: Math.max(2, duration * LOOSE_WAVE_RATE) }
+    return { rate: LOOSE_WAVE_RATE, length: Math.max(2, Math.round(duration * LOOSE_WAVE_RATE)) }
   }
 
   get loading(): boolean {
@@ -210,6 +215,13 @@ export class Player {
     if (this.track?.id === track.id) await this.open(track)
   }
 
+  /** Keeps playing the same file, and its scan on screen until rekordbox's analysis of it arrives. */
+  adoptImported(track: Track): void {
+    this.importAwaitingAnalysis = true
+    this.session.track = track
+    void this.refreshDetail()
+  }
+
   private alreadyLoaded(track: Track): boolean {
     return this.track?.id === track.id && !this.fileMissing
   }
@@ -219,6 +231,7 @@ export class Player {
     this.holding = null
     this.previewOwner = null
     this.previewAt = null
+    this.importAwaitingAnalysis = false
     this.grid.cancel()
   }
 
@@ -497,6 +510,9 @@ export class Player {
 
   async refreshDetail(): Promise<void> {
     await this.session.refresh()
+    if (!this.importAwaitingAnalysis || !this.session.waveform) return
+    this.importAwaitingAnalysis = false
+    this.display.reload()
   }
 
   private newCueMs(): [startMs: number, endMs: number | null] {

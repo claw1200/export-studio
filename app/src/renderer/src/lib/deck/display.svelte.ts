@@ -241,10 +241,9 @@ export class WaveformDisplay {
     return this.prepared ? 100 : this.quality
   }
 
-  /** Fall for the samples on screen. The fast preview, and a loose file with quality off, use none. */
   get paintFall(): number {
-    if (this.prepared && (this.waves.previewing || this.quality <= 0)) return 0
-    return this.fallBlocks
+    const looseAtCoarsest = this.prepared && this.quality <= 0
+    return looseAtCoarsest ? 0 : this.fallBlocks
   }
 
   setMode(mode: WaveformMode): void {

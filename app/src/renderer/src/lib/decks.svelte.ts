@@ -2,9 +2,11 @@ import { ENGINE_DECKS } from '../../../shared/engine'
 import { Audition } from './audition.svelte'
 import { Output } from './deck/output.svelte'
 import { DeckPrefs } from './deck/prefs.svelte'
+import { pathKey } from './library/views'
 import { Listeners } from './listeners'
 import { MixPrefs } from './mix/prefs.svelte'
 import { Player } from './player.svelte'
+import type { Track } from './types'
 
 const AUDITION_ENGINE_DECK = ENGINE_DECKS - 1
 
@@ -60,6 +62,16 @@ export class Decks {
 
   withTrack(trackId: string): Player[] {
     return this.players.filter((player) => player.track?.id === trackId)
+  }
+
+  /** Points each deck holding a file from outside the collection at that file's new collection row. */
+  adoptImported(tracks: readonly Track[]): void {
+    const byPath = new Map(tracks.map((track) => [pathKey(track.path), track]))
+    for (const player of this.players) {
+      const loaded = player.track
+      const imported = loaded?.collected === false ? byPath.get(pathKey(loaded.path)) : undefined
+      if (imported) player.adoptImported(imported)
+    }
   }
 
   ejectAll(): void {
