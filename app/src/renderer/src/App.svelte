@@ -43,7 +43,10 @@
     setSetting('mode', next.id)
   }
 
-  library.onImported((tracks) => analysis.afterImport(tracks))
+  library.onImported((tracks) => {
+    decks.adoptImported(tracks)
+    analysis.afterImport(tracks)
+  })
   library.onRemoved((ids) => decks.ejectWhere((id) => ids.includes(id)))
   analysis.onFinished((track) => {
     if (!track) return

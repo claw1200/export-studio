@@ -17,7 +17,7 @@ import {
 import { type BandFall, bandFall } from './fall'
 
 /** Overview peaks stop this far short of the top of the waveform window. */
-export const OVERVIEW_TOP_PAD = 0.1
+const OVERVIEW_TOP_PAD = 0.1
 
 function heightInPixels(level: number, reach: number): number {
   return Math.max(1, Math.round(level * reach))

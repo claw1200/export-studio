@@ -5,15 +5,35 @@ import type { Waveform } from './data'
 let envUpper = new Float32Array(0)
 let envLower = new Float32Array(0)
 
+/** The share of the height left clear above a full-scale peak. */
+const FULL_SCALE_HEADROOM = 0.04
+const HEIGHT_MAX = 255
+const heightsBySamples = new WeakMap<WaveSamples, { entries: number; heights: Uint8Array }>()
+
+/** The loudest sample in each of `entries` entries at `entriesPerSecond`, in the shape of rekordbox's Color heights. */
+export function sampleHeights(samples: WaveSamples, entriesPerSecond: number, entries: number): Uint8Array {
+  const kept = heightsBySamples.get(samples)
+  if (kept?.entries === entries) return kept.heights
+  const { data, rate, peak } = samples
+  const scale = peak > 0 ? HEIGHT_MAX / peak : 0
+  const heights = new Uint8Array(entries)
+  for (let entry = 0; entry < entries; entry++) {
+    const first = Math.floor((entry * rate) / entriesPerSecond)
+    const end = Math.min(data.length, Math.max(first + 1, Math.floor(((entry + 1) * rate) / entriesPerSecond)))
+    let loudest = 0
+    for (let i = first; i < end; i++) loudest = Math.max(loudest, Math.abs(data[i]))
+    heights[entry] = Math.min(HEIGHT_MAX, Math.round(loudest * scale))
+  }
+  heightsBySamples.set(samples, { entries, heights })
+  return heights
+}
+
 /** Entries read as one at `quality` (1–100): every entry at 100. */
 export function waveStride(quality: number): number {
   return quality >= 100 ? 1 : 100 / Math.max(1, quality)
 }
 
-/**
- * Entries `from`–`to` of `wf` (its rate), drawn from `samples` in `colors`, one per entry.
- * `headroom` is the share of the height left clear above a full-scale peak.
- */
+/** Entries `from`–`to` of `wf` (its rate), drawn from `samples` in `colors`, one per entry. */
 export function drawSampleWave(
   ctx: CanvasRenderingContext2D,
   wf: Waveform,
@@ -23,8 +43,7 @@ export function drawSampleWave(
   to: number,
   pw: number,
   ph: number,
-  quality: number,
-  headroom = 0.04
+  quality: number
 ): void {
   const span = to - from
   const data = samples.data
@@ -42,7 +61,7 @@ export function drawSampleWave(
   if (!(per > 0)) return
   const first = Math.floor(sample0 / per)
   const mid = ph / 2
-  const scale = (ph * (0.5 - headroom)) / samples.peak
+  const scale = (ph * (0.5 - FULL_SCALE_HEADROOM)) / samples.peak
 
   const at = (t: number): number => {
     if (t <= 0) return data[0]
