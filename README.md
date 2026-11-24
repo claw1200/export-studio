@@ -137,6 +137,7 @@ secret with read access to `claw1200/es-rekordbox-sdk`.
 - `npm run build:native` builds release native binaries.
 - `npm run build:native:debug` builds debug native binaries.
 - `ES_NATIVE_TARGET=<rust-target> npm run build:native` cross-compiles for the specified Rust target. The target must be installed with `rustup target add <rust-target>`.
+- `npm run build:ffmpeg` builds the self-contained FFmpeg that track conversion uses. Packaging (`build:mac`, `build:win`, `build:unpack`) fails until it exists. On macOS it needs `brew install lame`; on Windows, run it from an MSYS2 UCRT64 shell with `make`, `nasm`, the toolchain and `lame` installed.
 
 ### Environment Variables
 
