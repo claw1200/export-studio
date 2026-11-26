@@ -20,6 +20,7 @@ export class Decks {
   mixMaster = $state.raw<Player | null>(null)
 
   private players = $state.raw<Player[]>([])
+  private shownPlayers = $state.raw<Player[]>([])
   private byKey = new Map<string, Player>()
   private fileChecked = new Listeners<[id: string, missing: boolean]>()
 
@@ -32,6 +33,10 @@ export class Decks {
 
   get all(): readonly Player[] {
     return this.players
+  }
+
+  get shown(): readonly Player[] {
+    return this.shownPlayers
   }
 
   claim(key: string): Player {
@@ -49,6 +54,7 @@ export class Decks {
 
   enter(keys: readonly string[]): Player[] {
     const shown = keys.map((key) => this.claim(key))
+    this.shownPlayers = shown
     const hidden = this.players.filter((player) => !shown.includes(player))
     for (const player of hidden) if (player.playing) player.pause()
     const focusIsShown = this.focused != null && shown.includes(this.focused)
