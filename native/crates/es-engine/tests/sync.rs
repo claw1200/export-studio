@@ -5,7 +5,7 @@ use std::path::Path;
 use rb_library::fixture::{self, Rows};
 use rb_library::{Guard, Library};
 use es_engine::import::{import_files, Options};
-use es_engine::sync::{sync_volume, Progress};
+use es_engine::sync::{prepare_sync, sync_volume, Progress};
 use std::cell::RefCell;
 
 fn wav(path: &Path, seconds: u32) {
@@ -24,18 +24,17 @@ fn wav(path: &Path, seconds: u32) {
     std::fs::write(path, bytes).unwrap();
 }
 
-#[test]
-fn a_playlist_synced_to_a_stick_reads_back_with_its_tracks() {
+/// A library whose playlist `10`, "Mix", holds two short tracks.
+fn library_with_a_mix(dir: &Path) -> Library {
     es_engine::sync::exporter().expect("Build es-usb and set EXPORTSTUDIO_USB_EXPORT before running sync tests");
-    let dir = tempfile::tempdir().unwrap();
-    let path = fixture::build(dir.path(), 5).unwrap();
+    let path = fixture::build(dir, 5).unwrap();
     {
         let conn = fixture::connect(&path).unwrap();
         Rows(&conn).playlist("10", "Mix", 0).unwrap();
     }
     let mut lib = Library::open_live(&path, Guard::Off).unwrap();
     let share = lib.share_dir();
-    let music = dir.path().join("music");
+    let music = dir.join("music");
     std::fs::create_dir_all(&music).unwrap();
     let mut files = Vec::new();
     for (name, seconds) in [("One.wav", 1), ("Two.wav", 2)] {
@@ -45,7 +44,13 @@ fn a_playlist_synced_to_a_stick_reads_back_with_its_tracks() {
     }
     let out = import_files(&mut lib, &share, &files, &Options { artwork: false, playlist: Some("10".into()) }).unwrap();
     assert_eq!(out.added.len(), 2);
+    lib
+}
 
+#[test]
+fn a_playlist_synced_to_a_stick_reads_back_with_its_tracks() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = library_with_a_mix(dir.path());
     let volume = dir.path().join("STICK");
     std::fs::create_dir_all(&volume).unwrap();
     let phases = RefCell::new(Vec::new());
@@ -87,6 +92,23 @@ fn a_playlist_synced_to_a_stick_reads_back_with_its_tracks() {
     assert_eq!(after["playlists"][0]["export_id"], playlists_before[0]["export_id"]);
     assert_eq!(std::fs::read(&foreign_path).unwrap(), b"foreign application state");
     assert!(!volume.join(".exportstudio-publication").exists());
+}
+
+#[test]
+fn a_sync_cancelled_while_copying_leaves_the_stick_without_a_library() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = library_with_a_mix(dir.path());
+    let volume = dir.path().join("STICK");
+    std::fs::create_dir_all(&volume).unwrap();
+
+    let job = prepare_sync(&lib, &volume, &["10".to_owned()], None, None).unwrap();
+    let cancel = job.canceller();
+    let outcome = job.run(&|progress| {
+        if matches!(&progress, Progress::Step { phase, .. } if phase == "copy") { cancel.cancel(); }
+    });
+
+    assert!(matches!(outcome, Err(es_engine::Error::Cancelled)), "{outcome:?}");
+    assert!(rb_device::read::read(&volume).unwrap().is_none());
 }
 
 #[test]

@@ -21,6 +21,8 @@ type Events = ThreadsafeFunction<(String, String), ErrorStrategy::Fatal>;
 /// What every call shares: the open library, where events go, and the backup folder.
 pub(crate) struct Core {
     pub(crate) devices: crate::usb::Devices,
+    pub(crate) stick_gate: crate::usb::StickGate,
+    pub(crate) running_sync: crate::usb::RunningSync,
     service: Mutex<LibraryService>,
     events: Mutex<Option<Events>>,
 }
@@ -29,6 +31,8 @@ impl Core {
     fn new() -> Self {
         Self {
             devices: crate::usb::Devices::default(),
+            stick_gate: crate::usb::StickGate::default(),
+            running_sync: crate::usb::RunningSync::default(),
             service: Mutex::new(LibraryService::new()),
             events: Mutex::new(None),
         }
@@ -60,8 +64,8 @@ impl Core {
             ),
             ServiceEvent::UsbSyncProgress(progress) => {
                 let data = match progress {
-                    es_engine::sync::Progress::Step { phase, done, total, name } => {
-                        json!({ "phase": phase, "done": done, "total": total, "name": name })
+                    es_engine::sync::Progress::Step { phase, done, total, unit, file, name } => {
+                        json!({ "phase": phase, "done": done, "total": total, "unit": unit, "file": file, "name": name })
                     }
                     es_engine::sync::Progress::Done { tracks, playlists } => {
                         json!({ "phase": "done", "tracks": tracks, "playlists": playlists })
@@ -500,10 +504,10 @@ impl Task for Run {
         let mut service = self.core.service.lock().map_err(|_| failure("the library lock was poisoned"))?;
         let lock_wait_ms = waiting.elapsed().as_secs_f64() * 1000.0;
         let started = Instant::now();
-        let result = if matches!(self.op, Op::DailyBackup | Op::BackupCreate) {
-            self.backup_off_lock(service)
-        } else {
-            self.perform(&mut service)
+        let result = match &self.op {
+            Op::DailyBackup | Op::BackupCreate => self.backup_off_lock(service),
+            Op::Usb(sync @ UsbOp::Sync { .. }) => crate::usb::sync_off_lock(&self.core, service, sync),
+            _ => self.perform(&mut service),
         };
         if profile {
             eprintln!(
@@ -874,6 +878,11 @@ impl RekordboxLibrary {
     #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_sync(&self, volume: String, playlist_ids: Vec<String>, decisions: Option<Value>, convert: Option<Value>) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::Sync { volume, playlists: playlist_ids, decisions, convert }))
+    }
+
+    #[napi]
+    pub fn usb_sync_cancel(&self) {
+        self.core.running_sync.cancel();
     }
 }
 

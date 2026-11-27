@@ -144,6 +144,7 @@ export interface NativeLibrary {
   usbImport(volume: string, folder: string | null, policy: string | null): Promise<unknown>
   usbSyncReview(volume: string, playlistIds: string[], convert?: unknown): Promise<unknown>
   usbSync(volume: string, playlistIds: string[], review?: unknown, convert?: unknown): Promise<unknown>
+  usbSyncCancel(): void
   usbRecoveryStatus(volume: string): Promise<unknown>
   usbRecover(volume: string): Promise<unknown>
   removeTracks(ids: string[]): Promise<unknown>

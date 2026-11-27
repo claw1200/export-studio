@@ -93,6 +93,7 @@ export const api = {
     call<SyncInspection>('usb.syncReview', { volumeId, playlistIds, convert }),
   usbSync: (volumeId: string, playlistIds: string[], review?: SyncDecisions, convert?: ConvertPreset) =>
     call<{ volumeId: string; tracks: number; playlists: number }>('usb.sync', { volumeId, playlistIds, review, convert }),
+  usbSyncCancel: () => call<void>('usb.syncCancel'),
   usbRecoveryStatus: (volumeId: string) => call<{ required: boolean }>('usb.recoveryStatus', { volumeId }),
   usbRecover: (volumeId: string) => call<{ recovered: boolean }>('usb.recover', { volumeId }),
   usbImportPreview: (volumeId: string, folder: string | null, policy: PlaylistPolicy = 'skipExisting') =>

@@ -177,6 +177,7 @@ export interface EngineCommandParams {
   'usb.format': { volumeId: string }
   'usb.syncReview': { volumeId: string; playlistIds: string[]; convert?: SyncConversion }
   'usb.sync': { volumeId: string; playlistIds: string[]; review?: SyncDecisions; convert?: SyncConversion }
+  'usb.syncCancel': undefined
   'usb.recoveryStatus': { volumeId: string }
   'usb.recover': { volumeId: string }
   'usb.import': { volumeId: string; folder?: string | null; policy?: PlaylistPolicy }

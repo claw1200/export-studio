@@ -1,9 +1,11 @@
 //! Copy playlists onto a stick. The native `es-usb` program writes the device databases; this builds its job
 //! from the library and relays its progress.
 
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use rb_library::export::{Bundle, ExportTrack};
 use rb_library::Library;
@@ -16,11 +18,21 @@ use crate::{Error, Result};
 /// What rekordbox's own analysis marks a fully analysed track with.
 const ANALYSED: i64 = 105;
 const JOB_SCHEMA_VERSION: u32 = 4;
+const CANCEL_REQUEST: &[u8] = b"cancel\n";
 
 #[derive(Debug, Clone)]
 pub enum Progress {
-    Step { phase: String, done: Option<i64>, total: Option<i64>, name: String },
+    /// `unit` is what `done` and `total` count: `tracks`, or `files` while publishing.
+    Step { phase: String, done: Option<i64>, total: Option<i64>, unit: String, file: Option<FileProgress>, name: String },
     Done { tracks: i64, playlists: i64 },
+}
+
+/// Through the file being copied (`bytes`) or converted (`milliseconds`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FileProgress {
+    pub done: i64,
+    pub total: i64,
+    pub unit: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,6 +181,8 @@ fn export_error(kind: &str, message: String, review: Option<Value>) -> Error {
         )
     } else if kind == "conflict" {
         Error::Conflict(message)
+    } else if kind == "cancelled" {
+        Error::Cancelled
     } else if message.to_lowercase().contains("verif") || message.to_lowercase().contains("disagree") {
         Error::Verify(message)
     } else {
@@ -178,7 +192,44 @@ fn export_error(kind: &str, message: String, review: Option<Value>) -> Error {
 
 /// Publishes a prepared, versioned USB export job and reports progress from the publisher.
 pub trait UsbPublisher {
-    fn publish(&self, job: &Value, on_progress: &dyn Fn(Progress)) -> Result<Value>;
+    fn publish(&self, job: &Value, on_progress: &dyn Fn(Progress), cancel: &SyncCancel) -> Result<Value>;
+}
+
+/// Stops a running sync by asking `es-usb`, which listens for a `cancel` line on its input.
+#[derive(Clone, Default)]
+pub struct SyncCancel(Arc<CancelState>);
+
+#[derive(Default)]
+struct CancelState {
+    requested: AtomicBool,
+    exporter_input: Mutex<Option<ChildStdin>>,
+}
+
+impl SyncCancel {
+    /// The publisher finishes a sync that has begun putting files in place: stopping then would cost more than it saves.
+    pub fn cancel(&self) {
+        self.0.requested.store(true, Ordering::SeqCst);
+        self.ask_exporter_to_stop();
+    }
+
+    fn is_requested(&self) -> bool {
+        self.0.requested.load(Ordering::SeqCst)
+    }
+
+    fn attach(&self, input: ChildStdin) {
+        *self.exporter_input() = Some(input);
+        if self.is_requested() { self.ask_exporter_to_stop(); }
+    }
+
+    fn ask_exporter_to_stop(&self) {
+        if let Some(mut input) = self.exporter_input().take() {
+            let _ = input.write_all(CANCEL_REQUEST);
+        }
+    }
+
+    fn exporter_input(&self) -> std::sync::MutexGuard<'_, Option<ChildStdin>> {
+        self.0.exporter_input.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 }
 
 /// The isolated `es-usb` process that writes the device databases.
@@ -193,10 +244,10 @@ impl CommandPublisher {
 }
 
 impl UsbPublisher for CommandPublisher {
-    fn publish(&self, job: &Value, on_progress: &dyn Fn(Progress)) -> Result<Value> {
+    fn publish(&self, job: &Value, on_progress: &dyn Fn(Progress), cancel: &SyncCancel) -> Result<Value> {
         let job_path = std::env::temp_dir().join(format!("exportstudio-usb-{}.json", uuid::Uuid::new_v4()));
         std::fs::write(&job_path, job.to_string()).map_err(|error| Error::Other(error.to_string()))?;
-        let outcome = run(&self.binary, &job_path, on_progress);
+        let outcome = run(&self.binary, &job_path, on_progress, cancel);
         let _ = std::fs::remove_file(&job_path);
         outcome
     }
@@ -212,8 +263,7 @@ pub fn sync_volume(
     convert: Option<&Preset>,
     on_progress: &dyn Fn(Progress),
 ) -> Result<Outcome> {
-    let publisher = CommandPublisher::discover()?;
-    sync_volume_with_publisher(lib, volume, playlist_ids, decisions, convert, &publisher, on_progress)
+    prepare_sync(lib, volume, playlist_ids, decisions, convert)?.run(on_progress)
 }
 
 /// What syncing would change. `convert` must be what the sync will be given.
@@ -230,6 +280,12 @@ pub fn recover_volume(volume: &Path) -> Result<()> {
     rb_usb::recover(volume).map_err(|error| Error::Publication(error.to_string()))
 }
 
+fn mounted(volume: &Path) -> Result<PathBuf> {
+    let not_mounted = || Error::Other(format!("Volume is not mounted: {}", volume.display()));
+    let volume = volume.canonicalize().map_err(|_| not_mounted())?;
+    if volume.is_dir() { Ok(volume) } else { Err(not_mounted()) }
+}
+
 pub fn inspect_volume_with_publisher(
     lib: &Library,
     volume: &Path,
@@ -237,18 +293,57 @@ pub fn inspect_volume_with_publisher(
     convert: Option<&Preset>,
     publisher: &impl UsbPublisher,
 ) -> Result<Inspection> {
-    let volume = volume.canonicalize()
-        .map_err(|_| Error::Other(format!("Volume is not mounted: {}", volume.display())))?;
-    if !volume.is_dir() { return Err(Error::Other(format!("Volume is not mounted: {}", volume.display()))); }
+    let volume = mounted(volume)?;
     let bundle = lib.export_bundle(playlist_ids)?;
     let body = job(&lib.share_dir(), &volume, &bundle, "inspect", None, convert)?;
-    let result = publisher.publish(&body, &|_| {})?;
+    let result = publisher.publish(&body, &|_| {}, &SyncCancel::default())?;
     serde_json::from_value(result.get("inspection").cloned()
         .ok_or_else(|| Error::Other("USB inspection returned no diagnostics".into()))?)
         .map_err(|error| Error::Other(format!("USB inspection response was invalid: {error}")))
 }
 
-/// Build and validate the library export, then publish it through the selected device boundary.
+/// A sync whose export has been read from the library, so publishing it needs the library no more.
+pub struct SyncJob {
+    volume: PathBuf,
+    body: Value,
+    cancel: SyncCancel,
+}
+
+/// Build and validate the library export for `volume`.
+pub fn prepare_sync(
+    lib: &Library,
+    volume: &Path,
+    playlist_ids: &[String],
+    decisions: Option<&Decisions>,
+    convert: Option<&Preset>,
+) -> Result<SyncJob> {
+    let volume = mounted(volume)?;
+    let bundle = lib.export_bundle(playlist_ids)?;
+    let body = job(&lib.share_dir(), &volume, &bundle, "export", decisions, convert)?;
+    Ok(SyncJob { volume, body, cancel: SyncCancel::default() })
+}
+
+impl SyncJob {
+    pub fn canceller(&self) -> SyncCancel {
+        self.cancel.clone()
+    }
+
+    pub fn run(self, on_progress: &dyn Fn(Progress)) -> Result<Outcome> {
+        self.run_with(&CommandPublisher::discover()?, on_progress)
+    }
+
+    pub fn run_with(self, publisher: &impl UsbPublisher, on_progress: &dyn Fn(Progress)) -> Result<Outcome> {
+        let result = publisher.publish(&self.body, on_progress, &self.cancel)?;
+        if std::env::var_os("EXPORTSTUDIO_PROFILE_LIBRARY_OPEN").is_some() {
+            eprintln!("[usb-profile] elapsed_ms={} metrics={}", result["elapsedMs"], result["metrics"]);
+        }
+        let tracks = result.get("tracks").and_then(Value::as_i64).unwrap_or(0);
+        let playlists = result.get("playlists").and_then(Value::as_i64).unwrap_or(0);
+        on_progress(Progress::Done { tracks, playlists });
+        Ok(Outcome { volume: self.volume.to_string_lossy().into_owned(), tracks, playlists })
+    }
+}
+
 pub fn sync_volume_with_publisher(
     lib: &Library,
     volume: &Path,
@@ -258,30 +353,19 @@ pub fn sync_volume_with_publisher(
     publisher: &impl UsbPublisher,
     on_progress: &dyn Fn(Progress),
 ) -> Result<Outcome> {
-    let volume = volume
-        .canonicalize()
-        .map_err(|_| Error::Other(format!("Volume is not mounted: {}", volume.display())))?;
-    if !volume.is_dir() {
-        return Err(Error::Other(format!("Volume is not mounted: {}", volume.display())));
-    }
-    let bundle = lib.export_bundle(playlist_ids)?;
-    let body = job(&lib.share_dir(), &volume, &bundle, "export", decisions, convert)?;
-    let result = publisher.publish(&body, on_progress)?;
-    let tracks = result.get("tracks").and_then(Value::as_i64).unwrap_or(0);
-    let playlists = result.get("playlists").and_then(Value::as_i64).unwrap_or(0);
-    on_progress(Progress::Done { tracks, playlists });
-    Ok(Outcome { volume: volume.to_string_lossy().into_owned(), tracks, playlists })
+    prepare_sync(lib, volume, playlist_ids, decisions, convert)?.run_with(publisher, on_progress)
 }
 
-fn run(binary: &Path, job: &Path, on_progress: &dyn Fn(Progress)) -> Result<Value> {
+fn run(binary: &Path, job: &Path, on_progress: &dyn Fn(Progress), cancel: &SyncCancel) -> Result<Value> {
     let mut command = Command::new(binary);
-    command.arg(job).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command.arg(job).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     // CREATE_NO_WINDOW: es-usb is a console program and the app has no console to share.
     #[cfg(windows)]
     std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
     let mut child = command
         .spawn()
         .map_err(|e| Error::Other(format!("Could not start the USB export program: {e}")))?;
+    if let Some(input) = child.stdin.take() { cancel.attach(input); }
     let stdout = child.stdout.take().ok_or_else(|| Error::Other("no output from the USB export program".into()))?;
     let mut stderr = child.stderr.take();
     let drain = std::thread::spawn(move || {
@@ -299,6 +383,8 @@ fn run(binary: &Path, job: &Path, on_progress: &dyn Fn(Progress)) -> Result<Valu
                 phase: event.get("phase").and_then(Value::as_str).filter(|p| !p.is_empty()).unwrap_or("reading").to_owned(),
                 done: event.get("done").and_then(Value::as_i64),
                 total: event.get("total").and_then(Value::as_i64),
+                unit: event.get("unit").and_then(Value::as_str).unwrap_or("tracks").to_owned(),
+                file: event.get("file").cloned().and_then(|file| serde_json::from_value(file).ok()),
                 name: event.get("name").and_then(Value::as_str).unwrap_or("").to_owned(),
             }),
             Some("result") => result = Some(event),
@@ -334,13 +420,52 @@ mod tests {
     struct FakePublisher;
 
     impl UsbPublisher for FakePublisher {
-        fn publish(&self, job: &Value, _on_progress: &dyn Fn(Progress)) -> Result<Value> {
+        fn publish(&self, job: &Value, _on_progress: &dyn Fn(Progress), _cancel: &SyncCancel) -> Result<Value> {
             assert_eq!(job["schemaVersion"], JOB_SCHEMA_VERSION);
             if job["operation"] == "inspect" {
                 return Ok(json!({ "inspection": { "token": "fixture", "diagnostics": [], "plan": null } }));
             }
             Ok(json!({ "tracks": 0, "playlists": 1 }))
         }
+    }
+
+    /// Reports one step, then stops as `es-usb` does when asked to.
+    #[cfg(unix)]
+    fn exporter_that_waits_to_be_cancelled(directory: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let exporter = directory.join("es-usb");
+        let script = r#"#!/bin/sh
+echo '{"event":"progress","phase":"copy","done":0,"total":1}'
+while read request && [ "$request" != cancel ]; do :; done
+echo '{"event":"error","kind":"cancelled","message":"Export stopped."}'
+exit 1
+"#;
+        std::fs::write(&exporter, script).unwrap();
+        std::fs::set_permissions(&exporter, std::fs::Permissions::from_mode(0o755)).unwrap();
+        exporter
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancelling_a_running_sync_stops_the_exporter() {
+        let directory = tempfile::tempdir().unwrap();
+        let exporter = exporter_that_waits_to_be_cancelled(directory.path());
+        let cancel = SyncCancel::default();
+
+        let outcome = run(&exporter, directory.path(), &|_| cancel.cancel(), &cancel);
+
+        assert!(matches!(outcome, Err(Error::Cancelled)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_sync_cancelled_before_the_exporter_starts_stops_at_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let exporter = exporter_that_waits_to_be_cancelled(directory.path());
+        let cancel = SyncCancel::default();
+        cancel.cancel();
+
+        assert!(matches!(run(&exporter, directory.path(), &|_| {}, &cancel), Err(Error::Cancelled)));
     }
 
     #[test]
@@ -384,6 +509,25 @@ mod tests {
             &|_| {},
         )
         .unwrap();
+
+        assert_eq!((result.tracks, result.playlists), (0, 1));
+    }
+
+    #[test]
+    fn a_prepared_sync_publishes_after_the_library_is_closed() {
+        let directory = tempfile::tempdir().unwrap();
+        let database_path = fixture::build(directory.path(), 1).unwrap();
+        {
+            let connection = fixture::connect(&database_path).unwrap();
+            Rows(&connection).playlist("playlist-1", "Test playlist", 0).unwrap();
+        }
+        let volume = directory.path().join("STICK");
+        std::fs::create_dir_all(&volume).unwrap();
+        let library = Library::open_live(&database_path, Guard::Off).unwrap();
+
+        let job = prepare_sync(&library, &volume, &["playlist-1".into()], None, None).unwrap();
+        drop(library);
+        let result = job.run_with(&FakePublisher, &|_| {}).unwrap();
 
         assert_eq!((result.tracks, result.playlists), (0, 1));
     }
