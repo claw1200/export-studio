@@ -52,10 +52,10 @@
   } = $props()
 
   const { library, decks, keybinds, analysis } = getApp()
-  /** Tracks loaded on a deck, and whether any deck holding each is playing it. */
+  /** Tracks loaded on a deck in the current mode, and whether any deck holding each is playing it. */
   const onDeck = $derived.by(() => {
     const tracks: Record<string, boolean> = {}
-    for (const player of decks.all) {
+    for (const player of decks.shown) {
       const id = player.track?.id
       if (id) tracks[id] = tracks[id] || player.playing
     }
