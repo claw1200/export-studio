@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 use std::time::SystemTime;
 
 use rb_device::{paths::pioneer_dir, volumes, Device, LibraryKind, Volume};
@@ -10,7 +10,7 @@ use es_engine::device_import::{self, PlaylistPolicy, TrackStatus};
 use serde_json::{json, Value};
 
 use crate::library::{failure, json_of, Core};
-use es_engine::library::LibraryService;
+use es_engine::library::{LibraryService, ServiceEvent};
 
 pub(crate) enum UsbOp {
     List,
@@ -145,7 +145,49 @@ fn require(device: Option<Arc<Device>>) -> napi::Result<Arc<Device>> {
     device.ok_or_else(|| failure("This volume has no rekordbox library"))
 }
 
+impl UsbOp {
+    fn changes_stick(&self) -> bool {
+        matches!(
+            self,
+            Self::Eject(_) | Self::Format(_) | Self::SetSettings(..) | Self::Import { .. } | Self::Recover(_) | Self::Sync { .. }
+        )
+    }
+}
+
+/// Held while a stick is changed. Taken without waiting, so a second change is refused rather
+/// than queued behind the library lock.
+#[derive(Default)]
+pub(crate) struct StickGate(Mutex<()>);
+
+impl StickGate {
+    fn enter(&self) -> napi::Result<MutexGuard<'_, ()>> {
+        match self.0.try_lock() {
+            Ok(guard) => Ok(guard),
+            Err(TryLockError::Poisoned(poisoned)) => Ok(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) => Err(failure("Wait for the USB sync to finish")),
+        }
+    }
+}
+
+/// The export is read under the library lock; the stick is written without it, so the library
+/// stays readable while tracks are copied.
+pub(crate) fn sync_off_lock(core: &Core, service: MutexGuard<'_, LibraryService>, op: &UsbOp) -> napi::Result<Value> {
+    let UsbOp::Sync { volume, playlists, decisions, convert } = op else { unreachable!("not a sync") };
+    let _changing = core.stick_gate.enter()?;
+    let volume = listed(volume)?;
+    let decisions = decisions.as_ref().map(|value| serde_json::from_value(value.clone())).transpose().map_err(failure)?;
+    let convert = preset(convert.as_ref())?;
+    let job = service.usb_sync_job(&volume, playlists, decisions.as_ref(), convert.as_ref()).map_err(failure)?;
+    drop(service);
+    let result = job.run(&|progress| core.emit_service_event(ServiceEvent::UsbSyncProgress(progress)));
+    core.devices.forget(&volume);
+    let result = result.map_err(failure)?;
+    publish_volumes(core);
+    json_of(&json!({ "volumeId": result.volume, "tracks": result.tracks, "playlists": result.playlists }))
+}
+
 pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> napi::Result<Value> {
+    let _changing = op.changes_stick().then(|| core.stick_gate.enter()).transpose()?;
     match op {
         UsbOp::List => {
             let found: Vec<_> = volumes::list(None).into_iter().map(volume_value).collect();
@@ -295,17 +337,7 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
             publish_volumes(core);
             Ok(json!({ "recovered": true }))
         }
-        UsbOp::Sync { volume, playlists, decisions, convert } => {
-            let volume = listed(volume)?;
-            let emit = |event| core.emit_service_event(event);
-            let decisions = decisions.as_ref().map(|value| serde_json::from_value(value.clone())).transpose().map_err(failure)?;
-            let convert = preset(convert.as_ref())?;
-            let result = service.usb_sync(&volume, playlists, decisions.as_ref(), convert.as_ref(), &emit);
-            core.devices.forget(&volume);
-            let result = result.map_err(failure)?;
-            publish_volumes(core);
-            json_of(&json!({ "volumeId": result.volume, "tracks": result.tracks, "playlists": result.playlists }))
-        }
+        UsbOp::Sync { .. } => unreachable!("syncs run off the library lock"),
     }
 }
 

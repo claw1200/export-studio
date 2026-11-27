@@ -4,6 +4,7 @@
   import { getApp } from '$lib/context'
   import { formatSize, formatTotal } from '$lib/format'
   import { syncFraction, syncPhaseLabel } from '$lib/syncProgress'
+  import ProgressBar from './ProgressBar.svelte'
   import type { Snippet } from 'svelte'
   import type { Update } from '../../../../shared/updates'
 
@@ -56,9 +57,7 @@
     <LoaderCircle class="size-3 shrink-0 animate-spin text-accent" />
     <span class="truncate" title={label}>{label}</span>
     {#if fraction !== null}
-      <span class="h-1 w-20 shrink-0 overflow-hidden rounded-full bg-line">
-        <span class="block h-full rounded-full bg-accent transition-[width]" style:width="{100 * fraction}%"></span>
-      </span>
+      <ProgressBar {fraction} {label} />
     {/if}
     {@render controls?.()}
   </span>

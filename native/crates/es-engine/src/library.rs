@@ -793,22 +793,21 @@ impl LibraryService {
         })
     }
 
-    pub fn usb_sync(
+    /// A sync to publish without holding the service, so the library stays readable while the
+    /// stick is written.
+    pub fn usb_sync_job(
         &self,
         volume: &Path,
         playlist_ids: &[String],
         decisions: Option<&rb_model::conflict::Decisions>,
         convert: Option<&crate::convert::Preset>,
-        emit: &impl Fn(ServiceEvent),
-    ) -> Result<crate::sync::Outcome> {
+    ) -> Result<crate::sync::SyncJob> {
         let database = self
             .session
             .as_ref()
             .ok_or_else(|| crate::Error::Other("Library not open".into()))?
             .database();
-        crate::sync::sync_volume(database, volume, playlist_ids, decisions, convert, &|progress| {
-            emit(ServiceEvent::UsbSyncProgress(progress));
-        })
+        crate::sync::prepare_sync(database, volume, playlist_ids, decisions, convert)
     }
 
     pub fn usb_sync_review(

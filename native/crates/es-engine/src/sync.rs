@@ -19,8 +19,17 @@ const JOB_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone)]
 pub enum Progress {
-    Step { phase: String, done: Option<i64>, total: Option<i64>, name: String },
+    /// `unit` is what `done` and `total` count: `tracks`, or `files` while publishing.
+    Step { phase: String, done: Option<i64>, total: Option<i64>, unit: String, file: Option<FileProgress>, name: String },
     Done { tracks: i64, playlists: i64 },
+}
+
+/// Through the file being copied (`bytes`) or converted (`milliseconds`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FileProgress {
+    pub done: i64,
+    pub total: i64,
+    pub unit: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -212,8 +221,7 @@ pub fn sync_volume(
     convert: Option<&Preset>,
     on_progress: &dyn Fn(Progress),
 ) -> Result<Outcome> {
-    let publisher = CommandPublisher::discover()?;
-    sync_volume_with_publisher(lib, volume, playlist_ids, decisions, convert, &publisher, on_progress)
+    prepare_sync(lib, volume, playlist_ids, decisions, convert)?.run(on_progress)
 }
 
 /// What syncing would change. `convert` must be what the sync will be given.
@@ -230,6 +238,12 @@ pub fn recover_volume(volume: &Path) -> Result<()> {
     rb_usb::recover(volume).map_err(|error| Error::Publication(error.to_string()))
 }
 
+fn mounted(volume: &Path) -> Result<PathBuf> {
+    let not_mounted = || Error::Other(format!("Volume is not mounted: {}", volume.display()));
+    let volume = volume.canonicalize().map_err(|_| not_mounted())?;
+    if volume.is_dir() { Ok(volume) } else { Err(not_mounted()) }
+}
+
 pub fn inspect_volume_with_publisher(
     lib: &Library,
     volume: &Path,
@@ -237,9 +251,7 @@ pub fn inspect_volume_with_publisher(
     convert: Option<&Preset>,
     publisher: &impl UsbPublisher,
 ) -> Result<Inspection> {
-    let volume = volume.canonicalize()
-        .map_err(|_| Error::Other(format!("Volume is not mounted: {}", volume.display())))?;
-    if !volume.is_dir() { return Err(Error::Other(format!("Volume is not mounted: {}", volume.display()))); }
+    let volume = mounted(volume)?;
     let bundle = lib.export_bundle(playlist_ids)?;
     let body = job(&lib.share_dir(), &volume, &bundle, "inspect", None, convert)?;
     let result = publisher.publish(&body, &|_| {})?;
@@ -248,7 +260,43 @@ pub fn inspect_volume_with_publisher(
         .map_err(|error| Error::Other(format!("USB inspection response was invalid: {error}")))
 }
 
-/// Build and validate the library export, then publish it through the selected device boundary.
+/// A sync whose export has been read from the library, so publishing it needs the library no more.
+pub struct SyncJob {
+    volume: PathBuf,
+    body: Value,
+}
+
+/// Build and validate the library export for `volume`.
+pub fn prepare_sync(
+    lib: &Library,
+    volume: &Path,
+    playlist_ids: &[String],
+    decisions: Option<&Decisions>,
+    convert: Option<&Preset>,
+) -> Result<SyncJob> {
+    let volume = mounted(volume)?;
+    let bundle = lib.export_bundle(playlist_ids)?;
+    let body = job(&lib.share_dir(), &volume, &bundle, "export", decisions, convert)?;
+    Ok(SyncJob { volume, body })
+}
+
+impl SyncJob {
+    pub fn run(self, on_progress: &dyn Fn(Progress)) -> Result<Outcome> {
+        self.run_with(&CommandPublisher::discover()?, on_progress)
+    }
+
+    pub fn run_with(self, publisher: &impl UsbPublisher, on_progress: &dyn Fn(Progress)) -> Result<Outcome> {
+        let result = publisher.publish(&self.body, on_progress)?;
+        if std::env::var_os("EXPORTSTUDIO_PROFILE_LIBRARY_OPEN").is_some() {
+            eprintln!("[usb-profile] elapsed_ms={} metrics={}", result["elapsedMs"], result["metrics"]);
+        }
+        let tracks = result.get("tracks").and_then(Value::as_i64).unwrap_or(0);
+        let playlists = result.get("playlists").and_then(Value::as_i64).unwrap_or(0);
+        on_progress(Progress::Done { tracks, playlists });
+        Ok(Outcome { volume: self.volume.to_string_lossy().into_owned(), tracks, playlists })
+    }
+}
+
 pub fn sync_volume_with_publisher(
     lib: &Library,
     volume: &Path,
@@ -258,19 +306,7 @@ pub fn sync_volume_with_publisher(
     publisher: &impl UsbPublisher,
     on_progress: &dyn Fn(Progress),
 ) -> Result<Outcome> {
-    let volume = volume
-        .canonicalize()
-        .map_err(|_| Error::Other(format!("Volume is not mounted: {}", volume.display())))?;
-    if !volume.is_dir() {
-        return Err(Error::Other(format!("Volume is not mounted: {}", volume.display())));
-    }
-    let bundle = lib.export_bundle(playlist_ids)?;
-    let body = job(&lib.share_dir(), &volume, &bundle, "export", decisions, convert)?;
-    let result = publisher.publish(&body, on_progress)?;
-    let tracks = result.get("tracks").and_then(Value::as_i64).unwrap_or(0);
-    let playlists = result.get("playlists").and_then(Value::as_i64).unwrap_or(0);
-    on_progress(Progress::Done { tracks, playlists });
-    Ok(Outcome { volume: volume.to_string_lossy().into_owned(), tracks, playlists })
+    prepare_sync(lib, volume, playlist_ids, decisions, convert)?.run_with(publisher, on_progress)
 }
 
 fn run(binary: &Path, job: &Path, on_progress: &dyn Fn(Progress)) -> Result<Value> {
@@ -299,6 +335,8 @@ fn run(binary: &Path, job: &Path, on_progress: &dyn Fn(Progress)) -> Result<Valu
                 phase: event.get("phase").and_then(Value::as_str).filter(|p| !p.is_empty()).unwrap_or("reading").to_owned(),
                 done: event.get("done").and_then(Value::as_i64),
                 total: event.get("total").and_then(Value::as_i64),
+                unit: event.get("unit").and_then(Value::as_str).unwrap_or("tracks").to_owned(),
+                file: event.get("file").cloned().and_then(|file| serde_json::from_value(file).ok()),
                 name: event.get("name").and_then(Value::as_str).unwrap_or("").to_owned(),
             }),
             Some("result") => result = Some(event),
@@ -384,6 +422,25 @@ mod tests {
             &|_| {},
         )
         .unwrap();
+
+        assert_eq!((result.tracks, result.playlists), (0, 1));
+    }
+
+    #[test]
+    fn a_prepared_sync_publishes_after_the_library_is_closed() {
+        let directory = tempfile::tempdir().unwrap();
+        let database_path = fixture::build(directory.path(), 1).unwrap();
+        {
+            let connection = fixture::connect(&database_path).unwrap();
+            Rows(&connection).playlist("playlist-1", "Test playlist", 0).unwrap();
+        }
+        let volume = directory.path().join("STICK");
+        std::fs::create_dir_all(&volume).unwrap();
+        let library = Library::open_live(&database_path, Guard::Off).unwrap();
+
+        let job = prepare_sync(&library, &volume, &["playlist-1".into()], None, None).unwrap();
+        drop(library);
+        let result = job.run_with(&FakePublisher, &|_| {}).unwrap();
 
         assert_eq!((result.tracks, result.playlists), (0, 1));
     }

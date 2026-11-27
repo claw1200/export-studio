@@ -61,8 +61,12 @@ fn phase(stage: &str) -> &'static str {
         "copying" => "copy",
         "converting" => "convert",
         "database" => "writing",
+        "checking" => "checking",
+        "planning" => "planning",
+        "preparing" => "preparing",
         "verifying" => "verifying",
         "publishing" => "publishing",
+        "cleanup" => "cleanup",
         _ => "reading",
     }
 }
@@ -116,9 +120,10 @@ fn run(path: &Path) -> Result<(), JobError> {
         &source,
         &options,
         &mut |event| {
+            let file = event.file.map(|file| serde_json::json!({ "done": file.done, "total": file.total, "unit": file.unit }));
             let _ = emit(&serde_json::json!({
                 "event": "progress", "phase": phase(event.stage),
-                "done": event.done, "total": event.total, "name": event.title,
+                "done": event.done, "total": event.total, "unit": event.unit, "file": file, "name": event.title,
             }));
         },
         &|| false,
@@ -126,7 +131,7 @@ fn run(path: &Path) -> Result<(), JobError> {
     emit(&serde_json::json!({
         "event": "result", "tracks": report.tracks, "playlists": report.playlists,
         "reused": report.reused, "removed": report.removed, "skipped": report.skipped,
-        "oneLibrary": report.one_library,
+        "oneLibrary": report.one_library, "elapsedMs": report.elapsed_ms, "metrics": report.metrics,
     }))?;
     Ok(())
 }

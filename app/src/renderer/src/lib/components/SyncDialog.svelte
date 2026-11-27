@@ -8,7 +8,8 @@
   import { FORMAT_NAMES, presetKey, presetLabel } from '$lib/convertPresets'
   import { suspendModal } from '$lib/modal'
   import { buildTree, type TreeNode } from '$lib/library/tree'
-  import { syncPhaseLabel } from '$lib/syncProgress'
+  import { syncFraction, syncPhaseLabel } from '$lib/syncProgress'
+  import ProgressBar from './ProgressBar.svelte'
   import type { DeviceLibraryView, Volume } from '$lib/types'
   import type { SyncInspection, SyncPlan, SyncResolution } from '../../../../preload/engine'
 
@@ -64,6 +65,8 @@
   const volumeId = $derived(selectedIds[0] ?? '')
   const pending = $derived(volumeId !== '' && loadedFor !== volumeId)
   const locked = $derived(library.syncing)
+  const progressLabel = $derived(syncPhaseLabel(library.syncProgress))
+  const progressFraction = $derived(syncFraction(library.syncProgress))
   const canEject = $derived(selectedIds.some((id) => library.devices.some((item) => item.id === id && item.ejectable)))
 
   async function recoverVolume(id: string): Promise<void> {
@@ -837,8 +840,11 @@
               {:else}
                 <Check class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
               {/if}
-              <span>{locked ? syncPhaseLabel(library.syncProgress) : notice}</span>
+              <span>{locked ? progressLabel : notice}</span>
             </p>
+            {#if locked && progressFraction !== null}
+              <ProgressBar fraction={progressFraction} label={progressLabel} class="w-full" />
+            {/if}
           {/if}
         </div>
       </section>

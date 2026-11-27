@@ -230,7 +230,15 @@ export interface SyncProgress {
   phase: string
   done?: number
   total?: number
+  unit?: 'tracks' | 'files'
+  file?: FileProgress | null
   name?: string
+}
+
+export interface FileProgress {
+  done: number
+  total: number
+  unit: 'bytes' | 'milliseconds'
 }
 
 export type BackupReason = 'manual' | 'before-edit' | 'daily' | 'pre-restore'
