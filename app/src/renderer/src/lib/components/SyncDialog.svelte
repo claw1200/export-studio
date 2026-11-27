@@ -1,5 +1,18 @@
 <script lang="ts">
-  import { Check, ChevronRight, Eraser, Folder, FolderOpen, Library, ListMusic, LoaderCircle, RefreshCw, Search, Sparkles, X } from '@lucide/svelte'
+  import {
+    Check,
+    ChevronRight,
+    Eraser,
+    Folder,
+    FolderOpen,
+    Library,
+    ListMusic,
+    LoaderCircle,
+    RefreshCw,
+    Search,
+    Sparkles,
+    X
+  } from '@lucide/svelte'
   import { untrack } from 'svelte'
   import { SvelteSet } from 'svelte/reactivity'
   import { api } from '$lib/api'
@@ -15,7 +28,11 @@
 
   const COLLECTION_ID = 'collection'
 
-  let { playlistId = '', volumeId: preferredVolume = '', onclose }: { playlistId?: string; volumeId?: string; onclose: () => void } = $props()
+  let {
+    playlistId = '',
+    volumeId: preferredVolume = '',
+    onclose
+  }: { playlistId?: string; volumeId?: string; onclose: () => void } = $props()
 
   const { library, keybinds } = getApp()
 
@@ -118,11 +135,18 @@
   })
 
   const reviewKey = $derived(JSON.stringify([selectedIds, [...checked].sort(), refreshToken, convertKey]))
-  const reviewBlocked = $derived(selectedIds.some((id) => inspections[id]?.diagnostics.some((item) => item.severity === 'blocked')))
-  const reviewUnresolved = $derived(selectedIds.some((id) => {
-    const inspection = inspections[id]
-    return !inspection || inspection.diagnostics.some((item) => item.severity === 'decision_required' && !resolutions[id]?.[item.id])
-  }))
+  const reviewBlocked = $derived(
+    selectedIds.some((id) => inspections[id]?.diagnostics.some((item) => item.severity === 'blocked'))
+  )
+  const reviewUnresolved = $derived(
+    selectedIds.some((id) => {
+      const inspection = inspections[id]
+      return (
+        !inspection ||
+        inspection.diagnostics.some((item) => item.severity === 'decision_required' && !resolutions[id]?.[item.id])
+      )
+    })
+  )
 
   $effect(() => {
     const key = reviewKey
@@ -141,26 +165,30 @@
     inspections = {}
     inspectionErrors = {}
     resolutions = {}
-    void Promise.all(ids.map(async (id) => {
-      try {
-        return [id, await api.usbSyncReview(id, playlistIds, preset)] as const
-      } catch (reason) {
-        const message = reason instanceof Error ? reason.message : 'Could not inspect USB changes'
-        return [id, message] as const
-      }
-    })).then((results) => {
-      if (cancelled || key !== reviewKey) return
-      const nextInspections: Record<string, SyncInspection> = {}
-      const nextErrors: Record<string, string> = {}
-      for (const [id, result] of results) {
-        if (typeof result === 'string') nextErrors[id] = result
-        else nextInspections[id] = result
-      }
-      inspections = nextInspections
-      inspectionErrors = nextErrors
-    }).finally(() => {
-      if (!cancelled && key === reviewKey) reviewing = false
-    })
+    void Promise.all(
+      ids.map(async (id) => {
+        try {
+          return [id, await api.usbSyncReview(id, playlistIds, preset)] as const
+        } catch (reason) {
+          const message = reason instanceof Error ? reason.message : 'Could not inspect USB changes'
+          return [id, message] as const
+        }
+      })
+    )
+      .then((results) => {
+        if (cancelled || key !== reviewKey) return
+        const nextInspections: Record<string, SyncInspection> = {}
+        const nextErrors: Record<string, string> = {}
+        for (const [id, result] of results) {
+          if (typeof result === 'string') nextErrors[id] = result
+          else nextInspections[id] = result
+        }
+        inspections = nextInspections
+        inspectionErrors = nextErrors
+      })
+      .finally(() => {
+        if (!cancelled && key === reviewKey) reviewing = false
+      })
     return (): void => {
       cancelled = true
     }
@@ -175,9 +203,12 @@
 
   function resolutionLabel(resolution: SyncResolution): string {
     switch (resolution) {
-      case 'use_library': return 'Use library version'
-      case 'restore_from_library': return 'Restore from library'
-      case 'discard_device_edits': return 'Discard device edits'
+      case 'use_library':
+        return 'Use library version'
+      case 'restore_from_library':
+        return 'Restore from library'
+      case 'discard_device_edits':
+        return 'Discard device edits'
     }
   }
 
@@ -389,7 +420,8 @@
     confirm = null
     const inspection = inspections[volumeId]
     const chosen = resolutions[volumeId] ?? {}
-    const review = inspection && Object.keys(chosen).length ? { token: inspection.token, resolutions: { ...chosen } } : undefined
+    const review =
+      inspection && Object.keys(chosen).length ? { token: inspection.token, resolutions: { ...chosen } } : undefined
     const summary = await library.syncTo(volumeId, playlistIds, { review, convert, ejectAfter })
     deviceToken += 1
     refreshToken += 1
@@ -433,7 +465,9 @@
       {@const isFolder = node.kind === 'folder'}
       {@const collection = node.id === COLLECTION_ID}
       {@const named = (node.name || 'Untitled').toLowerCase().includes(term)}
-      {@const opened = isFolder && ((term !== '' && (named || node.children.some((child) => nodeMatches(child, term)))) || open.has(key))}
+      {@const opened =
+        isFolder &&
+        ((term !== '' && (named || node.children.some((child) => nodeMatches(child, term)))) || open.has(key))}
       {@const state = isFolder ? folderState(node) : checked.has(node.id) ? 'on' : 'off'}
       <div
         class={[
@@ -541,326 +575,370 @@
       </button>
     </header>
     <div class="min-h-0 flex-1 overflow-hidden p-5">
-    <div class="grid h-full min-h-0 grid-cols-2 gap-4">
-      <section class="flex min-h-0 min-w-0 flex-col">
-        <h2 class="text-[13.5px] font-semibold">Playlists</h2>
-        <p class="mt-1 text-[12px] text-muted">
-          {#if pending}
-            Reading this volume
-          {:else}
-            {stats.picked} of {stats.total} playlists selected
-          {/if}
-        </p>
-        <label class="mt-3 flex h-8 shrink-0 items-center gap-2 rounded-md border border-line bg-bg px-2">
-          <Search class="size-3.5 shrink-0 text-faint" />
-          <input
-            type="search"
-            bind:value={query}
-            placeholder="Search playlists"
-            disabled={locked}
-            class="min-w-0 flex-1 bg-transparent text-[12.5px] outline-none placeholder:text-faint"
-            onkeydown={(e) => {
-              if (e.key === 'Enter') e.preventDefault()
-            }}
-          />
-        </label>
-        <div class="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-md border border-line py-1">
-          {#if needle && !searchHit}
-            <p class="px-2 py-1 text-[12.5px] text-faint">No matching playlists</p>
-          {:else}
-            {@render playlistTree([collectionRoot], 0, 'playlist', true, needle)}
-          {/if}
-        </div>
-        <p class="mt-2 text-[11px] leading-relaxed text-faint">
-          Unticked playlists from this library are removed from the USB. Playlists that aren’t in this library stay.
-        </p>
-      </section>
+      <div class="grid h-full min-h-0 grid-cols-2 gap-4">
+        <section class="flex min-h-0 min-w-0 flex-col">
+          <h2 class="text-[13.5px] font-semibold">Playlists</h2>
+          <p class="mt-1 text-[12px] text-muted">
+            {#if pending}
+              Reading this volume
+            {:else}
+              {stats.picked} of {stats.total} playlists selected
+            {/if}
+          </p>
+          <label class="mt-3 flex h-8 shrink-0 items-center gap-2 rounded-md border border-line bg-bg px-2">
+            <Search class="size-3.5 shrink-0 text-faint" />
+            <input
+              type="search"
+              bind:value={query}
+              placeholder="Search playlists"
+              disabled={locked}
+              class="min-w-0 flex-1 bg-transparent text-[12.5px] outline-none placeholder:text-faint"
+              onkeydown={(e) => {
+                if (e.key === 'Enter') e.preventDefault()
+              }}
+            />
+          </label>
+          <div class="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-md border border-line py-1">
+            {#if needle && !searchHit}
+              <p class="px-2 py-1 text-[12.5px] text-faint">No matching playlists</p>
+            {:else}
+              {@render playlistTree([collectionRoot], 0, 'playlist', true, needle)}
+            {/if}
+          </div>
+          <p class="mt-2 text-[11px] leading-relaxed text-faint">
+            Unticked playlists from this library are removed from the USB. Playlists that aren’t in this library stay.
+          </p>
+        </section>
 
-      <section class="flex min-h-0 min-w-0 flex-col" {@attach loadLibraries(library.devices.map((item) => item.id).join('\n'), deviceToken)}>
-        <div class="flex shrink-0 items-baseline justify-between gap-3">
-          <h2 class="text-[13.5px] font-semibold">Devices</h2>
-          <button
-            type="button"
-            class="inline-flex h-6 items-center gap-1 rounded-md border border-line px-2 text-[11px] text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
-            disabled={locked}
-            onclick={() => {
-              void library.refreshDevices()
-              refreshToken += 1
-              deviceToken += 1
-            }}
-          >
-            <RefreshCw class="size-3" />
-            Refresh
-          </button>
-        </div>
-        <p class="mt-1 text-[12px] text-muted">
-          {selectedIds.length} of {library.devices.length} selected
-        </p>
+        <section
+          class="flex min-h-0 min-w-0 flex-col"
+          {@attach loadLibraries(library.devices.map((item) => item.id).join('\n'), deviceToken)}
+        >
+          <div class="flex shrink-0 items-baseline justify-between gap-3">
+            <h2 class="text-[13.5px] font-semibold">Devices</h2>
+            <button
+              type="button"
+              class="inline-flex h-6 items-center gap-1 rounded-md border border-line px-2 text-[11px] text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
+              disabled={locked}
+              onclick={() => {
+                void library.refreshDevices()
+                refreshToken += 1
+                deviceToken += 1
+              }}
+            >
+              <RefreshCw class="size-3" />
+              Refresh
+            </button>
+          </div>
+          <p class="mt-1 text-[12px] text-muted">
+            {selectedIds.length} of {library.devices.length} selected
+          </p>
 
-        {#if library.devices.length}
-          <div class="mt-3 min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-md border border-line">
-            {#each library.devices as item (item.id)}
-              {@const libs = deviceLibraries[item.id]}
-              {@const chosen = selectedIds.includes(item.id)}
-              {@const usage = share(item)}
-              {@const detail = [item.fileSystem, item.bytesTotal > 0 ? formatBytes(item.bytesTotal) : ''].filter(Boolean).join(' · ')}
-              <div class="border-t border-line first:border-t-0">
-                <div class="flex items-center gap-1.5 px-2 py-1">
-                  <label class="flex h-7 min-w-0 flex-1 items-center gap-2 text-[12.5px] hover:text-fg">
-                    <input
-                      type="checkbox"
-                      class="shrink-0"
-                      checked={chosen}
-                      disabled={locked}
-                      aria-label={`Sync to ${item.name}`}
-                      onchange={() => toggleDevice(item.id)}
-                    />
-                    <span class="min-w-0 flex-1 truncate">{item.name}</span>
-                    {#if detail}
-                      <span class="max-w-[46%] shrink-0 truncate text-[11px] text-faint">{detail}</span>
-                    {/if}
-                  </label>
-                  {#if item.ejectable}
-                    <button
-                      type="button"
-                      class="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-line px-1.5 text-[11px] text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
-                      disabled={locked}
-                      onclick={() => {
-                        formatId = item.id
-                        confirm = 'format'
-                      }}
-                    >
-                      <Eraser class="size-3" />
-                      Format USB
-                    </button>
-                  {/if}
-                </div>
-                {#if confirm === 'format' && formatId === item.id}
-                  <div class="border-t border-line px-2.5 py-2.5">
-                    <p class="text-[12.5px] leading-relaxed text-muted">
-                      Erase everything on {item.name} and format it as FAT32? This cannot be undone.
-                    </p>
-                    <div class="mt-2.5 flex justify-end gap-2">
+          {#if library.devices.length}
+            <div class="mt-3 min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-md border border-line">
+              {#each library.devices as item (item.id)}
+                {@const libs = deviceLibraries[item.id]}
+                {@const chosen = selectedIds.includes(item.id)}
+                {@const usage = share(item)}
+                {@const detail = [item.fileSystem, item.bytesTotal > 0 ? formatBytes(item.bytesTotal) : '']
+                  .filter(Boolean)
+                  .join(' · ')}
+                <div class="border-t border-line first:border-t-0">
+                  <div class="flex items-center gap-1.5 px-2 py-1">
+                    <label class="flex h-7 min-w-0 flex-1 items-center gap-2 text-[12.5px] hover:text-fg">
+                      <input
+                        type="checkbox"
+                        class="shrink-0"
+                        checked={chosen}
+                        disabled={locked}
+                        aria-label={`Sync to ${item.name}`}
+                        onchange={() => toggleDevice(item.id)}
+                      />
+                      <span class="min-w-0 flex-1 truncate">{item.name}</span>
+                      {#if detail}
+                        <span class="max-w-[46%] shrink-0 truncate text-[11px] text-faint">{detail}</span>
+                      {/if}
+                    </label>
+                    {#if item.ejectable}
                       <button
                         type="button"
-                        class="h-7 rounded-md px-3 text-[12.5px] text-muted hover:bg-hover hover:text-fg"
-                        onclick={() => (confirm = null)}
+                        class="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-line px-1.5 text-[11px] text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
+                        disabled={locked}
+                        onclick={() => {
+                          formatId = item.id
+                          confirm = 'format'
+                        }}
                       >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        class="h-7 rounded-md bg-danger px-3 text-[12.5px] font-medium text-white hover:bg-danger/90"
-                        onclick={() => void runFormat()}
-                      >
+                        <Eraser class="size-3" />
                         Format USB
                       </button>
-                    </div>
-                  </div>
-                {/if}
-                {#if chosen && item.bytesTotal > 0}
-                  <div class="px-2.5 pb-2">
-                    <div class="h-1.5 overflow-hidden rounded-full bg-line">
-                      <div class="h-full bg-accent" style:width="{usage.used}%"></div>
-                    </div>
-                    <p class="mt-1.5 flex justify-between gap-3 text-[11px] text-faint">
-                      <span>{formatBytes(item.bytesUsed)} used</span>
-                      <span>{formatBytes(item.bytesFree)} free ({usage.free}%)</span>
-                    </p>
-                  </div>
-                {/if}
-                <div class="max-h-40 overflow-y-auto overscroll-contain" role="region" aria-label={`Playlists on ${item.name}`}>
-                {#if libs === undefined}
-                  <p class="px-2 pb-2 text-[12px] text-faint">Reading this volume</p>
-                {:else if libs.length === 0}
-                  <p class="px-2 pb-2 text-[12px] text-faint">Nothing on this volume yet</p>
-                {:else}
-                  {#each libs as lib (lib.id)}
-                    {@const libraryKey = `${item.id}:${lib.id}`}
-                    {@const libraryOpen = open.has(libraryKey)}
-                    <button
-                      type="button"
-                      class="flex h-7 w-full items-center gap-1.5 px-2 text-left text-[12.5px] text-fg hover:bg-hover"
-                      aria-expanded={libraryOpen}
-                      onclick={() => toggleOpen(libraryKey)}
-                    >
-                      <ChevronRight class={['size-3 shrink-0 text-faint transition-transform', libraryOpen && 'rotate-90']} />
-                      {#if libraryOpen}
-                        <FolderOpen class="size-3.5 shrink-0 text-faint" />
-                      {:else}
-                        <Folder class="size-3.5 shrink-0 text-faint" />
-                      {/if}
-                      <span class="min-w-0 flex-1 truncate">{lib.name}</span>
-                    </button>
-                    {#if libraryOpen}
-                      {#if lib.playlists.length}
-                        {@render playlistTree(buildTree(lib.playlists), 1, libraryKey, false, '')}
-                      {:else}
-                        <p class="py-1 pr-2 text-[12px] text-faint" style:padding-left="36px">No playlists</p>
-                      {/if}
                     {/if}
-                  {/each}
-                {/if}
-                </div>
-              </div>
-            {/each}
-          </div>
-        {:else}
-          <p class="mt-3 text-[12.5px] text-muted">Connect a USB drive.</p>
-        {/if}
-
-        {#if error}
-          <p class="mt-2.5 text-[12px] leading-relaxed text-warn">{error}</p>
-        {/if}
-
-        <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        {#if reviewing}
-          <p class="mt-3 flex items-center gap-2 border-t border-line pt-3 text-[12px] text-muted" role="status">
-            <LoaderCircle class="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-            Reviewing USB changes
-          </p>
-        {:else}
-          {#each selectedIds as id (id)}
-            {@const inspection = inspections[id]}
-            {@const deviceName = library.devices.find((item) => item.id === id)?.name ?? id}
-            {#if inspectionErrors[id]}
-              <p class="mt-3 border-t border-line pt-3 text-[12px] leading-relaxed text-warn">
-                {deviceName}: {inspectionErrors[id]}
-              </p>
-            {:else if inspection}
-              {@const informationCount = inspection.diagnostics.filter((item) => item.severity === 'information').length}
-              {@const visibleDiagnostics = inspection.diagnostics.filter((item) => item.severity !== 'information' || showInformation.has(id))}
-              <section class="mt-3 border-t border-line pt-3" aria-label={`USB changes on ${deviceName}`}>
-                <h3 class="text-[12.5px] font-semibold">Summary · {deviceName}</h3>
-                {#if inspection.plan}
-                  <p class="mt-0.5 text-[11px] text-faint">
-                    {inspection.plan.tracks} tracks · {inspection.plan.playlists} playlists
-                    {inspection.plan.estimatedPeakBytes == null ? ' · space estimate unavailable' : ` · ${inspection.plan.approximate ? 'approximately ' : ''}up to ${formatBytes(inspection.plan.estimatedPeakBytes)}`}
-                  </p>
-                  <p class="mt-0.5 text-[11px] text-faint">{planChanges(inspection.plan)}</p>
-                {/if}
-                {#if informationCount > 0}
-                  <label class="mt-2 flex items-center gap-2 text-[11px] text-muted">
-                    <input
-                      type="checkbox"
-                      checked={showInformation.has(id)}
-                      onchange={(event) => {
-                        if (event.currentTarget.checked) showInformation.add(id)
-                        else showInformation.delete(id)
-                      }}
-                    />
-                    Show informational changes ({informationCount})
-                  </label>
-                {/if}
-                <div class="mt-2 flex max-h-48 flex-col gap-2 overflow-y-auto overscroll-contain" role="region" aria-label={`Change details for ${deviceName}`}>
-                  {#if visibleDiagnostics.length === 0}
-                    <p class="text-[11px] text-muted">No device changes need review.</p>
-                  {/if}
-                  {#each visibleDiagnostics as diagnostic (diagnostic.id)}
-                    <div class="shrink-0 break-words border-l-2 {diagnostic.severity === 'blocked' ? 'border-danger' : diagnostic.severity === 'decision_required' ? 'border-warn' : 'border-line'} pl-2.5">
-                      <p class="text-[12px] font-medium">{diagnostic.name || diagnostic.entity}</p>
-                      <p class="mt-0.5 text-[11px] leading-relaxed text-muted">{diagnostic.detail}</p>
-                      {#if diagnostic.kind === 'recovery_required'}
+                  </div>
+                  {#if confirm === 'format' && formatId === item.id}
+                    <div class="border-t border-line px-2.5 py-2.5">
+                      <p class="text-[12.5px] leading-relaxed text-muted">
+                        Erase everything on {item.name} and format it as FAT32? This cannot be undone.
+                      </p>
+                      <div class="mt-2.5 flex justify-end gap-2">
                         <button
                           type="button"
-                          class="mt-1 h-7 rounded-md border border-line px-2 text-[11px] text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
-                          disabled={locked}
-                          onclick={() => void recoverVolume(id)}
+                          class="h-7 rounded-md px-3 text-[12.5px] text-muted hover:bg-hover hover:text-fg"
+                          onclick={() => (confirm = null)}
                         >
-                          Recover interrupted export
+                          Cancel
                         </button>
-                      {/if}
-                      {#if diagnostic.fields.length}
-                        <p class="text-[10.5px] text-faint">{diagnostic.fields.join(' · ')}{diagnostic.formats.length ? ` · ${diagnostic.formats.join(' / ')}` : ''}</p>
-                      {/if}
-                      {#each diagnostic.evidence as evidence (evidence.field)}
-                        <p class="break-words text-[10.5px] text-faint">
-                          {evidence.field}: baseline {evidence.baseline ?? 'unknown'} · device {evidence.device ?? 'absent'} · library {evidence.library ?? 'unavailable'}
-                        </p>
-                      {/each}
-                      {#if diagnostic.severity === 'decision_required'}
-                        <select
-                          class="mt-1 h-7 max-w-full rounded-md border border-line bg-bg px-2 text-[11px]"
-                          aria-label={`Resolution for ${diagnostic.name}`}
-                          value={resolutions[id]?.[diagnostic.id] ?? ''}
-                          onchange={(event) => {
-                            const value = event.currentTarget.value as SyncResolution | ''
-                            if (value) chooseResolution(id, diagnostic.id, value)
-                          }}
+                        <button
+                          type="button"
+                          class="h-7 rounded-md bg-danger px-3 text-[12.5px] font-medium text-white hover:bg-danger/90"
+                          onclick={() => void runFormat()}
                         >
-                          <option value="">Choose action</option>
-                          {#each diagnostic.allowedResolutions as resolution (resolution)}
-                            <option value={resolution}>{resolutionLabel(resolution)}</option>
-                          {/each}
-                        </select>
-                      {/if}
+                          Format USB
+                        </button>
+                      </div>
                     </div>
-                  {/each}
+                  {/if}
+                  {#if chosen && item.bytesTotal > 0}
+                    <div class="px-2.5 pb-2">
+                      <div class="h-1.5 overflow-hidden rounded-full bg-line">
+                        <div class="h-full bg-accent" style:width="{usage.used}%"></div>
+                      </div>
+                      <p class="mt-1.5 flex justify-between gap-3 text-[11px] text-faint">
+                        <span>{formatBytes(item.bytesUsed)} used</span>
+                        <span>{formatBytes(item.bytesFree)} free ({usage.free}%)</span>
+                      </p>
+                    </div>
+                  {/if}
+                  <div
+                    class="max-h-40 overflow-y-auto overscroll-contain"
+                    role="region"
+                    aria-label={`Playlists on ${item.name}`}
+                  >
+                    {#if libs === undefined}
+                      <p class="px-2 pb-2 text-[12px] text-faint">Reading this volume</p>
+                    {:else if libs.length === 0}
+                      <p class="px-2 pb-2 text-[12px] text-faint">Nothing on this volume yet</p>
+                    {:else}
+                      {#each libs as lib (lib.id)}
+                        {@const libraryKey = `${item.id}:${lib.id}`}
+                        {@const libraryOpen = open.has(libraryKey)}
+                        <button
+                          type="button"
+                          class="flex h-7 w-full items-center gap-1.5 px-2 text-left text-[12.5px] text-fg hover:bg-hover"
+                          aria-expanded={libraryOpen}
+                          onclick={() => toggleOpen(libraryKey)}
+                        >
+                          <ChevronRight
+                            class={['size-3 shrink-0 text-faint transition-transform', libraryOpen && 'rotate-90']}
+                          />
+                          {#if libraryOpen}
+                            <FolderOpen class="size-3.5 shrink-0 text-faint" />
+                          {:else}
+                            <Folder class="size-3.5 shrink-0 text-faint" />
+                          {/if}
+                          <span class="min-w-0 flex-1 truncate">{lib.name}</span>
+                        </button>
+                        {#if libraryOpen}
+                          {#if lib.playlists.length}
+                            {@render playlistTree(buildTree(lib.playlists), 1, libraryKey, false, '')}
+                          {:else}
+                            <p class="py-1 pr-2 text-[12px] text-faint" style:padding-left="36px">No playlists</p>
+                          {/if}
+                        {/if}
+                      {/each}
+                    {/if}
+                  </div>
                 </div>
-              </section>
-            {/if}
-          {/each}
-        {/if}
-        </div>
-
-        <div class="mt-3 flex shrink-0 flex-col gap-2.5">
-          <label class="flex flex-col gap-1 text-[12px] text-muted">
-            Convert audio
-            <select
-              class="h-8 rounded-md border border-line bg-bg px-2 text-[12px] text-fg"
-              bind:value={convertKey}
-              disabled={locked}
-            >
-              <option value="">Don't convert</option>
-              {#each presets as preset (presetKey(preset))}
-                <option value={presetKey(preset)}>{presetLabel(preset)}</option>
               {/each}
-            </select>
-            {#if convert}
-              <span class="text-[11px] leading-snug text-faint">
-                Tracks not already {FORMAT_NAMES[convert.format]} are converted on the USB. Your library isn’t changed.
-              </span>
-            {/if}
-          </label>
-          <button
-            value="confirm"
-            disabled={locked || pending || reviewing || reviewBlocked || reviewUnresolved || selectedIds.length === 0 || checked.size === 0}
-            class="h-8 rounded-md bg-accent px-3 text-[12.5px] font-medium text-bg hover:bg-accent/90 disabled:opacity-40"
-          >
-            Sync
-          </button>
-          <label class="flex items-start gap-2 text-[12px] leading-snug text-muted">
-            <input type="checkbox" class="mt-0.5" bind:checked={ejectAfter} disabled={locked || !canEject} />
-            Eject after syncing
-          </label>
-          {#if locked || notice}
-            <p class="flex items-start gap-2 text-[12px] leading-snug {locked ? 'text-muted' : 'text-ok'}" role="status" aria-atomic="true">
-              {#if locked}
-                <LoaderCircle class="mt-0.5 size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-              {:else}
-                <Check class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-              {/if}
-              <span>{locked ? progressLabel : notice}</span>
-            </p>
-            {#if locked && progressFraction !== null}
-              <ProgressBar fraction={progressFraction} label={progressLabel} class="w-full" />
-            {/if}
-            {#if library.syncingPlaylists}
-              <button
-                type="button"
-                disabled={!library.canStopSync}
-                title={library.canStopSync ? undefined : 'Finishing the sync so the USB stays complete'}
-                class="h-7 self-start rounded-md border border-line px-3 text-[12px] text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
-                onclick={() => void library.stopSync()}
-              >
-                Stop sync
-              </button>
-            {/if}
+            </div>
+          {:else}
+            <p class="mt-3 text-[12.5px] text-muted">Connect a USB drive.</p>
           {/if}
-        </div>
-      </section>
-    </div>
 
+          {#if error}
+            <p class="mt-2.5 text-[12px] leading-relaxed text-warn">{error}</p>
+          {/if}
+
+          <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            {#if reviewing}
+              <p class="mt-3 flex items-center gap-2 border-t border-line pt-3 text-[12px] text-muted" role="status">
+                <LoaderCircle class="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                Reviewing USB changes
+              </p>
+            {:else}
+              {#each selectedIds as id (id)}
+                {@const inspection = inspections[id]}
+                {@const deviceName = library.devices.find((item) => item.id === id)?.name ?? id}
+                {#if inspectionErrors[id]}
+                  <p class="mt-3 border-t border-line pt-3 text-[12px] leading-relaxed text-warn">
+                    {deviceName}: {inspectionErrors[id]}
+                  </p>
+                {:else if inspection}
+                  {@const informationCount = inspection.diagnostics.filter(
+                    (item) => item.severity === 'information'
+                  ).length}
+                  {@const visibleDiagnostics = inspection.diagnostics.filter(
+                    (item) => item.severity !== 'information' || showInformation.has(id)
+                  )}
+                  <section class="mt-3 border-t border-line pt-3" aria-label={`USB changes on ${deviceName}`}>
+                    <h3 class="text-[12.5px] font-semibold">Summary · {deviceName}</h3>
+                    {#if inspection.plan}
+                      <p class="mt-0.5 text-[11px] text-faint">
+                        {inspection.plan.tracks} tracks · {inspection.plan.playlists} playlists
+                        {inspection.plan.estimatedPeakBytes == null
+                          ? ' · space estimate unavailable'
+                          : ` · ${inspection.plan.approximate ? 'approximately ' : ''}up to ${formatBytes(inspection.plan.estimatedPeakBytes)}`}
+                      </p>
+                      <p class="mt-0.5 text-[11px] text-faint">{planChanges(inspection.plan)}</p>
+                    {/if}
+                    {#if informationCount > 0}
+                      <label class="mt-2 flex items-center gap-2 text-[11px] text-muted">
+                        <input
+                          type="checkbox"
+                          checked={showInformation.has(id)}
+                          onchange={(event) => {
+                            if (event.currentTarget.checked) showInformation.add(id)
+                            else showInformation.delete(id)
+                          }}
+                        />
+                        Show informational changes ({informationCount})
+                      </label>
+                    {/if}
+                    <div
+                      class="mt-2 flex max-h-48 flex-col gap-2 overflow-y-auto overscroll-contain"
+                      role="region"
+                      aria-label={`Change details for ${deviceName}`}
+                    >
+                      {#if visibleDiagnostics.length === 0}
+                        <p class="text-[11px] text-muted">No device changes need review.</p>
+                      {/if}
+                      {#each visibleDiagnostics as diagnostic (diagnostic.id)}
+                        <div
+                          class="shrink-0 break-words border-l-2 {diagnostic.severity === 'blocked'
+                            ? 'border-danger'
+                            : diagnostic.severity === 'decision_required'
+                              ? 'border-warn'
+                              : 'border-line'} pl-2.5"
+                        >
+                          <p class="text-[12px] font-medium">{diagnostic.name || diagnostic.entity}</p>
+                          <p class="mt-0.5 text-[11px] leading-relaxed text-muted">{diagnostic.detail}</p>
+                          {#if diagnostic.kind === 'recovery_required'}
+                            <button
+                              type="button"
+                              class="mt-1 h-7 rounded-md border border-line px-2 text-[11px] text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
+                              disabled={locked}
+                              onclick={() => void recoverVolume(id)}
+                            >
+                              Recover interrupted export
+                            </button>
+                          {/if}
+                          {#if diagnostic.fields.length}
+                            <p class="text-[10.5px] text-faint">
+                              {diagnostic.fields.join(' · ')}{diagnostic.formats.length
+                                ? ` · ${diagnostic.formats.join(' / ')}`
+                                : ''}
+                            </p>
+                          {/if}
+                          {#each diagnostic.evidence as evidence (evidence.field)}
+                            <p class="break-words text-[10.5px] text-faint">
+                              {evidence.field}: baseline {evidence.baseline ?? 'unknown'} · device {evidence.device ??
+                                'absent'} · library {evidence.library ?? 'unavailable'}
+                            </p>
+                          {/each}
+                          {#if diagnostic.severity === 'decision_required'}
+                            <select
+                              class="mt-1 h-7 max-w-full rounded-md border border-line bg-bg px-2 text-[11px]"
+                              aria-label={`Resolution for ${diagnostic.name}`}
+                              value={resolutions[id]?.[diagnostic.id] ?? ''}
+                              onchange={(event) => {
+                                const value = event.currentTarget.value as SyncResolution | ''
+                                if (value) chooseResolution(id, diagnostic.id, value)
+                              }}
+                            >
+                              <option value="">Choose action</option>
+                              {#each diagnostic.allowedResolutions as resolution (resolution)}
+                                <option value={resolution}>{resolutionLabel(resolution)}</option>
+                              {/each}
+                            </select>
+                          {/if}
+                        </div>
+                      {/each}
+                    </div>
+                  </section>
+                {/if}
+              {/each}
+            {/if}
+          </div>
+
+          <div class="mt-3 flex shrink-0 flex-col gap-2.5">
+            <label class="flex flex-col gap-1 text-[12px] text-muted">
+              Convert audio
+              <select
+                class="h-8 rounded-md border border-line bg-bg px-2 text-[12px] text-fg"
+                bind:value={convertKey}
+                disabled={locked}
+              >
+                <option value="">Don't convert</option>
+                {#each presets as preset (presetKey(preset))}
+                  <option value={presetKey(preset)}>{presetLabel(preset)}</option>
+                {/each}
+              </select>
+              {#if convert}
+                <span class="text-[11px] leading-snug text-faint">
+                  Tracks not already {FORMAT_NAMES[convert.format]} are converted on the USB. Your library isn’t changed.
+                </span>
+              {/if}
+            </label>
+            <button
+              value="confirm"
+              disabled={locked ||
+                pending ||
+                reviewing ||
+                reviewBlocked ||
+                reviewUnresolved ||
+                selectedIds.length === 0 ||
+                checked.size === 0}
+              class="h-8 rounded-md bg-accent px-3 text-[12.5px] font-medium text-bg hover:bg-accent/90 disabled:opacity-40"
+            >
+              Sync
+            </button>
+            <label class="flex items-start gap-2 text-[12px] leading-snug text-muted">
+              <input type="checkbox" class="mt-0.5" bind:checked={ejectAfter} disabled={locked || !canEject} />
+              Eject after syncing
+            </label>
+            {#if locked || notice}
+              <p
+                class="flex items-start gap-2 text-[12px] leading-snug {locked ? 'text-muted' : 'text-ok'}"
+                role="status"
+                aria-atomic="true"
+              >
+                {#if locked}
+                  <LoaderCircle
+                    class="mt-0.5 size-3.5 shrink-0 animate-spin motion-reduce:animate-none"
+                    aria-hidden="true"
+                  />
+                {:else}
+                  <Check class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                {/if}
+                <span>{locked ? progressLabel : notice}</span>
+              </p>
+              {#if locked && progressFraction !== null}
+                <ProgressBar fraction={progressFraction} label={progressLabel} class="w-full" />
+              {/if}
+              {#if library.syncingPlaylists}
+                <button
+                  type="button"
+                  disabled={!library.canStopSync}
+                  title={library.canStopSync ? undefined : 'Finishing the sync so the USB stays complete'}
+                  class="h-7 self-start rounded-md border border-line px-3 text-[12px] text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
+                  onclick={() => void library.stopSync()}
+                >
+                  Stop sync
+                </button>
+              {/if}
+            {/if}
+          </div>
+        </section>
+      </div>
     </div>
   </form>
 </dialog>

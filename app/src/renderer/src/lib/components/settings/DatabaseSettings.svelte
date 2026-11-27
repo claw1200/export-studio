@@ -4,6 +4,7 @@
   import { getApp } from '$lib/context'
   import { DEFAULT_LIBRARY_PREFS } from '$lib/library.svelte'
   import type { BackupProgress } from '$lib/types'
+  import ProgressBar from '../ProgressBar.svelte'
   import type { Choice } from './choice'
   import { allOf, setting } from './resettable'
   import SavedBackups from './SavedBackups.svelte'
@@ -95,12 +96,7 @@
           <LoaderCircle class="size-3 shrink-0 animate-spin text-accent" />
           <span class="truncate">{progressLabel(p)}</span>
           {#if p.total}
-            <span class="h-1 w-20 shrink-0 overflow-hidden rounded-full bg-line">
-              <span
-                class="block h-full rounded-full bg-accent transition-[width]"
-                style:width="{(100 * (p.done ?? 0)) / p.total}%"
-              ></span>
-            </span>
+            <ProgressBar fraction={(p.done ?? 0) / p.total} label={progressLabel(p)} />
           {/if}
         </span>
       {/if}
