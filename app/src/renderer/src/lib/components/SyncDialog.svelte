@@ -70,6 +70,7 @@
   let resolutions = $state<Record<string, Record<string, SyncResolution>>>({})
   let reviewing = $state(false)
   let showStickContents = $state(false)
+  let showErrorDetails = $state(false)
   const presets = loadPresets()
   /** The chosen format by preset key; empty copies every track as it is. */
   let convertKey = $state('')
@@ -414,6 +415,8 @@
     return parts.join(' · ')
   }
 
+  /** The SDK's errors open with what happened, then list every file involved after a further colon. */
+  const errorSummary = $derived(error?.split(': ').slice(0, 2).join(': ') ?? '')
   const inspection = $derived(inspections[volumeId])
   const inspectionError = $derived(inspectionErrors[volumeId])
   const readiness = $derived.by((): string => {
@@ -845,7 +848,23 @@
             <ProgressBar fraction={progressFraction} label={progressLabel} class="w-full" />
           {/if}
         {:else if error}
-          <p class="text-[12px] leading-snug text-warn">{error}</p>
+          <p class="line-clamp-2 text-[12px] leading-snug text-warn" title={errorSummary}>{errorSummary}</p>
+          {#if errorSummary !== error}
+            {#if showErrorDetails}
+              <p
+                class="max-h-32 overflow-y-auto overscroll-contain rounded-md border border-line bg-bg px-2 py-1.5 font-mono text-[10.5px] leading-relaxed break-words text-muted select-text"
+              >
+                {error}
+              </p>
+            {/if}
+            <button
+              type="button"
+              class="self-start text-[11px] text-muted hover:text-fg"
+              onclick={() => (showErrorDetails = !showErrorDetails)}
+            >
+              {showErrorDetails ? 'Hide details' : 'Show details'}
+            </button>
+          {/if}
         {:else if notice}
           <p class="flex items-center gap-2 text-[12px] text-ok">
             <Check class="size-3.5 shrink-0" aria-hidden="true" />
