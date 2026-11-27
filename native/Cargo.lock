@@ -1529,6 +1529,7 @@ dependencies = [
  "fs2",
  "plist",
  "rb-storage",
+ "rbl-export",
  "rbl-onelibrary",
  "rbl-pdb",
  "rusqlite",
