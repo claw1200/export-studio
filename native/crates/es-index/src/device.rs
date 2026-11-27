@@ -255,7 +255,11 @@ pub fn audio_file(volume: &Path, track: &Track) -> Option<String> {
     audio_path(volume, track).filter(|p| p.is_file()).map(|p| p.to_string_lossy().into_owned())
 }
 
+/// A stick's databases name each image's 80×80 copy; the largest it holds is the 240×240 `_m` beside it.
+const LARGEST_STICK_SIZE: &str = "m";
+
 pub fn artwork_file(volume: &Path, track: &Track, size: &str) -> Option<std::path::PathBuf> {
+    let size = if size.is_empty() { LARGEST_STICK_SIZE } else { size };
     let relative = track.artwork.replace('\\', "/");
     volume_path(&relative, volume).ok()?;
     let path = crate::media::art(volume, &relative, size)?;
@@ -298,13 +302,15 @@ mod tests {
         let track = Track { artwork: relative.into(), ..Track::default() };
         assert!(track_row(dir.path(), &track).has_artwork);
         assert_eq!(artwork_file(dir.path(), &track, "m"), Some(original.clone()));
-        let thumbnail = original.with_file_name("cover_m.jpg");
-        std::fs::write(&thumbnail, b"thumbnail").unwrap();
-        assert_eq!(artwork_file(dir.path(), &track, "m"), Some(thumbnail));
         assert_eq!(artwork_file(dir.path(), &track, ""), Some(original.clone()));
+        let medium = original.with_file_name("cover_m.jpg");
+        std::fs::write(&medium, b"medium").unwrap();
+        assert_eq!(artwork_file(dir.path(), &track, "m"), Some(medium.clone()));
+        assert_eq!(artwork_file(dir.path(), &track, ""), Some(medium.clone()), "full size is the largest the stick holds");
         let windows_path = Track { artwork: relative.replace('/', "\\"), ..Track::default() };
-        assert_eq!(artwork_file(dir.path(), &windows_path, ""), Some(original.clone()));
+        assert_eq!(artwork_file(dir.path(), &windows_path, ""), Some(medium.clone()));
         std::fs::remove_file(original).unwrap();
+        std::fs::remove_file(medium).unwrap();
         assert!(!track_row(dir.path(), &track).has_artwork);
         assert_eq!(artwork_file(dir.path(), &track, ""), None);
     }
