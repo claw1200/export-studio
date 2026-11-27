@@ -7,6 +7,7 @@ use std::time::SystemTime;
 
 use rb_device::{paths::pioneer_dir, volumes, Device, LibraryKind, Volume};
 use es_engine::device_import::{self, PlaylistPolicy, TrackStatus};
+use es_engine::sync::SyncCancel;
 use serde_json::{json, Value};
 
 use crate::library::{failure, json_of, Core};
@@ -169,6 +170,33 @@ impl StickGate {
     }
 }
 
+/// The sync writing the stick now. Stopping it never waits for the library lock.
+#[derive(Default)]
+pub(crate) struct RunningSync(Mutex<Option<SyncCancel>>);
+
+struct Running<'a>(&'a RunningSync);
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        self.0.current().take();
+    }
+}
+
+impl RunningSync {
+    fn start(&self, cancel: SyncCancel) -> Running<'_> {
+        *self.current() = Some(cancel);
+        Running(self)
+    }
+
+    pub(crate) fn cancel(&self) {
+        if let Some(sync) = self.current().as_ref() { sync.cancel(); }
+    }
+
+    fn current(&self) -> MutexGuard<'_, Option<SyncCancel>> {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
 /// The export is read under the library lock; the stick is written without it, so the library
 /// stays readable while tracks are copied.
 pub(crate) fn sync_off_lock(core: &Core, service: MutexGuard<'_, LibraryService>, op: &UsbOp) -> napi::Result<Value> {
@@ -179,6 +207,7 @@ pub(crate) fn sync_off_lock(core: &Core, service: MutexGuard<'_, LibraryService>
     let convert = preset(convert.as_ref())?;
     let job = service.usb_sync_job(&volume, playlists, decisions.as_ref(), convert.as_ref()).map_err(failure)?;
     drop(service);
+    let _running = core.running_sync.start(job.canceller());
     let result = job.run(&|progress| core.emit_service_event(ServiceEvent::UsbSyncProgress(progress)));
     core.devices.forget(&volume);
     let result = result.map_err(failure)?;

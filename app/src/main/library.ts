@@ -102,6 +102,7 @@ const WRITES: CommandHandlers = {
   'usb.format': (lib, p) => lib.usbFormat(text(p?.volumeId)),
   'usb.setSettings': (lib, p) => lib.usbSetSettings(text(p?.volumeId), p?.settings),
   'usb.sync': (lib, p) => lib.usbSync(text(p?.volumeId), list(p?.playlistIds), p?.review, p?.convert),
+  'usb.syncCancel': async (lib) => lib.usbSyncCancel(),
   'usb.recover': (lib, p) => lib.usbRecover(text(p?.volumeId)),
   'usb.import': (lib, p) =>
     lib.usbImport(

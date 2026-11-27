@@ -12,6 +12,7 @@ import { isRekordboxPresetTrack } from './library/factory'
 import { loadViews, looseTrack, matchesTrack, pathKey, saveViews, type FileEntry } from './library/views'
 import { Listeners } from './listeners'
 import { storedFlag, storeFlag } from './deck/stored'
+import { syncPhaseLabel, syncStoppable } from './syncProgress'
 import { getSetting, setSetting } from './settings'
 import type {
   ConvertMode,
@@ -128,6 +129,12 @@ export class Library {
   syncing = $derived(this.syncVolumeId !== null)
   syncProgress = $state<SyncProgress | null>(null)
   syncError = $state<string | null>(null)
+  syncingPlaylists = $state(false)
+  syncStopping = $state(false)
+  canStopSync = $derived(this.syncingPlaylists && !this.syncStopping && syncStoppable(this.syncProgress))
+  syncLabel = $derived(
+    this.syncStopping && syncStoppable(this.syncProgress) ? 'Stopping sync' : syncPhaseLabel(this.syncProgress)
+  )
 
   status = $state<'idle' | 'loading' | 'ready' | 'error'>('idle')
   error = $state<string | null>(null)
@@ -1051,6 +1058,7 @@ export class Library {
       this.syncError = 'Select a playlist to sync'
       return null
     }
+    this.syncingPlaylists = true
     const summary = await this.runDeviceJob(volumeId, 'reading', async () => {
       await api.usbSync(volumeId, playlistIds, review, convert)
       await this.reloadDevice(volumeId)
@@ -1060,9 +1068,20 @@ export class Library {
       await this.ejectDevice(volumeId)
       return 'Sync finished and the device was ejected'
     })
+    const stopped = this.syncStopping
+    this.syncingPlaylists = this.syncStopping = false
     if (summary) this.notify(summary)
-    else if (this.syncError) this.notify(this.syncError, 'error')
+    else if (stopped) {
+      this.syncError = null
+      this.notify('Sync stopped. The USB was left as it was')
+    } else if (this.syncError) this.notify(this.syncError, 'error')
     return summary
+  }
+
+  async stopSync(): Promise<void> {
+    if (!this.canStopSync) return
+    this.syncStopping = true
+    await api.usbSyncCancel()
   }
 
   async importDevice(

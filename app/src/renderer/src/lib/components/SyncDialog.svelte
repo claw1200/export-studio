@@ -8,7 +8,7 @@
   import { FORMAT_NAMES, presetKey, presetLabel } from '$lib/convertPresets'
   import { suspendModal } from '$lib/modal'
   import { buildTree, type TreeNode } from '$lib/library/tree'
-  import { syncFraction, syncPhaseLabel } from '$lib/syncProgress'
+  import { syncFraction } from '$lib/syncProgress'
   import ProgressBar from './ProgressBar.svelte'
   import type { DeviceLibraryView, Volume } from '$lib/types'
   import type { SyncInspection, SyncPlan, SyncResolution } from '../../../../preload/engine'
@@ -65,7 +65,7 @@
   const volumeId = $derived(selectedIds[0] ?? '')
   const pending = $derived(volumeId !== '' && loadedFor !== volumeId)
   const locked = $derived(library.syncing)
-  const progressLabel = $derived(syncPhaseLabel(library.syncProgress))
+  const progressLabel = $derived(library.syncLabel)
   const progressFraction = $derived(syncFraction(library.syncProgress))
   const canEject = $derived(selectedIds.some((id) => library.devices.some((item) => item.id === id && item.ejectable)))
 
@@ -844,6 +844,17 @@
             </p>
             {#if locked && progressFraction !== null}
               <ProgressBar fraction={progressFraction} label={progressLabel} class="w-full" />
+            {/if}
+            {#if library.syncingPlaylists}
+              <button
+                type="button"
+                disabled={!library.canStopSync}
+                title={library.canStopSync ? undefined : 'Finishing the sync so the USB stays complete'}
+                class="h-7 self-start rounded-md border border-line px-3 text-[12px] text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
+                onclick={() => void library.stopSync()}
+              >
+                Stop sync
+              </button>
             {/if}
           {/if}
         </div>

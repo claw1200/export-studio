@@ -37,6 +37,13 @@ export function syncPhaseLabel(progress: SyncProgress | null): string {
   return PHASE_LABELS[progress.phase] ?? 'Syncing'
 }
 
+const PUBLISHING_PHASES = new Set(['publishing', 'cleanup', 'done', 'eject'])
+
+/** Once files start going into place a sync finishes, so the USB never holds half of it. */
+export function syncStoppable(progress: SyncProgress | null): boolean {
+  return !progress || !PUBLISHING_PHASES.has(progress.phase)
+}
+
 export function syncFraction(progress: SyncProgress | null): number | null {
   if (!progress?.total) return null
   const { done = 0, total, file } = progress

@@ -3,7 +3,7 @@
   import type { NoticeLevel } from '$lib/library.svelte'
   import { getApp } from '$lib/context'
   import { formatSize, formatTotal } from '$lib/format'
-  import { syncFraction, syncPhaseLabel } from '$lib/syncProgress'
+  import { syncFraction } from '$lib/syncProgress'
   import ProgressBar from './ProgressBar.svelte'
   import type { Snippet } from 'svelte'
   import type { Update } from '../../../../shared/updates'
@@ -63,19 +63,34 @@
   </span>
 {/snippet}
 
+{#snippet stopButton(title: string, onclick: () => void, disabled = false)}
+  <button
+    type="button"
+    class="grid size-4 shrink-0 place-items-center rounded text-faint hover:bg-hover hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent"
+    {title}
+    aria-label={title}
+    {disabled}
+    {onclick}
+  >
+    <X class="size-3" />
+  </button>
+{/snippet}
+
+{#snippet syncControls()}
+  {#if library.syncingPlaylists}
+    {@render stopButton(
+      library.canStopSync ? 'Stop syncing' : 'Finishing the sync so the USB stays complete',
+      () => void library.stopSync(),
+      !library.canStopSync
+    )}
+  {/if}
+{/snippet}
+
 {#snippet analysisControls()}
   {#if analysis.progress?.failed}
     <span class="shrink-0 text-warn" title={analysis.lastError ?? undefined}>{analysis.progress.failed} failed</span>
   {/if}
-  <button
-    type="button"
-    class="grid size-4 shrink-0 place-items-center rounded text-faint hover:bg-hover hover:text-fg"
-    title="Stop analysing"
-    aria-label="Stop analysing"
-    onclick={() => analysis.cancel()}
-  >
-    <X class="size-3" />
-  </button>
+  {@render stopButton('Stop analysing', () => analysis.cancel())}
 {/snippet}
 
 <footer
@@ -112,8 +127,12 @@
   {/if}
 
   {#if library.syncing}
-    {@const label = syncPhaseLabel(library.syncProgress)}
-    {@render task(syncDevice ? `${syncDevice.name} · ${label}` : label, syncFraction(library.syncProgress))}
+    {@const label = library.syncLabel}
+    {@render task(
+      syncDevice ? `${syncDevice.name} · ${label}` : label,
+      syncFraction(library.syncProgress),
+      syncControls
+    )}
   {/if}
 
   {#if backups.progress}

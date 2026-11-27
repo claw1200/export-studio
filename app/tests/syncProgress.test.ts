@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 
 register(new URL('./resolve-ts.mjs', import.meta.url).href)
 
-const { syncFraction, syncPhaseLabel } = await import('../src/renderer/src/lib/syncProgress.ts')
+const { syncFraction, syncPhaseLabel, syncStoppable } = await import('../src/renderer/src/lib/syncProgress.ts')
 
 describe('syncPhaseLabel', () => {
   it('says the sync is preparing before the first event', () => {
@@ -55,5 +55,17 @@ describe('syncFraction', () => {
   it('never passes the end', () => {
     assert.equal(syncFraction({ phase: 'publishing', done: 12, total: 10, unit: 'files' }), 1)
     assert.equal(syncFraction({ phase: 'copy', done: 3, total: 4, file: { done: 200, total: 100, unit: 'bytes' } }), 1)
+  })
+})
+
+describe('syncStoppable', () => {
+  it('can stop a sync until files start going into place', () => {
+    assert.equal(syncStoppable(null), true)
+    assert.equal(syncStoppable({ phase: 'copy', done: 3, total: 10 }), true)
+    assert.equal(syncStoppable({ phase: 'verifying' }), true)
+  })
+
+  it('lets a sync finish once it is publishing', () => {
+    for (const phase of ['publishing', 'cleanup', 'done', 'eject']) assert.equal(syncStoppable({ phase }), false)
   })
 })

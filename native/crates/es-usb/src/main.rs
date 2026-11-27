@@ -3,9 +3,10 @@
 mod convert;
 
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use rb_model::source::{Playlist, Source, Tag, Track};
@@ -71,6 +72,16 @@ fn phase(stage: &str) -> &'static str {
     }
 }
 
+fn cancel_requested_on_input() -> Arc<AtomicBool> {
+    let requested = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&requested);
+    std::thread::spawn(move || {
+        let asks_to_cancel = io::stdin().lock().lines().map_while(Result::ok).any(|line| line.trim() == "cancel");
+        if asks_to_cancel { flag.store(true, Ordering::SeqCst); }
+    });
+    requested
+}
+
 fn parse_job(bytes: &[u8]) -> Result<Job, JobError> {
     let job: Job = serde_json::from_slice(bytes)
         .map_err(|error| JobError::Message(format!("Export job is not valid JSON: {error}")))?;
@@ -115,6 +126,7 @@ fn run(path: &Path) -> Result<(), JobError> {
     if job.operation != "export" {
         return Err(JobError::Message(format!("Unsupported USB operation: {}", job.operation)));
     }
+    let cancel_requested = cancel_requested_on_input();
     let report = rb_usb::export(
         &job.destination,
         &source,
@@ -126,7 +138,7 @@ fn run(path: &Path) -> Result<(), JobError> {
                 "done": event.done, "total": event.total, "unit": event.unit, "file": file, "name": event.title,
             }));
         },
-        &|| false,
+        &|| cancel_requested.load(Ordering::SeqCst),
     )?;
     emit(&serde_json::json!({
         "event": "result", "tracks": report.tracks, "playlists": report.playlists,

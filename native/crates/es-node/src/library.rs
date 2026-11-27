@@ -22,6 +22,7 @@ type Events = ThreadsafeFunction<(String, String), ErrorStrategy::Fatal>;
 pub(crate) struct Core {
     pub(crate) devices: crate::usb::Devices,
     pub(crate) stick_gate: crate::usb::StickGate,
+    pub(crate) running_sync: crate::usb::RunningSync,
     service: Mutex<LibraryService>,
     events: Mutex<Option<Events>>,
 }
@@ -31,6 +32,7 @@ impl Core {
         Self {
             devices: crate::usb::Devices::default(),
             stick_gate: crate::usb::StickGate::default(),
+            running_sync: crate::usb::RunningSync::default(),
             service: Mutex::new(LibraryService::new()),
             events: Mutex::new(None),
         }
@@ -876,6 +878,11 @@ impl RekordboxLibrary {
     #[napi(ts_return_type = "Promise<unknown>")]
     pub fn usb_sync(&self, volume: String, playlist_ids: Vec<String>, decisions: Option<Value>, convert: Option<Value>) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::Sync { volume, playlists: playlist_ids, decisions, convert }))
+    }
+
+    #[napi]
+    pub fn usb_sync_cancel(&self) {
+        self.core.running_sync.cancel();
     }
 }
 

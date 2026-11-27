@@ -34,6 +34,8 @@ pub enum Error {
     Publication(String),
     #[error("USB changes require review")]
     ReviewRequired(rb_model::conflict::Inspection),
+    #[error("Sync stopped.")]
+    Cancelled,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
