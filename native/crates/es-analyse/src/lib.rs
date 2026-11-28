@@ -6,6 +6,7 @@ pub mod downbeat;
 pub mod key;
 pub mod onset;
 pub mod spectrum;
+pub mod structure;
 pub mod tempo;
 pub mod waveform;
 

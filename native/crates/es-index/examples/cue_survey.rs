@@ -125,6 +125,7 @@ fn to_json(surveyed: &SurveyedTrack) -> serde_json::Value {
         "title": track.title,
         "artist": track.artist,
         "genre": track.genre,
+        "path": track.folder_path,
         "bpm": track.bpm_x100 as f64 / 100.0,
         "lengthSeconds": track.length,
         "grid": surveyed.grid.as_ref().map(|grid| json!({ "times": grid.times, "beats": grid.beats })),

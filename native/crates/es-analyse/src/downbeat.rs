@@ -6,7 +6,7 @@
 
 use crate::spectrum::Stft;
 
-const BANDS: usize = 12;
+pub(crate) const BANDS: usize = 12;
 const BAND_LO_HZ: f64 = 40.0;
 const BAND_HI_HZ: f64 = 12_000.0;
 /// Phrase lengths compared, in beats, and their weights.
@@ -21,10 +21,10 @@ const START_WEIGHT: f64 = 0.6;
 const SOUNDING_DB: f64 = 20.0;
 
 /// Per-beat features: log band energies and a unit chroma, averaged over the beat.
-struct Profiles {
-    bands: Vec<[f64; BANDS]>,
-    chroma: Vec<[f64; 12]>,
-    kick: Vec<f64>,
+pub(crate) struct Profiles {
+    pub bands: Vec<[f64; BANDS]>,
+    pub chroma: Vec<[f64; 12]>,
+    pub kick: Vec<f64>,
 }
 
 fn band_edges(stft: &Stft) -> [usize; BANDS + 1] {
@@ -37,7 +37,7 @@ fn band_edges(stft: &Stft) -> [usize; BANDS + 1] {
     edges
 }
 
-fn profiles(stft: &Stft, beats: &[f64], low_onset: &dyn Fn(f64) -> f64) -> Profiles {
+pub(crate) fn profiles(stft: &Stft, beats: &[f64], low_onset: &dyn Fn(f64) -> f64) -> Profiles {
     let edges = band_edges(stft);
     let bin_hz = stft.bin_hz();
     let pitch: Vec<Option<usize>> = (0..stft.bins)
