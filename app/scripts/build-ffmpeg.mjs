@@ -16,7 +16,9 @@ const args = process.argv.slice(2)
 const at = args.indexOf('--version')
 const version = at >= 0 ? args[at + 1] : '7.1'
 const run = (cmd, argv, cwd) => execFileSync(cmd, argv, { cwd, stdio: 'inherit' })
-const output = (cmd, argv) => execFileSync(cmd, argv, { encoding: 'utf8' })
+// objdump -p lists every imported symbol, which overflows execFileSync's 1 MB default.
+const OUTPUT_BUFFER_BYTES = 64 * 1024 * 1024
+const output = (cmd, argv) => execFileSync(cmd, argv, { encoding: 'utf8', maxBuffer: OUTPUT_BUFFER_BYTES })
 
 const work = mkdtempSync(join(tmpdir(), 'ffmpeg-'))
 const source = join(work, `ffmpeg-${version}`)
