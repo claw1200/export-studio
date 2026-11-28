@@ -24,6 +24,9 @@ const ONSET_FRAME: usize = 1024;
 const ONSET_HOP: usize = 256;
 const KICK_HZ: (f64, f64) = (30.0, 150.0);
 const ONSET_HZ: (f64, f64) = (30.0, 16_000.0);
+/// How many times more of the phrase changes another beat of the bar must carry before a detected
+/// grid's downbeat moves to it.
+const DOWNBEAT_RECHECK_TRUST: f64 = 3.0;
 
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -92,22 +95,44 @@ pub fn analyse_samples(mono: &[f32], sample_rate: f64, options: &Options) -> Ana
         || detect_grid.then(|| beatgrid(mono, sample_rate, duration, &options.tempo)).flatten(),
         || options.key.then(|| key::analyse(mono, sample_rate)).flatten(),
     );
-    let (bpm, beats) = grid.unwrap_or_default();
-    let section_grid = options.kept_grid.as_deref().unwrap_or(&beats);
+    let (bpm, mut beats) = grid.unwrap_or_default();
     let (waveform, sections) = rayon::join(
         || waveform::features(mono, sample_rate),
-        || {
-            let wanted = options.sections && !section_grid.is_empty();
-            let found = wanted.then(|| {
-                structure::segment(
-                    &structure::BarFeatures::measure(mono, sample_rate, section_grid),
-                    &structure::Tuning::default(),
-                )
-            });
-            found.unwrap_or_default()
-        },
+        || recheck_downbeats_and_find_sections(mono, sample_rate, &mut beats, options),
     );
     Analysis { duration, bpm, beats, key, waveform, sections }
+}
+
+/// Sections on the kept grid, or on `detected` after checking its downbeats against where the
+/// music changes: a detected grid is renumbered when another beat of the bar carries clearly more
+/// of the track's phrase changes. A kept grid is the user's and is never renumbered.
+fn recheck_downbeats_and_find_sections(
+    mono: &[f32],
+    sample_rate: f64,
+    detected: &mut [Beat],
+    options: &Options,
+) -> Vec<structure::Section> {
+    let segment = |features: &structure::BeatFeatures| {
+        if options.sections {
+            structure::segment(features, &structure::Tuning::default())
+        } else {
+            Vec::new()
+        }
+    };
+    if let Some(kept) = options.kept_grid.as_deref().filter(|kept| !kept.is_empty()) {
+        return segment(&structure::BeatFeatures::measure(mono, sample_rate, kept));
+    }
+    if detected.is_empty() {
+        return Vec::new();
+    }
+    let features = structure::BeatFeatures::measure(mono, sample_rate, detected);
+    let votes = structure::bar_phase_votes(&features);
+    let phase = structure::bar_phase(features.on_downbeat(), &votes, DOWNBEAT_RECHECK_TRUST);
+    let numbers = downbeat::numbers(detected.len(), phase);
+    for (beat, number) in detected.iter_mut().zip(numbers) {
+        beat.number = number;
+    }
+    segment(&features.counting_bars_from(phase))
 }
 
 fn beatgrid(mono: &[f32], sample_rate: f64, duration: f64, opts: &TempoOptions) -> Option<(f64, Vec<Beat>)> {
@@ -213,15 +238,13 @@ mod tests {
     #[test]
     fn sections_follow_a_kept_grid_instead_of_a_detected_one() {
         let audio = track(128.0, 60.0, 0.0, &[220.0]);
-        let first_downbeat = |beats: &[Beat]| beats.iter().position(|beat| beat.number == 1);
         let detected = analyse_samples(&audio, RATE, &Options::default());
-        assert_eq!(detected.sections.first().map(|s| s.first_beat), first_downbeat(&detected.beats));
-
-        let kept_grid: Vec<Beat> = detected.beats[2..].to_vec();
+        let kept_grid: Vec<Beat> = detected.beats[..detected.beats.len() / 2].to_vec();
         let options = Options { kept_grid: Some(kept_grid.clone()), ..Options::default() };
         let kept = analyse_samples(&audio, RATE, &options);
         assert!(kept.beats.is_empty());
-        assert_eq!(kept.sections.first().map(|s| s.first_beat), first_downbeat(&kept_grid));
+        let last = kept.sections.last().expect("sections on the kept grid");
+        assert_eq!(last.first_beat + last.beats, kept_grid.len());
     }
 
     #[test]
