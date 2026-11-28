@@ -76,7 +76,11 @@
               Normal fits one tempo to the track. Dynamic follows tempo changes.
             </span>
           </span>
-          <div class="flex shrink-0 rounded-md border border-line bg-bg p-0.5 text-[11px] font-semibold" role="radiogroup" aria-label="Grid">
+          <div
+            class="flex shrink-0 rounded-md border border-line bg-bg p-0.5 text-[11px] font-semibold"
+            role="radiogroup"
+            aria-label="Grid"
+          >
             {#each GRID_MODES as mode (mode.id)}
               <button
                 type="button"
@@ -129,7 +133,18 @@
 
       <section>
         <h3 class="mb-1 px-2 text-[10.5px] font-semibold tracking-wider text-faint uppercase">More</h3>
-        {@render toggle('Detect key', 'Analyse the musical key as well as the beatgrid.', draft.key, () => (draft.key = !draft.key))}
+        {@render toggle(
+          'Detect key',
+          'Analyse the musical key as well as the beatgrid.',
+          draft.key,
+          () => (draft.key = !draft.key)
+        )}
+        {@render toggle(
+          'Detect phrases',
+          'Find the intro, builds, drops, breakdowns and outro.',
+          draft.phrases,
+          () => (draft.phrases = !draft.phrases)
+        )}
         <label class="flex items-start gap-3 rounded-md px-2 py-2">
           <span class="min-w-0 flex-1">
             <span class="block text-[12.5px] font-medium">Tracks analysed at once</span>

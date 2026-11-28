@@ -162,6 +162,7 @@ export interface EngineCommandParams {
       beats?: number[][]
       waveform: string
       key?: { tonic: number; minor: boolean } | null
+      sections?: { firstBeat: number; kind: string }[]
       bpm?: number
       duration?: number
     }

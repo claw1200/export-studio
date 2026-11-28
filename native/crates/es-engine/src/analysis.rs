@@ -2,8 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
+use es_analyse::structure::SectionKind;
 use rb_anlz::build::{self, Beat};
 use rb_anlz::decode::{self, Tags};
+use rb_anlz::phrase::{self, Mood, Phrase, PhraseKind, SongStructure};
 use rb_anlz::write::{build_beatgrid, clear_extended_beatgrid, patch_tags};
 use rb_library::{AnalysisWrite, CueMove, Library};
 
@@ -122,10 +124,19 @@ pub fn set_beatgrid(lib: &mut Library, share: &Path, id: &str, grid: &Grid, move
     Ok(constant)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SectionStart {
+    /// Index into the grid the sections were found on: `beats` when it isn't empty, otherwise the
+    /// grid the track keeps.
+    pub first_beat: usize,
+    pub kind: SectionKind,
+}
+
 /// What the native analyser found for a track.
 #[derive(Debug, Clone, Default)]
 pub struct Analysis {
     pub beats: Vec<Beat>,
+    pub sections: Vec<SectionStart>,
     /// Eight bytes per 1/150 s: peak and RMS of the whole signal and of the low, mid and high bands.
     pub waveform: Vec<u8>,
     pub key: Option<(i64, bool)>,
@@ -141,8 +152,40 @@ pub struct Options {
     pub key: bool,
 }
 
+fn phrase_kind(kind: SectionKind) -> PhraseKind {
+    match kind {
+        SectionKind::Intro => PhraseKind::Intro,
+        SectionKind::Build => PhraseKind::Up,
+        SectionKind::Drop => PhraseKind::Chorus,
+        SectionKind::Breakdown => PhraseKind::Down,
+        SectionKind::Outro => PhraseKind::Outro,
+    }
+}
+
+/// The sections as rekordbox's phrases, in the high mood whose names fit dance music.
+fn phrase_tag(sections: &[SectionStart], beat_count: usize) -> Vec<u8> {
+    let beat_number = |index: usize| u16::try_from(index + 1).unwrap_or(u16::MAX);
+    let phrases = sections
+        .iter()
+        .filter(|section| section.first_beat < beat_count)
+        .map(|section| Phrase {
+            first_beat: beat_number(section.first_beat),
+            kind: Some(phrase_kind(section.kind)),
+            variant: None,
+            fill_in_beat: None,
+        })
+        .collect();
+    phrase::song_structure_tag(&SongStructure {
+        mood: Mood::High,
+        end_beat: u16::try_from(beat_count).unwrap_or(u16::MAX),
+        phrases,
+    })
+}
+
 /// Write an analysis: the analysis files, tempo, key and the analysed flag. Cues already in the files are
-/// kept; phrases go when the grid they were counted on changes.
+/// kept. Phrases are written from the sections when they fit the grid the track ends up with and
+/// the track has none (or overwrite is asked for, or the grid changes); otherwise they go when the
+/// grid they were counted on changes.
 pub fn apply_analysis(lib: &mut Library, share: &Path, id: &str, result: &Analysis, options: Options) -> Result<()> {
     let files = lib.track_files(id)?.ok_or_else(|| Error::Other(format!("Unknown track {id}")))?;
     let features = build::features_from_bytes(&result.waveform);
@@ -169,8 +212,19 @@ pub fn apply_analysis(lib: &mut Library, share: &Path, id: &str, result: &Analys
             Err(_) => Ok(None),
         })
         .collect::<Result<_>>()?;
-    let has_grid = existing[0].as_ref().and_then(|(_, t)| decode::beatgrid(t)).is_some_and(|g| !g.times.is_empty());
+    let kept_beat_count = existing[0].as_ref().and_then(|(_, t)| decode::beatgrid(t)).map_or(0, |g| g.times.len());
+    let has_grid = kept_beat_count > 0;
     let write_grid = options.grid && !result.beats.is_empty() && (options.overwrite || !has_grid);
+    let final_beat_count = if write_grid { result.beats.len() } else { kept_beat_count };
+    let sections_fit_final_grid = write_grid || result.beats.is_empty();
+    let has_phrases = kinds.iter().zip(&existing).any(|((kind, _, _), file)| {
+        *kind == "EXT" && file.as_ref().is_some_and(|(_, t)| t.first(rb_anlz::PHRASE_TAG).is_some())
+    });
+    let phrases = (sections_fit_final_grid
+        && !result.sections.is_empty()
+        && final_beat_count > 0
+        && (write_grid || options.overwrite || !has_phrases))
+        .then(|| phrase_tag(&result.sections, final_beat_count));
 
     let fresh = build::new_files(&audio_name, if write_grid { &result.beats } else { &[] }, &features);
     let waves = if features.is_empty() { Vec::new() } else { build::wave_tags(&features) };
@@ -178,7 +232,13 @@ pub fn apply_analysis(lib: &mut Library, share: &Path, id: &str, result: &Analys
     for (index, (kind, wave_kinds, path)) in kinds.iter().enumerate() {
         let Some((bytes, tags)) = &existing[index] else {
             if let Some((_, data)) = fresh.iter().find(|(k, _)| k == kind) {
-                writes.push((path.clone(), data.clone()));
+                let data = match (&phrases, *kind) {
+                    (Some(tag), "EXT") => {
+                        patch_tags(data, &[(rb_anlz::PHRASE_TAG, tag.clone())], &[]).map_err(other)?
+                    }
+                    _ => data.clone(),
+                };
+                writes.push((path.clone(), data));
             }
             continue;
         };
@@ -195,7 +255,13 @@ pub fn apply_analysis(lib: &mut Library, share: &Path, id: &str, result: &Analys
             if let Some(pqt2) = tags.first("PQT2") {
                 replace.push(("PQT2", clear_extended_beatgrid(pqt2)));
             }
-            drop.push(rb_anlz::PHRASE_TAG);
+        }
+        if *kind == "EXT" {
+            match &phrases {
+                Some(tag) => replace.push((rb_anlz::PHRASE_TAG, tag.clone())),
+                None if write_grid => drop.push(rb_anlz::PHRASE_TAG),
+                None => {}
+            }
         }
         if !replace.is_empty() || !drop.is_empty() {
             writes.push((path.clone(), patch_tags(bytes, &replace, &drop).map_err(other)?));

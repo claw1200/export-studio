@@ -25,6 +25,7 @@ export interface AnalysisSettings {
   highPrecision: boolean
   roundBpm: boolean
   key: boolean
+  phrases: boolean
   concurrency: number
 }
 
@@ -38,6 +39,7 @@ export const DEFAULT_ANALYSIS_SETTINGS: Readonly<AnalysisSettings> = {
   highPrecision: true,
   roundBpm: true,
   key: true,
+  phrases: true,
   concurrency: 3
 }
 const SETTING_KEYS = Object.keys(DEFAULT_ANALYSIS_SETTINGS) as (keyof AnalysisSettings)[]
@@ -119,6 +121,7 @@ export class Analysis {
     return {
       grid: true,
       key: s.key,
+      phrases: s.phrases,
       gridMode: s.gridMode,
       minBpm: s.minBpm,
       maxBpm: s.maxBpm,

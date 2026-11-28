@@ -616,6 +616,7 @@ dependencies = [
 name = "es-engine"
 version = "0.1.0"
 dependencies = [
+ "es-analyse",
  "es-backup",
  "es-convert",
  "es-index",

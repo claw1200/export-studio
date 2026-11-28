@@ -44,7 +44,7 @@
   <SettingsGroup title="Import">
     <SettingToggle
       label="Analyse imported tracks"
-      description="Work out the beatgrid, tempo and key of new tracks as soon as they are imported."
+      description="Work out the beatgrid, tempo, key and phrases of new tracks as soon as they are imported."
       on={s.auto}
       onflip={() => analysis.set('auto', !s.auto)}
     />
@@ -91,6 +91,12 @@
       description="Work out the musical key as well as the beatgrid."
       on={s.key}
       onflip={() => analysis.set('key', !s.key)}
+    />
+    <SettingToggle
+      label="Detect phrases"
+      description="Find each intro, build, drop, breakdown and outro, and save them as rekordbox phrases."
+      on={s.phrases}
+      onflip={() => analysis.set('phrases', !s.phrases)}
     />
     <SettingChoice
       label="Tracks analysed at once"

@@ -67,9 +67,18 @@ export interface NativeEngine {
   close(): void
 }
 
+export interface NativeGrid {
+  times: number[]
+  beats: number[]
+  bpms: number[]
+}
+
 export interface NativeTrackAnalysisOptions {
   grid: boolean
   key: boolean
+  sections: boolean
+  /** Sections are found on this grid, and no new grid is detected. */
+  keptGrid?: NativeGrid | null
   dynamic: boolean
   minBpm: number
   maxBpm: number
@@ -89,6 +98,8 @@ export interface NativeTrackAnalysis {
   key?: { tonic: number; minor: boolean } | null
   /** Eight bytes per 1/150 s: peak and RMS of the whole signal, then the low, mid and high bands. */
   waveform: Uint8Array
+  /** `firstBeat` indexes the kept grid when one was given, otherwise the beats above. */
+  sections: { firstBeat: number; kind: string }[]
 }
 
 export interface NativeLibrary {

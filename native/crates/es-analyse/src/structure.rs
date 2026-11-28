@@ -31,6 +31,24 @@ pub enum SectionKind {
     Outro,
 }
 
+impl SectionKind {
+    pub const ALL: [Self; 5] = [Self::Intro, Self::Build, Self::Drop, Self::Breakdown, Self::Outro];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Intro => "intro",
+            Self::Build => "build",
+            Self::Drop => "drop",
+            Self::Breakdown => "breakdown",
+            Self::Outro => "outro",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Section {
     pub first_beat: BeatIndex,

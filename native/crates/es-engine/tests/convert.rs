@@ -85,6 +85,7 @@ fn a_delay_moves_the_grid_and_the_detail_waveforms() {
         key: None,
         bpm: 128.0,
         duration: 1.0,
+        ..Analysis::default()
     };
     apply_analysis(&mut lib, &share, &id, &analysis, AnalysisOptions { overwrite: true, grid: true, key: false })
         .unwrap();

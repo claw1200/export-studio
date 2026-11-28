@@ -377,14 +377,30 @@ pub fn analyse(path: String, bands: bool, quality: u32) -> AsyncTask<Analyse> {
 }
 
 #[napi(object)]
+pub struct GridJs {
+    pub times: Vec<u32>,
+    pub beats: Vec<u32>,
+    pub bpms: Vec<f64>,
+}
+
+#[napi(object)]
 pub struct TrackAnalysisOptionsJs {
     pub grid: bool,
     pub key: bool,
+    pub sections: bool,
     pub dynamic: bool,
     pub min_bpm: f64,
     pub max_bpm: f64,
     pub high_precision: bool,
     pub round_bpm: bool,
+    pub kept_grid: Option<GridJs>,
+}
+
+#[napi(object)]
+pub struct SectionJs {
+    /// Index into the grid the sections were found on.
+    pub first_beat: u32,
+    pub kind: String,
 }
 
 #[napi(object)]
@@ -406,6 +422,7 @@ pub struct TrackAnalysisJs {
     pub key: Option<KeyJs>,
     /// Eight bytes per 1/150 s: peak and RMS of the whole signal, then the low, mid and high bands.
     pub waveform: Uint8Array,
+    pub sections: Vec<SectionJs>,
 }
 
 pub struct AnalyseTrack {
@@ -431,11 +448,19 @@ impl Task for AnalyseTrack {
             beat_times: Uint32Array::new(a.beats.iter().map(|b| b.time_ms).collect()),
             key: a.key.map(|k| KeyJs { tonic: k.tonic as u32, minor: k.minor }),
             waveform: Uint8Array::new(a.waveform),
+            sections: a
+                .sections
+                .iter()
+                .map(|section| SectionJs {
+                    first_beat: u32::try_from(section.first_beat).unwrap_or(u32::MAX),
+                    kind: section.kind.name().to_owned(),
+                })
+                .collect(),
         })
     }
 }
 
-/// Beatgrid, tempo, key and waveform loudness for a file, worked out off the main thread.
+/// Beatgrid, tempo, key, sections and waveform loudness for a file, worked out off the main thread.
 #[napi(ts_return_type = "Promise<TrackAnalysisJs>")]
 pub fn analyse_track(path: String, options: TrackAnalysisOptionsJs) -> AsyncTask<AnalyseTrack> {
     AsyncTask::new(AnalyseTrack {
@@ -443,6 +468,19 @@ pub fn analyse_track(path: String, options: TrackAnalysisOptionsJs) -> AsyncTask
         options: es_analyse::Options {
             grid: options.grid,
             key: options.key,
+            sections: options.sections,
+            kept_grid: options.kept_grid.map(|grid| {
+                grid.times
+                    .iter()
+                    .zip(&grid.beats)
+                    .zip(&grid.bpms)
+                    .map(|((&time_ms, &number), &bpm)| es_analyse::Beat {
+                        number: u8::try_from(number).unwrap_or(0),
+                        tempo_x100: (bpm * 100.0).round().clamp(0.0, f64::from(u16::MAX)) as u16,
+                        time_ms,
+                    })
+                    .collect()
+            }),
             tempo: es_analyse::TempoOptions {
                 min_bpm: options.min_bpm,
                 max_bpm: options.max_bpm.max(options.min_bpm + 1.0),

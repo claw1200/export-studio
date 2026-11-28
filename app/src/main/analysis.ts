@@ -80,6 +80,7 @@ export class AnalysisQueue {
     const result = await native.analyseTrack(path, {
       grid: options.grid,
       key: options.key,
+      sections: options.phrases,
       dynamic: options.gridMode === 'dynamic',
       minBpm: options.minBpm,
       maxBpm: options.maxBpm,
@@ -95,6 +96,7 @@ export class AnalysisQueue {
         bpm: result.bpm,
         beats,
         key: result.key ?? null,
+        sections: result.sections,
         waveform: waveform.toString('base64')
       },
       options: { grid: options.grid, key: options.key, overwrite: options.overwrite }

@@ -25,16 +25,19 @@ const ONSET_HOP: usize = 256;
 const KICK_HZ: (f64, f64) = (30.0, 150.0);
 const ONSET_HZ: (f64, f64) = (30.0, 16_000.0);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Options {
     pub tempo: TempoOptions,
     pub grid: bool,
     pub key: bool,
+    pub sections: bool,
+    /// Sections are found on this grid, and no new grid is detected.
+    pub kept_grid: Option<Vec<Beat>>,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { tempo: TempoOptions::default(), grid: true, key: true }
+        Self { tempo: TempoOptions::default(), grid: true, key: true, sections: true, kept_grid: None }
     }
 }
 
@@ -55,6 +58,8 @@ pub struct Analysis {
     pub key: Option<key::Key>,
     /// [`waveform::LANES`] bytes per entry at [`waveform::RATE`] entries per second.
     pub waveform: Vec<u8>,
+    /// On the kept grid when there is one, otherwise on `beats`.
+    pub sections: Vec<structure::Section>,
 }
 
 /// Decodes `path` through the deck's decoder at [`SAMPLE_RATE`], mixed to mono.
@@ -82,12 +87,27 @@ pub fn analyse_file(path: &Path, options: &Options) -> Result<Analysis, DecodeEr
 
 pub fn analyse_samples(mono: &[f32], sample_rate: f64, options: &Options) -> Analysis {
     let duration = mono.len() as f64 / sample_rate;
+    let detect_grid = options.grid && options.kept_grid.is_none();
     let (grid, key) = rayon::join(
-        || options.grid.then(|| beatgrid(mono, sample_rate, duration, &options.tempo)).flatten(),
+        || detect_grid.then(|| beatgrid(mono, sample_rate, duration, &options.tempo)).flatten(),
         || options.key.then(|| key::analyse(mono, sample_rate)).flatten(),
     );
     let (bpm, beats) = grid.unwrap_or_default();
-    Analysis { duration, bpm, beats, key, waveform: waveform::features(mono, sample_rate) }
+    let section_grid = options.kept_grid.as_deref().unwrap_or(&beats);
+    let (waveform, sections) = rayon::join(
+        || waveform::features(mono, sample_rate),
+        || {
+            let wanted = options.sections && !section_grid.is_empty();
+            let found = wanted.then(|| {
+                structure::segment(
+                    &structure::BarFeatures::measure(mono, sample_rate, section_grid),
+                    &structure::Tuning::default(),
+                )
+            });
+            found.unwrap_or_default()
+        },
+    );
+    Analysis { duration, bpm, beats, key, waveform, sections }
 }
 
 fn beatgrid(mono: &[f32], sample_rate: f64, duration: f64, opts: &TempoOptions) -> Option<(f64, Vec<Beat>)> {
@@ -188,6 +208,20 @@ mod tests {
         assert_eq!(tempos.last(), Some(&12_800));
         let change = a.beats.iter().find(|b| b.tempo_x100 == 12_800).unwrap();
         assert!((f64::from(change.time_ms) / 1000.0 - 48.0).abs() < 8.0, "changes at {}", change.time_ms);
+    }
+
+    #[test]
+    fn sections_follow_a_kept_grid_instead_of_a_detected_one() {
+        let audio = track(128.0, 60.0, 0.0, &[220.0]);
+        let first_downbeat = |beats: &[Beat]| beats.iter().position(|beat| beat.number == 1);
+        let detected = analyse_samples(&audio, RATE, &Options::default());
+        assert_eq!(detected.sections.first().map(|s| s.first_beat), first_downbeat(&detected.beats));
+
+        let kept_grid: Vec<Beat> = detected.beats[2..].to_vec();
+        let options = Options { kept_grid: Some(kept_grid.clone()), ..Options::default() };
+        let kept = analyse_samples(&audio, RATE, &options);
+        assert!(kept.beats.is_empty());
+        assert_eq!(kept.sections.first().map(|s| s.first_beat), first_downbeat(&kept_grid));
     }
 
     #[test]

@@ -155,19 +155,16 @@ fn rekordbox_kind(label: &str) -> Option<SectionKind> {
     }
 }
 
-const KINDS: [SectionKind; 5] =
-    [SectionKind::Intro, SectionKind::Build, SectionKind::Drop, SectionKind::Breakdown, SectionKind::Outro];
-
 /// Share of bars whose section kind matches rekordbox's, and the counts behind it, ours by theirs.
 fn label_agreement(tracks: &[Track], tuning: &Tuning) -> (f64, [[usize; 5]; 5]) {
     let mut counts = [[0usize; 5]; 5];
     for track in tracks {
         let Some(theirs) = &track.rekordbox_bar_kinds else { continue };
         for section in segment(&track.features, tuning) {
-            let ours = KINDS.iter().position(|&k| k == section.kind).unwrap_or(0);
+            let ours = SectionKind::ALL.iter().position(|&k| k == section.kind).unwrap_or(0);
             for bar in section.first_bar..section.first_bar + section.bars {
                 if let Some(Some(kind)) = theirs.get(bar) {
-                    counts[ours][KINDS.iter().position(|k| k == kind).unwrap_or(0)] += 1;
+                    counts[ours][SectionKind::ALL.iter().position(|k| k == kind).unwrap_or(0)] += 1;
                 }
             }
         }
@@ -190,9 +187,9 @@ fn report_labels(tracks: &[Track], best: &Tuning) -> Tuning {
         }
     }
     let (_, counts) = label_agreement(tracks, &chosen);
-    println!("  ours \\ theirs  {}", KINDS.iter().map(|&k| format!("{:>9}", kind_name(k))).collect::<String>());
-    for (ours, row) in KINDS.iter().zip(counts) {
-        println!("  {:<14} {}", kind_name(*ours), row.iter().map(|n| format!("{n:>9}")).collect::<String>());
+    println!("  ours \\ theirs  {}", SectionKind::ALL.iter().map(|&k| format!("{:>9}", k.name())).collect::<String>());
+    for (ours, row) in SectionKind::ALL.iter().zip(counts) {
+        println!("  {:<14} {}", ours.name(), row.iter().map(|n| format!("{n:>9}")).collect::<String>());
     }
     chosen
 }
@@ -291,7 +288,7 @@ fn report_kinds(tracks: &[Track], tuning: &Tuning) {
         let sections = segment(&track.features, tuning);
         let mut seen: BTreeMap<String, usize> = BTreeMap::new();
         for section in &sections {
-            let kind = kind_name(section.kind);
+            let kind = section.kind.name();
             let occurrence = seen.entry(kind.to_owned()).and_modify(|n| *n += 1).or_insert(1);
             let anchor = format!("{kind}#{occurrence}");
             *everywhere.entry(anchor.clone()).or_default() += 1;
@@ -315,7 +312,7 @@ fn report_kinds(tracks: &[Track], tuning: &Tuning) {
                 "  bar {:>4} {:>3} bars {:<9} energy {:.2} {cued}",
                 section.first_bar,
                 section.bars,
-                kind_name(section.kind),
+                section.kind.name(),
                 section.relative_energy
             );
         }
@@ -323,15 +320,5 @@ fn report_kinds(tracks: &[Track], tuning: &Tuning) {
             track.cue_bars.difference(&starts(&segment(&track.features, tuning))).copied().collect();
         missed.sort_unstable();
         println!("  cues on no section start: bars {missed:?}");
-    }
-}
-
-fn kind_name(kind: SectionKind) -> &'static str {
-    match kind {
-        SectionKind::Intro => "Intro",
-        SectionKind::Build => "Build",
-        SectionKind::Drop => "Drop",
-        SectionKind::Breakdown => "Breakdown",
-        SectionKind::Outro => "Outro",
     }
 }

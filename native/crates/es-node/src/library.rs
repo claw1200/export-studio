@@ -455,8 +455,26 @@ impl Run {
                         value.get("minor").and_then(Value::as_bool).unwrap_or(false),
                     )
                 });
+                let sections = result
+                    .get("sections")
+                    .and_then(Value::as_array)
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(|section| {
+                                Some(es_engine::analysis::SectionStart {
+                                    first_beat: usize::try_from(section.get("firstBeat")?.as_u64()?).ok()?,
+                                    kind: es_analyse::structure::SectionKind::from_name(
+                                        section.get("kind")?.as_str()?,
+                                    )?,
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 let analysis = es_engine::analysis::Analysis {
                     beats,
+                    sections,
                     waveform,
                     key,
                     bpm: result.get("bpm").and_then(Value::as_f64).unwrap_or(0.0),

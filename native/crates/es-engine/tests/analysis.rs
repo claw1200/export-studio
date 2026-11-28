@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use es_engine::analysis::{apply_analysis, set_beatgrid, Analysis, Grid, Options};
+use es_analyse::structure::SectionKind;
+use es_engine::analysis::{apply_analysis, set_beatgrid, Analysis, Grid, Options, SectionStart};
 use es_engine::import::{import_files, Options as ImportOptions};
 use rb_anlz::decode::{self, Tags};
 use rb_library::fixture;
@@ -44,6 +45,7 @@ fn scene() -> (tempfile::TempDir, Library, String) {
 fn analysis() -> Analysis {
     Analysis {
         beats: vec![(1, 12800, 0), (2, 12800, 469), (3, 12800, 938), (4, 12800, 1406)],
+        sections: Vec::new(),
         waveform: (0..8 * 300).map(|i| (i * 7 % 251) as u8).collect(),
         key: Some((9, true)),
         bpm: 128.0,
@@ -82,6 +84,53 @@ fn an_existing_grid_survives_unless_overwrite_is_asked_for() {
     assert_eq!(lib.tracks(Some(std::slice::from_ref(&id))).unwrap().remove(0).bpm_x100, 12800);
     apply_analysis(&mut lib, &share, &id, &other, Options { overwrite: true, ..ALL }).unwrap();
     assert_eq!(lib.tracks(Some(std::slice::from_ref(&id))).unwrap().remove(0).bpm_x100, 9000);
+}
+
+fn sections(kinds: &[(usize, SectionKind)]) -> Vec<SectionStart> {
+    kinds.iter().map(|&(first_beat, kind)| SectionStart { first_beat, kind }).collect()
+}
+
+fn phrases(lib: &Library, share: &Path, id: &str) -> Option<Vec<(u16, String)>> {
+    let relative = lib.track_files(id).unwrap().unwrap().analysis_path.unwrap();
+    let ext = Tags::read(&rb_anlz::file(share, &relative, "EXT").unwrap()).unwrap();
+    let structure = rb_anlz::phrase::song_structure(&ext)?;
+    Some(structure.phrases.iter().map(|phrase| (phrase.first_beat, phrase.to_string())).collect())
+}
+
+#[test]
+fn sections_are_written_as_rekordbox_phrases() {
+    let (_dir, mut lib, id) = scene();
+    let share = lib.share_dir();
+    let analysed = Analysis { sections: sections(&[(0, SectionKind::Intro), (2, SectionKind::Drop)]), ..analysis() };
+    apply_analysis(&mut lib, &share, &id, &analysed, ALL).unwrap();
+    assert_eq!(phrases(&lib, &share, &id), Some(vec![(1, "INTRO 1".into()), (3, "CHORUS 1".into())]));
+}
+
+#[test]
+fn phrases_already_there_stay_unless_overwrite_is_asked_for() {
+    let (_dir, mut lib, id) = scene();
+    let share = lib.share_dir();
+    let first = Analysis { sections: sections(&[(0, SectionKind::Intro)]), ..analysis() };
+    apply_analysis(&mut lib, &share, &id, &first, ALL).unwrap();
+    let on_kept_grid = Analysis {
+        beats: Vec::new(),
+        sections: sections(&[(0, SectionKind::Build), (2, SectionKind::Breakdown)]),
+        ..analysis()
+    };
+    apply_analysis(&mut lib, &share, &id, &on_kept_grid, ALL).unwrap();
+    assert_eq!(phrases(&lib, &share, &id), Some(vec![(1, "INTRO 1".into())]));
+    apply_analysis(&mut lib, &share, &id, &on_kept_grid, Options { overwrite: true, ..ALL }).unwrap();
+    assert_eq!(phrases(&lib, &share, &id), Some(vec![(1, "UP 1".into()), (3, "DOWN".into())]));
+}
+
+#[test]
+fn sections_found_on_a_grid_that_is_not_kept_are_not_written() {
+    let (_dir, mut lib, id) = scene();
+    let share = lib.share_dir();
+    apply_analysis(&mut lib, &share, &id, &analysis(), ALL).unwrap();
+    let on_new_grid = Analysis { sections: sections(&[(0, SectionKind::Outro)]), ..analysis() };
+    apply_analysis(&mut lib, &share, &id, &on_new_grid, ALL).unwrap();
+    assert_eq!(phrases(&lib, &share, &id), None);
 }
 
 #[test]

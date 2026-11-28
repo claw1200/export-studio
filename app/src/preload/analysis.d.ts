@@ -7,6 +7,8 @@ export interface AnalysisOptions {
   grid: boolean
   /** Detect the musical key. */
   key: boolean
+  /** Find the track's sections and save them as rekordbox phrases. */
+  phrases: boolean
   gridMode: GridMode
   minBpm: number
   maxBpm: number
