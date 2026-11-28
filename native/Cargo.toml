@@ -72,7 +72,6 @@ module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
-chunks_exact_to_as_chunks = "allow"
 manual_is_multiple_of = "allow"
 
 [profile.release]

@@ -210,10 +210,8 @@ mod tests {
     fn rejects_missing_or_unsupported_job_schema() {
         assert!(parse_job(br#"{"destination":"/tmp","tracks":[],"playlists":[]}"#).is_err());
         let job = serde_json::json!({ "schemaVersion": JOB_SCHEMA_VERSION + 1, "destination": "/tmp", "tracks": [], "playlists": [] });
-        assert!(parse_job(job.to_string().as_bytes())
-            .unwrap_err()
-            .to_string()
-            .contains("Unsupported export job schema version"));
+        let error = parse_job(job.to_string().as_bytes()).err().map(|error| error.to_string());
+        assert!(error.is_some_and(|message| message.contains("Unsupported export job schema version")));
     }
 
     #[test]
