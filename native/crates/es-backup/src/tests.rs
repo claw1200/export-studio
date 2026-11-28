@@ -19,7 +19,11 @@ fn scene() -> Scene {
     fs::write(db_dir.join("share/PIONEER/Artwork/abc/art.jpg"), b"jpeg").unwrap();
     let verify = |p: &Path| {
         let text = fs::read_to_string(p).map_err(Error::from)?;
-        if text.contains("broken") { fail("The database is damaged") } else { Ok(Counts { tracks: 3, playlists: 2 }) }
+        if text.contains("broken") {
+            fail("The database is damaged")
+        } else {
+            Ok(Counts { tracks: 3, playlists: 2 })
+        }
     };
     let backups = Backups::new(dir.path().join("backups"), verify, || false);
     Scene { _dir: dir, db_dir, backups }
@@ -33,10 +37,14 @@ fn quiet() -> impl Fn(Value) {
 fn a_manual_backup_holds_the_database_side_files_and_share_folder() {
     let s = scene();
     let made = s.backups.create(&s.db_dir.join("master.db"), "manual", &quiet()).unwrap().unwrap();
-    assert_eq!((made["tracks"].as_i64(), made["playlists"].as_i64(), made["files"].as_i64()), (Some(3), Some(2), Some(3)));
+    assert_eq!(
+        (made["tracks"].as_i64(), made["playlists"].as_i64(), made["files"].as_i64()),
+        (Some(3), Some(2), Some(3))
+    );
 
     let mut zip = ZipArchive::new(File::open(made["path"].as_str().unwrap()).unwrap()).unwrap();
-    let mut names: Vec<String> = (0..zip.len()).map(|i| zip.by_index(i).unwrap().name().unwrap().into_owned()).collect();
+    let mut names: Vec<String> =
+        (0..zip.len()).map(|i| zip.by_index(i).unwrap().name().unwrap().into_owned()).collect();
     names.sort();
     assert_eq!(names, ["manifest.json", "master.db", "masterPlaylists6.xml", "share/PIONEER/Artwork/abc/art.jpg"]);
     assert_eq!(s.backups.list(Some(&s.db_dir.join("master.db"))).len(), 1);

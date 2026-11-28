@@ -74,7 +74,8 @@ pub fn relocate(lib: &mut Library, share: &Path, moves: &[(String, String)]) -> 
             if tags.first("PPTH").is_none() {
                 continue;
             }
-            let new = rb_anlz::write::replace_tags(&old, &[("PPTH", rb_anlz::write::path_tag(&item.stored))]).map_err(|e| Error::Other(e.to_string()))?;
+            let new = rb_anlz::write::replace_tags(&old, &[("PPTH", rb_anlz::write::path_tag(&item.stored))])
+                .map_err(|e| Error::Other(e.to_string()))?;
             touched.push(path.clone());
             writes.push((path, old, new));
         }
@@ -86,7 +87,9 @@ pub fn relocate(lib: &mut Library, share: &Path, moves: &[(String, String)]) -> 
     let result = (|| -> Result<()> {
         for (path, _, new) in &writes {
             let tmp = path.with_extension("tmp");
-            std::fs::write(&tmp, new).and_then(|()| std::fs::rename(&tmp, path)).map_err(|e| Error::Other(e.to_string()))?;
+            std::fs::write(&tmp, new)
+                .and_then(|()| std::fs::rename(&tmp, path))
+                .map_err(|e| Error::Other(e.to_string()))?;
         }
         lib.write(|tx| {
             for item in &plan {
@@ -144,7 +147,11 @@ pub fn find_missing(lib: &Library, ids: &[String], directory: &Path) -> Result<F
         if !is_local(&stored) || Path::new(&stored).is_file() {
             continue;
         }
-        let name = Path::new(&stored).file_name().map(|n| n.to_string_lossy().into_owned()).filter(|n| !n.is_empty()).unwrap_or(files.file_name);
+        let name = Path::new(&stored)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .filter(|n| !n.is_empty())
+            .unwrap_or(files.file_name);
         if !name.is_empty() {
             let key = name.to_lowercase();
             if !wanted.contains_key(&key) {
@@ -184,7 +191,10 @@ pub fn find_missing(lib: &Library, ids: &[String], directory: &Path) -> Result<F
     for key in order {
         for (id, size) in &wanted[&key] {
             let candidates = found.get(&key).map(Vec::as_slice).unwrap_or_default();
-            matches.push(Match { id: id.clone(), path: pick(candidates, *size).map(|p| p.to_string_lossy().into_owned()) });
+            matches.push(Match {
+                id: id.clone(),
+                path: pick(candidates, *size).map(|p| p.to_string_lossy().into_owned()),
+            });
         }
     }
     Ok(Found { matches, scanned })

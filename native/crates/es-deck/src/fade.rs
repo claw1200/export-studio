@@ -28,11 +28,7 @@ impl Ramp {
 
     /// Moves one frame towards open or closed and returns that frame's gain.
     pub fn step(&mut self, open: bool) -> f32 {
-        self.at = if open {
-            (self.at + 1).min(FADE_FRAMES)
-        } else {
-            self.at.saturating_sub(1)
-        };
+        self.at = if open { (self.at + 1).min(FADE_FRAMES) } else { self.at.saturating_sub(1) };
         self.gain()
     }
 }

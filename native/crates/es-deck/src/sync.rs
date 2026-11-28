@@ -40,9 +40,7 @@ impl Grid {
     }
 
     fn last_at_or_before(&self, frame: f64) -> usize {
-        self.times
-            .partition_point(|&t| t <= frame)
-            .saturating_sub(1)
+        self.times.partition_point(|&t| t <= frame).saturating_sub(1)
     }
 
     /// Fractional beats along the grid at `frame`.
@@ -56,12 +54,7 @@ impl Grid {
         }
         let i = self.last_at_or_before(frame);
         let span = self.times[i + 1] - self.times[i];
-        i as f64
-            + if span > 0.0 {
-                (frame - self.times[i]) / span
-            } else {
-                0.0
-            }
+        i as f64 + if span > 0.0 { (frame - self.times[i]) / span } else { 0.0 }
     }
 
     /// The frame `beat` beats along the grid: the inverse of [`beat_at`](Self::beat_at).
@@ -128,11 +121,7 @@ pub(crate) struct BeatSync {
 
 impl BeatSync {
     pub fn new(decks: usize, sample_rate: u32) -> Self {
-        Self {
-            sample_rate,
-            grids: vec![None; decks],
-            link: None,
-        }
+        Self { sample_rate, grids: vec![None; decks], link: None }
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -149,11 +138,7 @@ impl BeatSync {
         let decks = self.grids.len();
         self.link = link
             .filter(|&(master, follower)| master != follower && master < decks && follower < decks)
-            .map(|(master, follower)| Link {
-                master,
-                follower,
-                ratio: None,
-            });
+            .map(|(master, follower)| Link { master, follower, ratio: None });
     }
 
     pub fn link(&self) -> Option<(DeckId, DeckId)> {
@@ -182,16 +167,14 @@ impl BeatSync {
         else {
             return;
         };
-        let (Some(master), Some(follower)) = (clocks.get(link.master), clocks.get(link.follower))
-        else {
+        let (Some(master), Some(follower)) = (clocks.get(link.master), clocks.get(link.follower)) else {
             return;
         };
         let (master, follower) = (master.as_ref(), follower.as_ref());
         if !master.loaded() || !follower.loaded() {
             return;
         }
-        let master_bpm =
-            master_grid.bpm_at(master.position() as f64, self.sample_rate) * master.tempo();
+        let master_bpm = master_grid.bpm_at(master.position() as f64, self.sample_rate) * master.tempo();
         let own_bpm = own_grid.bpm_at(follower.position() as f64, self.sample_rate);
         let kept = link
             .ratio
@@ -213,11 +196,7 @@ impl BeatSync {
         let link = self.link?;
         let partner = self.partner(deck)?;
         let ratio = link.ratio?;
-        let own_ratio = if deck == link.follower {
-            ratio
-        } else {
-            1.0 / ratio
-        };
+        let own_ratio = if deck == link.follower { ratio } else { 1.0 / ratio };
         let own_grid = self.grids.get(deck)?.as_ref()?;
         let partner_grid = self.grids.get(partner)?.as_ref()?;
         let own_beat = own_grid.beat_at(own_at);
@@ -277,11 +256,7 @@ impl Timeline {
                 continue;
             }
             let frames = self.frames.load(Ordering::Relaxed);
-            let positions = self
-                .positions
-                .iter()
-                .map(|p| p.load(Ordering::Relaxed))
-                .collect();
+            let positions = self.positions.iter().map(|p| p.load(Ordering::Relaxed)).collect();
             fence(Ordering::Acquire);
             if self.seq.load(Ordering::Relaxed) == before {
                 return Moment { frames, positions };
@@ -367,19 +342,10 @@ mod tests {
         sync.link.as_mut().unwrap().ratio = Some(1.0);
         let master_at = 100_000.0;
         let target = sync.phase_target(1, 90_000.0, master_at).unwrap();
-        let grids = (
-            sync.grids[0].as_ref().unwrap(),
-            sync.grids[1].as_ref().unwrap(),
-        );
+        let grids = (sync.grids[0].as_ref().unwrap(), sync.grids[1].as_ref().unwrap());
         assert!(beat_offset(grids.0.beat_at(master_at), grids.1.beat_at(target), 1.0).abs() < 1e-9);
-        assert!(
-            (target - 90_000.0).abs() <= 12_000.0,
-            "under half a beat away"
-        );
+        assert!((target - 90_000.0).abs() <= 12_000.0, "under half a beat away");
         let back = sync.phase_target(0, master_at, target).unwrap();
-        assert!(
-            (back - master_at).abs() < 1e-6,
-            "the master is already in phase"
-        );
+        assert!((back - master_at).abs() < 1e-6, "the master is already in phase");
     }
 }

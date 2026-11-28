@@ -23,8 +23,18 @@ const CANCEL_REQUEST: &[u8] = b"cancel\n";
 #[derive(Debug, Clone)]
 pub enum Progress {
     /// `unit` is what `done` and `total` count: `tracks`, or `files` while publishing.
-    Step { phase: String, done: Option<i64>, total: Option<i64>, unit: String, file: Option<FileProgress>, name: String },
-    Done { tracks: i64, playlists: i64 },
+    Step {
+        phase: String,
+        done: Option<i64>,
+        total: Option<i64>,
+        unit: String,
+        file: Option<FileProgress>,
+        name: String,
+    },
+    Done {
+        tracks: i64,
+        playlists: i64,
+    },
 }
 
 /// Through the file being copied (`bytes`) or converted (`milliseconds`).
@@ -85,10 +95,9 @@ pub fn exporter() -> Result<PathBuf> {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     candidates.push(repo.join("native/target/release").join(name));
     candidates.push(repo.join("native/target/debug").join(name));
-    candidates
-        .into_iter()
-        .find(|p| p.is_file())
-        .ok_or_else(|| Error::Other("The USB export program is not built. From the app directory, run npm run build:native.".into()))
+    candidates.into_iter().find(|p| p.is_file()).ok_or_else(|| {
+        Error::Other("The USB export program is not built. From the app directory, run npm run build:native.".into())
+    })
 }
 
 fn analysis_files(share: &Path, track: &ExportTrack) -> Vec<String> {
@@ -139,7 +148,14 @@ fn track_job(share: &Path, track: &ExportTrack) -> Value {
     })
 }
 
-fn job(share: &Path, volume: &Path, bundle: &Bundle, operation: &str, decisions: Option<&Decisions>, convert: Option<&Preset>) -> Result<Value> {
+fn job(
+    share: &Path,
+    volume: &Path,
+    bundle: &Bundle,
+    operation: &str,
+    decisions: Option<&Decisions>,
+    convert: Option<&Preset>,
+) -> Result<Value> {
     let tracks: Vec<Value> = bundle.tracks.iter().map(|t| track_job(share, t)).collect();
     let known: std::collections::HashSet<i64> = bundle.tracks.iter().map(|t| num(&t.id)).collect();
     let mut playlists = Vec::new();
@@ -218,7 +234,9 @@ impl SyncCancel {
 
     fn attach(&self, input: ChildStdin) {
         *self.exporter_input() = Some(input);
-        if self.is_requested() { self.ask_exporter_to_stop(); }
+        if self.is_requested() {
+            self.ask_exporter_to_stop();
+        }
     }
 
     fn ask_exporter_to_stop(&self) {
@@ -267,7 +285,12 @@ pub fn sync_volume(
 }
 
 /// What syncing would change. `convert` must be what the sync will be given.
-pub fn inspect_volume(lib: &Library, volume: &Path, playlist_ids: &[String], convert: Option<&Preset>) -> Result<Inspection> {
+pub fn inspect_volume(
+    lib: &Library,
+    volume: &Path,
+    playlist_ids: &[String],
+    convert: Option<&Preset>,
+) -> Result<Inspection> {
     let publisher = CommandPublisher::discover()?;
     inspect_volume_with_publisher(lib, volume, playlist_ids, convert, &publisher)
 }
@@ -283,7 +306,11 @@ pub fn recover_volume(volume: &Path) -> Result<()> {
 fn mounted(volume: &Path) -> Result<PathBuf> {
     let not_mounted = || Error::Other(format!("Volume is not mounted: {}", volume.display()));
     let volume = volume.canonicalize().map_err(|_| not_mounted())?;
-    if volume.is_dir() { Ok(volume) } else { Err(not_mounted()) }
+    if volume.is_dir() {
+        Ok(volume)
+    } else {
+        Err(not_mounted())
+    }
 }
 
 pub fn inspect_volume_with_publisher(
@@ -297,9 +324,13 @@ pub fn inspect_volume_with_publisher(
     let bundle = lib.export_bundle(playlist_ids)?;
     let body = job(&lib.share_dir(), &volume, &bundle, "inspect", None, convert)?;
     let result = publisher.publish(&body, &|_| {}, &SyncCancel::default())?;
-    serde_json::from_value(result.get("inspection").cloned()
-        .ok_or_else(|| Error::Other("USB inspection returned no diagnostics".into()))?)
-        .map_err(|error| Error::Other(format!("USB inspection response was invalid: {error}")))
+    serde_json::from_value(
+        result
+            .get("inspection")
+            .cloned()
+            .ok_or_else(|| Error::Other("USB inspection returned no diagnostics".into()))?,
+    )
+    .map_err(|error| Error::Other(format!("USB inspection response was invalid: {error}")))
 }
 
 /// A sync whose export has been read from the library, so publishing it needs the library no more.
@@ -362,10 +393,11 @@ fn run(binary: &Path, job: &Path, on_progress: &dyn Fn(Progress), cancel: &SyncC
     // CREATE_NO_WINDOW: es-usb is a console program and the app has no console to share.
     #[cfg(windows)]
     std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
-    let mut child = command
-        .spawn()
-        .map_err(|e| Error::Other(format!("Could not start the USB export program: {e}")))?;
-    if let Some(input) = child.stdin.take() { cancel.attach(input); }
+    let mut child =
+        command.spawn().map_err(|e| Error::Other(format!("Could not start the USB export program: {e}")))?;
+    if let Some(input) = child.stdin.take() {
+        cancel.attach(input);
+    }
     let stdout = child.stdout.take().ok_or_else(|| Error::Other("no output from the USB export program".into()))?;
     let mut stderr = child.stderr.take();
     let drain = std::thread::spawn(move || {
@@ -380,7 +412,12 @@ fn run(binary: &Path, job: &Path, on_progress: &dyn Fn(Progress), cancel: &SyncC
         let Ok(event) = serde_json::from_str::<Value>(line.trim()) else { continue };
         match event.get("event").and_then(Value::as_str) {
             Some("progress") => on_progress(Progress::Step {
-                phase: event.get("phase").and_then(Value::as_str).filter(|p| !p.is_empty()).unwrap_or("reading").to_owned(),
+                phase: event
+                    .get("phase")
+                    .and_then(Value::as_str)
+                    .filter(|p| !p.is_empty())
+                    .unwrap_or("reading")
+                    .to_owned(),
                 done: event.get("done").and_then(Value::as_i64),
                 total: event.get("total").and_then(Value::as_i64),
                 unit: event.get("unit").and_then(Value::as_str).unwrap_or("tracks").to_owned(),
@@ -397,9 +434,11 @@ fn run(binary: &Path, job: &Path, on_progress: &dyn Fn(Progress), cancel: &SyncC
     match (result, error) {
         (Some(result), None) if status.success() => Ok(result),
         (_, error) => {
-            let kind = error.as_ref().and_then(|e| e.get("kind")).and_then(Value::as_str).unwrap_or("export").to_owned();
+            let kind =
+                error.as_ref().and_then(|e| e.get("kind")).and_then(Value::as_str).unwrap_or("export").to_owned();
             let review = error.as_ref().and_then(|e| e.get("review")).filter(|value| !value.is_null()).cloned();
-            let mut message = error.as_ref().and_then(|e| e.get("message")).and_then(Value::as_str).unwrap_or("").to_owned();
+            let mut message =
+                error.as_ref().and_then(|e| e.get("message")).and_then(Value::as_str).unwrap_or("").to_owned();
             if message.is_empty() {
                 message = stderr.trim().to_owned();
             }
@@ -482,7 +521,8 @@ exit 1
     #[test]
     fn a_conversion_travels_as_a_preset_es_usb_can_check_again() {
         let directory = tempfile::tempdir().unwrap();
-        let preset = crate::convert::clean_preset(&json!({ "format": "wav", "bitDepth": 24, "sampleRate": 44100 })).unwrap();
+        let preset =
+            crate::convert::clean_preset(&json!({ "format": "wav", "bitDepth": 24, "sampleRate": 44100 })).unwrap();
         let body = job(directory.path(), directory.path(), &Bundle::default(), "inspect", None, Some(&preset)).unwrap();
         assert_eq!(crate::convert::clean_preset(&body["conversion"]).unwrap(), preset);
     }
@@ -499,16 +539,9 @@ exit 1
         let volume = directory.path().join("STICK");
         std::fs::create_dir_all(&volume).unwrap();
 
-        let result = sync_volume_with_publisher(
-            &library,
-            &volume,
-            &["playlist-1".into()],
-            None,
-            None,
-            &FakePublisher,
-            &|_| {},
-        )
-        .unwrap();
+        let result =
+            sync_volume_with_publisher(&library, &volume, &["playlist-1".into()], None, None, &FakePublisher, &|_| {})
+                .unwrap();
 
         assert_eq!((result.tracks, result.playlists), (0, 1));
     }
@@ -543,7 +576,8 @@ exit 1
         let library = Library::open_live(&database_path, Guard::Off).unwrap();
         let volume = directory.path().join("STICK");
         std::fs::create_dir_all(&volume).unwrap();
-        let review = inspect_volume_with_publisher(&library, &volume, &["playlist-1".into()], None, &FakePublisher).unwrap();
+        let review =
+            inspect_volume_with_publisher(&library, &volume, &["playlist-1".into()], None, &FakePublisher).unwrap();
         assert_eq!(review.token, "fixture");
         assert!(review.diagnostics.is_empty());
     }

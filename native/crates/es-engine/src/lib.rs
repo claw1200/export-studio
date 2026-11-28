@@ -7,8 +7,8 @@ pub mod convert;
 pub mod device_import;
 pub mod import;
 pub mod library;
-pub mod relocate;
 pub mod place;
+pub mod relocate;
 pub mod sync;
 
 pub use es_convert::inspect;

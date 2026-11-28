@@ -137,7 +137,9 @@ pub fn track_detail(lib: &Library, share: &Path, id: &str) -> Result<Detail> {
     let ex2 = tags(share, relative, "2EX");
 
     let rgb = ext.as_ref().and_then(decode::rgb);
-    let bands = |kind: &str| ex2.as_ref().and_then(|t| decode::bands(t, kind)).map(|b| Bands { length: b.length, bands: b64(&b.bands) });
+    let bands = |kind: &str| {
+        ex2.as_ref().and_then(|t| decode::bands(t, kind)).map(|b| Bands { length: b.length, bands: b64(&b.bands) })
+    };
     let waveform = Waveform {
         rate: DETAIL_RATE,
         three_band: bands("PWV7"),
@@ -145,7 +147,11 @@ pub fn track_detail(lib: &Library, share: &Path, id: &str) -> Result<Detail> {
         mono: if rgb.is_some() {
             None
         } else {
-            ext.as_ref().and_then(decode::mono).map(|m| Mono { length: m.length, heights: b64(&m.heights), whiteness: b64(&m.whiteness) })
+            ext.as_ref().and_then(decode::mono).map(|m| Mono {
+                length: m.length,
+                heights: b64(&m.heights),
+                whiteness: b64(&m.whiteness),
+            })
         },
         rgb: rgb.map(|r| Colour { length: r.length, heights: b64(&r.heights), colors: b64(&r.colors) }),
     };
@@ -153,7 +159,11 @@ pub fn track_detail(lib: &Library, share: &Path, id: &str) -> Result<Detail> {
         id: id.to_owned(),
         file_exists: Path::new(&files.folder_path).is_file(),
         cues: cues(lib, id, ext.as_ref())?,
-        beatgrid: dat.as_ref().and_then(decode::beatgrid).map(|g| Grid { times: g.times, beats: g.beats, bpms: g.bpms }),
+        beatgrid: dat.as_ref().and_then(decode::beatgrid).map(|g| Grid {
+            times: g.times,
+            beats: g.beats,
+            bpms: g.bpms,
+        }),
         waveform,
     })
 }
@@ -215,7 +225,14 @@ impl Preview {
             heights: o.colour_length.map(|_| b64(&o.heights)),
             colors: o.colour_length.map(|_| b64(&o.colors)),
         });
-        Self { id: id.to_owned(), memory, hot, phrase: ext.is_some_and(|e| e.first(rb_anlz::PHRASE_TAG).is_some()), cues, waveform }
+        Self {
+            id: id.to_owned(),
+            memory,
+            hot,
+            phrase: ext.is_some_and(|e| e.first(rb_anlz::PHRASE_TAG).is_some()),
+            cues,
+            waveform,
+        }
     }
 }
 

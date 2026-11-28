@@ -45,19 +45,9 @@ impl Attacks {
             }
             db.push((10.0 * (energy / chunk.len() as f64 + 1e-10).log10()) as f32);
         }
-        let rise = (0..db.len())
-            .map(|j| {
-                if j < RISE_SPAN {
-                    0.0
-                } else {
-                    (db[j] - db[j - RISE_SPAN]).max(0.0)
-                }
-            })
-            .collect();
-        Self {
-            rise,
-            step: block as f64 / sample_rate,
-        }
+        let rise =
+            (0..db.len()).map(|j| if j < RISE_SPAN { 0.0 } else { (db[j] - db[j - RISE_SPAN]).max(0.0) }).collect();
+        Self { rise, step: block as f64 / sample_rate }
     }
 
     /// The start of the strongest transient within `reach` seconds of `time`.
@@ -69,9 +59,10 @@ impl Attacks {
         if lo >= hi {
             return None;
         }
-        let (peak_at, peak) = (lo..=hi)
-            .map(|j| (j, self.rise[j]))
-            .fold((lo, 0.0f32), |best, cur| if cur.1 > best.1 { cur } else { best });
+        let (peak_at, peak) =
+            (lo..=hi)
+                .map(|j| (j, self.rise[j]))
+                .fold((lo, 0.0f32), |best, cur| if cur.1 > best.1 { cur } else { best });
         if peak < MIN_RISE_DB {
             return None;
         }
@@ -83,9 +74,6 @@ impl Attacks {
         }
         // The rise at step j spans the RISE_SPAN steps before it, so the hit starts there.
         let start = onset.saturating_sub(RISE_SPAN - 1);
-        Some(Hit {
-            time: start as f64 * self.step + BEAT_AFTER_ONSET,
-            strength: peak,
-        })
+        Some(Hit { time: start as f64 * self.step + BEAT_AFTER_ONSET, strength: peak })
     }
 }

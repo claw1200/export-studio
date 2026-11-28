@@ -49,7 +49,8 @@ pub fn same_fingerprint(path: &Path, size: Option<i64>, mtime: Option<&str>) -> 
     }
     let hinted_time: u128 = mtime?.trim().parse().ok()?;
     let meta = path.metadata().ok()?;
-    (i64::try_from(meta.len()).ok()? == hinted && nanos(&meta)? == hinted_time).then(|| (meta.len(), Some(hinted_time.to_string())))
+    (i64::try_from(meta.len()).ok()? == hinted && nanos(&meta)? == hinted_time)
+        .then(|| (meta.len(), Some(hinted_time.to_string())))
 }
 
 /// Header measurements for one local file. Missing and unreadable files have no audio.
@@ -137,7 +138,12 @@ fn wav(file: &mut File, size: u64) -> std::io::Result<Option<Audio>> {
                 if format == 0xFFFE && raw.len() >= 26 {
                     format = u16::from_le_bytes([raw[24], raw[25]]);
                 }
-                found = Some((format, u32::from(u16::from_le_bytes([raw[2], raw[3]])), le32(&raw[4..8]), u32::from(u16::from_le_bytes([raw[14], raw[15]]))));
+                found = Some((
+                    format,
+                    u32::from(u16::from_le_bytes([raw[2], raw[3]])),
+                    le32(&raw[4..8]),
+                    u32::from(u16::from_le_bytes([raw[14], raw[15]])),
+                ));
             }
         } else if &head[..4] == b"data" {
             break;
@@ -148,7 +154,14 @@ fn wav(file: &mut File, size: u64) -> std::io::Result<Option<Audio>> {
         }
         file.seek(SeekFrom::Start(next))?;
     }
-    Ok(found.map(|(format, channels, rate, bits)| Audio { kind: "WAV", sample_rate: rate, bit_depth: bits, channels, bitrate: 0, encoding: pcm(format) }))
+    Ok(found.map(|(format, channels, rate, bits)| Audio {
+        kind: "WAV",
+        sample_rate: rate,
+        bit_depth: bits,
+        channels,
+        bitrate: 0,
+        encoding: pcm(format),
+    }))
 }
 
 fn extended(raw: &[u8]) -> f64 {
@@ -161,7 +174,11 @@ fn extended(raw: &[u8]) -> f64 {
         return 0.0;
     }
     let value = mantissa as f64 / (1u64 << 63) as f64 * 2f64.powi(exponent - 16383);
-    if raw[0] & 0x80 != 0 { -value } else { value }
+    if raw[0] & 0x80 != 0 {
+        -value
+    } else {
+        value
+    }
 }
 
 fn aiff(file: &mut File, size: u64, compressed: bool) -> std::io::Result<Option<Audio>> {
@@ -185,14 +202,22 @@ fn aiff(file: &mut File, size: u64, compressed: bool) -> std::io::Result<Option<
             let channels = u32::from(u16::from_be_bytes([raw[0], raw[1]]));
             let bits = u32::from(u16::from_be_bytes([raw[6], raw[7]]));
             let rate = extended(&raw[8..18]);
-            let compression: Vec<u8> = if compressed && raw.len() >= 22 { raw[18..22].to_ascii_uppercase() } else { b"NONE".to_vec() };
+            let compression: Vec<u8> =
+                if compressed && raw.len() >= 22 { raw[18..22].to_ascii_uppercase() } else { b"NONE".to_vec() };
             let format = match compression.as_slice() {
                 b"NONE" | b"TWOS" | b"SOWT" | b"RAW " => 1,
                 b"FL32" | b"FL64" => 3,
                 _ => 0,
             };
             let rate = if rate == 0.0 { 0 } else { rate.round_ties_even() as u32 };
-            return Ok(Some(Audio { kind: "AIFF", sample_rate: rate, bit_depth: bits, channels, bitrate: 0, encoding: pcm(format) }));
+            return Ok(Some(Audio {
+                kind: "AIFF",
+                sample_rate: rate,
+                bit_depth: bits,
+                channels,
+                bitrate: 0,
+                encoding: pcm(format),
+            }));
         }
         let next = pos + chunk + (chunk & 1);
         if chunk == 0 || next <= pos {
@@ -264,7 +289,9 @@ fn mp4_walk(file: &mut File, end: u64, depth: u32, size: u64, out: &mut Mp4) -> 
             return Ok(());
         }
         match &kind {
-            b"moov" | b"trak" | b"mdia" | b"minf" | b"stbl" if depth < 6 => mp4_walk(file, box_end, depth + 1, size, out)?,
+            b"moov" | b"trak" | b"mdia" | b"minf" | b"stbl" if depth < 6 => {
+                mp4_walk(file, box_end, depth + 1, size, out)?
+            }
             b"mdhd" => {
                 let version = read_exact_or_less(file, 1)?;
                 let skip = if version.first() == Some(&0) { 12 } else { 20 };
@@ -323,7 +350,10 @@ fn mp3(file: &mut File, size: u64) -> std::io::Result<Option<Audio>> {
     let lead = read_exact_or_less(file, 10)?;
     let mut offset = 0u64;
     if lead.starts_with(b"ID3") && lead.len() >= 10 {
-        let tag = (u64::from(lead[6] & 0x7F) << 21) | (u64::from(lead[7] & 0x7F) << 14) | (u64::from(lead[8] & 0x7F) << 7) | u64::from(lead[9] & 0x7F);
+        let tag = (u64::from(lead[6] & 0x7F) << 21)
+            | (u64::from(lead[7] & 0x7F) << 14)
+            | (u64::from(lead[8] & 0x7F) << 7)
+            | u64::from(lead[9] & 0x7F);
         offset = 10 + tag;
         if lead[5] & 0x10 != 0 {
             offset += 10;
@@ -345,7 +375,14 @@ fn mp3(file: &mut File, size: u64) -> std::io::Result<Option<Audio>> {
     const V2: [u32; 16] = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0];
     let bitrate = if version == 3 { V1[bitrate_index] } else { V2[bitrate_index] };
     let channels = if (frame[3] >> 6) & 3 == 3 { 1 } else { 2 };
-    Ok(Some(Audio { kind: "MP3", sample_rate: RATES[version][rate_index], bit_depth: 0, channels, bitrate, encoding: "mp3" }))
+    Ok(Some(Audio {
+        kind: "MP3",
+        sample_rate: RATES[version][rate_index],
+        bit_depth: 0,
+        channels,
+        bitrate,
+        encoding: "mp3",
+    }))
 }
 
 #[cfg(test)]
@@ -376,7 +413,10 @@ mod tests {
         std::fs::write(&path, wav_bytes(3, 32)).unwrap();
         let found = inspect_file(&path);
         let audio = found.audio.unwrap();
-        assert_eq!((audio.kind, audio.sample_rate, audio.bit_depth, audio.channels, audio.encoding), ("WAV", 44100, 32, 2, "float"));
+        assert_eq!(
+            (audio.kind, audio.sample_rate, audio.bit_depth, audio.channels, audio.encoding),
+            ("WAV", 44100, 32, 2, "float")
+        );
         assert!(found.issues.is_empty());
     }
 

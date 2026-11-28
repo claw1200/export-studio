@@ -115,9 +115,7 @@ impl DeckClock {
 
     /// Always before the first block of the new generation is pushed.
     pub fn bump_generation(&self) -> u32 {
-        self.generation
-            .fetch_add(1, Ordering::AcqRel)
-            .wrapping_add(1)
+        self.generation.fetch_add(1, Ordering::AcqRel).wrapping_add(1)
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -180,10 +178,7 @@ impl DeckClock {
 
     /// Makes `request` the only load whose result may be installed, and empties the deck.
     pub fn request_load(&self, request: u64) {
-        let _gate = self
-            .load_gate
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let _gate = self.load_gate.lock().unwrap_or_else(PoisonError::into_inner);
         self.requested_load.store(request, Ordering::Release);
         self.load_id.store(0, Ordering::Release);
         self.loaded.store(false, Ordering::Release);
@@ -192,10 +187,7 @@ impl DeckClock {
 
     /// Publishes a finished load unless a newer one was asked for meanwhile.
     pub fn install_load(&self, request: u64) -> bool {
-        let _gate = self
-            .load_gate
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let _gate = self.load_gate.lock().unwrap_or_else(PoisonError::into_inner);
         if self.requested_load() != request {
             return false;
         }
@@ -206,10 +198,7 @@ impl DeckClock {
 
     /// Whether a failed load still belongs to the current request.
     pub fn owns_load(&self, request: u64) -> bool {
-        let _gate = self
-            .load_gate
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let _gate = self.load_gate.lock().unwrap_or_else(PoisonError::into_inner);
         self.requested_load() == request
     }
 
@@ -241,8 +230,7 @@ impl DeckClock {
     }
 
     pub fn set_looping(&self, on: bool) {
-        self.looping
-            .store(on && self.loop_range().is_some(), Ordering::Release);
+        self.looping.store(on && self.loop_range().is_some(), Ordering::Release);
     }
 
     /// The loop the deck is inside, if any.

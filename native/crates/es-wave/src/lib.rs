@@ -46,9 +46,7 @@ pub fn wave_rates(length: usize, sample_rate: f64) -> WaveRates {
 fn scaled_rates(length: usize, sample_rate: f64, quality: u32) -> WaveRates {
     let scale = quality.clamp(1, 100) as f64 / 100.0;
     let duration = length as f64 / sample_rate;
-    let band_rate = (BAND_RATE * scale)
-        .min(sample_rate)
-        .min(MAX_BAND_FRAMES / duration);
+    let band_rate = (BAND_RATE * scale).min(sample_rate).min(MAX_BAND_FRAMES / duration);
     let env_rate = (ENVELOPE_RATE * scale).min(MAX_ENVELOPE_SAMPLES / duration);
     let band_step = sample_rate / band_rate;
     let env_step = sample_rate / env_rate;
@@ -87,21 +85,8 @@ pub struct ScanSpec {
 
 /// Splits the scan into up to `parts` independent parts, each starting its band filters early
 /// enough to settle before its first entry.
-pub fn plan_wave(
-    length: usize,
-    sample_rate: f64,
-    parts: usize,
-    want_bands: bool,
-    want_env: bool,
-) -> Vec<ScanSpec> {
-    plan_with(
-        length,
-        sample_rate,
-        parts,
-        want_bands,
-        want_env,
-        wave_rates(length, sample_rate),
-    )
+pub fn plan_wave(length: usize, sample_rate: f64, parts: usize, want_bands: bool, want_env: bool) -> Vec<ScanSpec> {
+    plan_with(length, sample_rate, parts, want_bands, want_env, wave_rates(length, sample_rate))
 }
 
 fn plan_with(
@@ -126,31 +111,12 @@ fn plan_with(
         if band.1 == 0 && env.1 == 0 {
             continue;
         }
-        let band_start = if band.1 > 0 {
-            (band.0 as f64 * rates.band_step).floor() as usize
-        } else {
-            sample0
-        };
-        let band_filter_from = if band.1 > 0 {
-            band_start.saturating_sub(if band.0 == 0 { 0 } else { warmup })
-        } else {
-            band_start
-        };
-        let band_end = if band.1 > 0 {
-            frame_end(band.0 + band.1 - 1, rates.band_step, length)
-        } else {
-            sample0
-        };
-        let env_start = if env.1 > 0 {
-            (env.0 as f64 * rates.env_step).floor() as usize
-        } else {
-            band_filter_from
-        };
-        let env_end = if env.1 > 0 {
-            frame_end(env.0 + env.1 - 1, rates.env_step, length)
-        } else {
-            band_end
-        };
+        let band_start = if band.1 > 0 { (band.0 as f64 * rates.band_step).floor() as usize } else { sample0 };
+        let band_filter_from =
+            if band.1 > 0 { band_start.saturating_sub(if band.0 == 0 { 0 } else { warmup }) } else { band_start };
+        let band_end = if band.1 > 0 { frame_end(band.0 + band.1 - 1, rates.band_step, length) } else { sample0 };
+        let env_start = if env.1 > 0 { (env.0 as f64 * rates.env_step).floor() as usize } else { band_filter_from };
+        let env_end = if env.1 > 0 { frame_end(env.0 + env.1 - 1, rates.env_step, length) } else { band_end };
         specs.push(ScanSpec {
             origin: band_filter_from.min(env_start),
             to: band_end.max(env_end),
@@ -232,9 +198,7 @@ impl Biquad {
     }
 
     fn run(&mut self, x: f64) -> f64 {
-        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2
-            - self.a1 * self.y1
-            - self.a2 * self.y2;
+        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2 - self.a1 * self.y1 - self.a2 * self.y2;
         self.x2 = self.x1;
         self.x1 = x;
         self.y2 = self.y1;
@@ -263,10 +227,7 @@ pub struct ScanOut {
 /// Scans one part. `samples` are the mono samples from `spec.origin` to `spec.to`.
 pub fn scan_part(spec: &ScanSpec, samples: &[f32]) -> ScanOut {
     let at = |index: usize| f64::from(samples[index - spec.origin]);
-    let mut out = ScanOut {
-        bands: vec![0; spec.band_frames * 3],
-        ..ScanOut::default()
-    };
+    let mut out = ScanOut { bands: vec![0; spec.band_frames * 3], ..ScanOut::default() };
     if spec.band_frames > 0 {
         let mut low = Biquad::new(Pass::Low, spec.sample_rate, LOW_HZ);
         let mut mid_high = Biquad::new(Pass::High, spec.sample_rate, LOW_HZ);
@@ -292,17 +253,9 @@ pub fn scan_part(spec: &ScanSpec, samples: &[f32]) -> ScanOut {
                 high_peak = high_peak.max(high.run(v).abs());
                 index += 1;
             }
-            let quantised = [
-                quant_band(low_peak),
-                quant_band(mid_peak),
-                quant_band(high_peak),
-            ];
+            let quantised = [quant_band(low_peak), quant_band(mid_peak), quant_band(high_peak)];
             out.bands[k * 3..k * 3 + 3].copy_from_slice(&quantised);
-            out.band_max = out
-                .band_max
-                .max(quantised[0])
-                .max(quantised[1])
-                .max(quantised[2]);
+            out.band_max = out.band_max.max(quantised[0]).max(quantised[1]).max(quantised[2]);
         }
     }
 
@@ -353,46 +306,19 @@ pub fn build(mono: &[f32], sample_rate: f64, parts: usize, want_bands: bool) -> 
     build_scaled(mono, sample_rate, parts, want_bands, 100)
 }
 
-fn build_scaled(
-    mono: &[f32],
-    sample_rate: f64,
-    parts: usize,
-    want_bands: bool,
-    quality: u32,
-) -> Option<Wave> {
+fn build_scaled(mono: &[f32], sample_rate: f64, parts: usize, want_bands: bool, quality: u32) -> Option<Wave> {
     let rates = scaled_rates(mono.len(), sample_rate, quality);
     if rates.env_frames < 2 {
         return None;
     }
     let want_bands = want_bands && rates.band_frames >= 2;
-    let specs = plan_with(
-        mono.len(),
-        sample_rate,
-        parts.max(1),
-        want_bands,
-        true,
-        rates,
-    );
-    let scanned: Vec<ScanOut> = specs
-        .par_iter()
-        .map(|spec| scan_part(spec, &mono[spec.origin..spec.to]))
-        .collect();
+    let specs = plan_with(mono.len(), sample_rate, parts.max(1), want_bands, true, rates);
+    let scanned: Vec<ScanOut> = specs.par_iter().map(|spec| scan_part(spec, &mono[spec.origin..spec.to])).collect();
 
-    let data: Vec<i16> = scanned
-        .iter()
-        .flat_map(|part| part.env.iter().copied())
-        .collect();
-    let peak = scanned
-        .iter()
-        .map(|part| part.env_peak)
-        .max()
-        .unwrap_or(0)
-        .max(1);
+    let data: Vec<i16> = scanned.iter().flat_map(|part| part.env.iter().copied()).collect();
+    let peak = scanned.iter().map(|part| part.env_peak).max().unwrap_or(0).max(1);
     let bands = want_bands.then(|| {
-        let mut bands: Vec<u8> = scanned
-            .iter()
-            .flat_map(|part| part.bands.iter().copied())
-            .collect();
+        let mut bands: Vec<u8> = scanned.iter().flat_map(|part| part.bands.iter().copied()).collect();
         let max = scanned.iter().map(|part| part.band_max).max().unwrap_or(0);
         normalize_bands(&mut bands, max);
         bands
@@ -401,21 +327,14 @@ fn build_scaled(
         rate: reported_rate(rates.env_frames, mono.len(), sample_rate),
         data,
         peak,
-        band_rate: if want_bands {
-            reported_rate(rates.band_frames, mono.len(), sample_rate)
-        } else {
-            0.0
-        },
+        band_rate: if want_bands { reported_rate(rates.band_frames, mono.len(), sample_rate) } else { 0.0 },
         bands,
     })
 }
 
 /// Left and right averaged, as the renderer mixed them. Mono sources come out unchanged.
 pub fn mix_mono(interleaved: &[f32]) -> Vec<f32> {
-    interleaved
-        .chunks_exact(2)
-        .map(|frame| ((f64::from(frame[0]) + f64::from(frame[1])) * 0.5) as f32)
-        .collect()
+    interleaved.chunks_exact(2).map(|frame| ((f64::from(frame[0]) + f64::from(frame[1])) * 0.5) as f32).collect()
 }
 
 /// Decodes `path` at its own sample rate, through the same decoder the deck plays, and analyses it.
@@ -432,18 +351,8 @@ pub fn analyse(path: &Path, want_bands: bool, quality: u32) -> Result<Option<Wav
         }
         mono.extend(mix_mono(&buffer[..frames * 2]));
     }
-    let quality = if quality == 0 {
-        100
-    } else {
-        quality.clamp(1, 100)
-    };
-    Ok(build_scaled(
-        &mono,
-        rate,
-        rayon::current_num_threads(),
-        want_bands,
-        quality,
-    ))
+    let quality = if quality == 0 { 100 } else { quality.clamp(1, 100) };
+    Ok(build_scaled(&mono, rate, rayon::current_num_threads(), want_bands, quality))
 }
 
 #[cfg(test)]

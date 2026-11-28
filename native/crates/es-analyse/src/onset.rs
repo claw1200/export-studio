@@ -70,11 +70,7 @@ pub fn flux(stft: &Stft, lo_hz: f64, hi_hz: f64) -> Envelope {
         raw.push(sum);
     }
     let values = normalise(&subtract_local_mean(&raw, MEAN_REACH));
-    Envelope {
-        values,
-        rate: stft.sample_rate / stft.hop as f64,
-        start: (stft.frame / 2) as f64 / stft.sample_rate,
-    }
+    Envelope { values, rate: stft.sample_rate / stft.hop as f64, start: (stft.frame / 2) as f64 / stft.sample_rate }
 }
 
 pub fn subtract_local_mean(raw: &[f32], reach: usize) -> Vec<f32> {
@@ -104,9 +100,7 @@ pub fn normalise(values: &[f32]) -> Vec<f32> {
 /// Smooths with a small triangular kernel, so a grid point a frame off still finds its onset.
 pub fn smooth(env: &Envelope, reach: usize) -> Envelope {
     let n = env.values.len();
-    let weights: Vec<f32> = (0..=reach * 2)
-        .map(|i| (reach + 1) as f32 - (i as f32 - reach as f32).abs())
-        .collect();
+    let weights: Vec<f32> = (0..=reach * 2).map(|i| (reach + 1) as f32 - (i as f32 - reach as f32).abs()).collect();
     let total: f32 = weights.iter().sum();
     let values = (0..n)
         .map(|i| {
@@ -120,9 +114,5 @@ pub fn smooth(env: &Envelope, reach: usize) -> Envelope {
             sum / total
         })
         .collect();
-    Envelope {
-        values,
-        rate: env.rate,
-        start: env.start,
-    }
+    Envelope { values, rate: env.rate, start: env.start }
 }

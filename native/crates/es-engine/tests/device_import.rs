@@ -3,9 +3,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use es_engine::device_import::{import_device, preview, Options, PlaylistPolicy, TrackStatus};
 use rb_library::fixture::{self, Rows};
 use rb_library::{Guard, Library};
-use es_engine::device_import::{import_device, preview, Options, PlaylistPolicy, TrackStatus};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -112,7 +112,8 @@ fn tracks_are_copied_imported_with_their_cues_and_put_in_new_playlists() {
     let tracks = w.lib.tracks(None).unwrap();
     let first = tracks.iter().find(|t| t.title == "First").unwrap();
     assert_eq!((first.artist.as_str(), first.bpm_x100, first.rating), ("Alpha", 12800, 4));
-    let mut cues: Vec<_> = w.lib.cues(&first.id).unwrap().into_iter().map(|c| (c.kind, c.start_ms, c.comment)).collect();
+    let mut cues: Vec<_> =
+        w.lib.cues(&first.id).unwrap().into_iter().map(|c| (c.kind, c.start_ms, c.comment)).collect();
     cues.sort();
     assert_eq!(cues, [(0, 500, String::new()), (1, 100, "drop".to_owned())]);
 
@@ -129,7 +130,14 @@ fn with_histories(w: &World) -> rb_device::Device {
     let mut device = rb_device::read::read(&w.volume).unwrap().unwrap();
     let id = |title: &str| device.tracks.iter().find(|t| t.title == title).unwrap().export_id;
     let (first, second) = (id("First"), id("Second"));
-    let history = |export_id: i64, name: &str, attribute: i64, track_ids: Vec<i64>| rb_device::History { export_id, name: name.into(), parent_id: 0, seq: export_id, attribute, track_ids };
+    let history = |export_id: i64, name: &str, attribute: i64, track_ids: Vec<i64>| rb_device::History {
+        export_id,
+        name: name.into(),
+        parent_id: 0,
+        seq: export_id,
+        attribute,
+        track_ids,
+    };
     device.histories = vec![
         history(1, "2024", 1, Vec::new()),
         history(2, "HISTORY 001", 0, vec![second, first, second]),
@@ -151,7 +159,14 @@ fn history_titles(w: &World, name: &str) -> Vec<Vec<String>> {
         .unwrap()
         .into_iter()
         .filter(|h| h.name == name)
-        .map(|h| w.lib.history_track_ids(&h.id).unwrap().iter().map(|id| tracks.iter().find(|t| &t.id == id).unwrap().title.clone()).collect())
+        .map(|h| {
+            w.lib
+                .history_track_ids(&h.id)
+                .unwrap()
+                .iter()
+                .map(|id| tracks.iter().find(|t| &t.id == id).unwrap().title.clone())
+                .collect()
+        })
         .collect()
 }
 
@@ -203,7 +218,10 @@ fn a_stick_with_only_histories_can_be_imported() {
     device.playlists.clear();
     let out = import_with(&mut w, &device, PlaylistPolicy::CreateNew);
     assert_eq!((out.histories, out.playlists, out.copied), (2, 0, 2));
-    assert!(w.lib.playlists().unwrap().iter().all(|n| !n.name.starts_with("Imported from ")), "no empty wrapper folder");
+    assert!(
+        w.lib.playlists().unwrap().iter().all(|n| !n.name.starts_with("Imported from ")),
+        "no empty wrapper folder"
+    );
 
     let mut empty = with_histories(&w);
     empty.playlists.clear();
@@ -234,7 +252,10 @@ fn a_track_removed_from_a_playlist_is_not_put_back_by_the_default_policy() {
     run(&mut w, PlaylistPolicy::SkipExisting);
     let members = w.lib.playlist_track_ids(&set.id).unwrap();
     assert_eq!(members.len(), 1, "the playlist keeps only what it had");
-    assert!(w.lib.tracks(None).unwrap().iter().any(|t| t.title == "First"), "the track itself is back in the collection");
+    assert!(
+        w.lib.tracks(None).unwrap().iter().any(|t| t.title == "First"),
+        "the track itself is back in the collection"
+    );
 }
 
 #[test]
@@ -268,7 +289,11 @@ fn a_track_from_another_library_is_never_mistaken_for_one_here() {
         conn.execute("UPDATE djmdProperty SET DBID = '9999'", []).unwrap();
         let path = w.dir.path().join("elsewhere.wav");
         wav(&path, 1);
-        conn.execute("INSERT INTO djmdContent (ID, Title, FolderPath) VALUES ('101', 'Unrelated', ?1)", [path.to_string_lossy().into_owned()]).unwrap();
+        conn.execute(
+            "INSERT INTO djmdContent (ID, Title, FolderPath) VALUES ('101', 'Unrelated', ?1)",
+            [path.to_string_lossy().into_owned()],
+        )
+        .unwrap();
         Rows(&conn).playlist("1", "x", 0).unwrap();
     }
     let device = rb_device::read::read(&w.volume).unwrap().unwrap();
@@ -283,7 +308,11 @@ fn a_track_this_library_exported_is_reused_not_copied() {
     wav(&path, 1);
     {
         let conn = fixture::connect(w.lib.path()).unwrap();
-        conn.execute("INSERT INTO djmdContent (ID, Title, FolderPath) VALUES ('101', 'Mine', ?1)", [path.to_string_lossy().into_owned()]).unwrap();
+        conn.execute(
+            "INSERT INTO djmdContent (ID, Title, FolderPath) VALUES ('101', 'Mine', ?1)",
+            [path.to_string_lossy().into_owned()],
+        )
+        .unwrap();
     }
     let out = run(&mut w, PlaylistPolicy::SkipExisting);
     assert_eq!((out.reused, out.copied), (1, 1));
@@ -377,7 +406,10 @@ fn both_usb_libraries_preserve_selected_and_unset_hot_cue_colours() {
         let track = w.lib.tracks(None).unwrap().into_iter().find(|t| t.title == "First").unwrap();
         let cues = es_index::detail::cues_for(&w.lib, &share, &track.id).unwrap();
         let selected = cues.iter().find(|c| c.slot == 1).unwrap();
-        assert_eq!((selected.color_index, selected.color_code, selected.rgb.as_deref()), (Some(46), Some(46), Some("#ff005c")));
+        assert_eq!(
+            (selected.color_index, selected.color_code, selected.rgb.as_deref()),
+            (Some(46), Some(46), Some("#ff005c"))
+        );
         let unset = cues.iter().find(|c| c.slot == 2).unwrap();
         assert_eq!((unset.color_index, unset.color_code, unset.rgb.as_deref()), (None, Some(0), Some("#00c4ff")));
         let slot_d = cues.iter().find(|c| c.slot == 5).unwrap();
@@ -387,7 +419,10 @@ fn both_usb_libraries_preserve_selected_and_unset_hot_cue_colours() {
         w.lib.write(|tx| tx.set_cue_color(&track.id, &selected.id, None)).unwrap();
         let previews = es_index::detail::previews(&w.lib, &share, &[track.id]).unwrap();
         let cleared = previews[0].cues.iter().find(|c| c.slot == 1).unwrap();
-        assert_eq!((cleared.color_index, cleared.color_code, cleared.rgb.as_deref()), (None, Some(46), Some("#ff005c")));
+        assert_eq!(
+            (cleared.color_index, cleared.color_code, cleared.rgb.as_deref()),
+            (None, Some(46), Some("#ff005c"))
+        );
         let slot_d = previews[0].cues.iter().find(|c| c.slot == 5).unwrap();
         assert_eq!(slot_d.color_code, Some(8));
     }

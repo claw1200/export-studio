@@ -55,17 +55,8 @@ pub type DeckId = usize;
 
 #[derive(Debug, Clone)]
 pub enum DeckEvent {
-    Loaded {
-        deck: DeckId,
-        load_id: u64,
-        total_frames: u64,
-        sample_rate: u32,
-    },
-    Error {
-        deck: DeckId,
-        load_id: u64,
-        message: String,
-    },
+    Loaded { deck: DeckId, load_id: u64, total_frames: u64, sample_rate: u32 },
+    Error { deck: DeckId, load_id: u64, message: String },
 }
 
 /// Receives deck events. Called from a decode thread, never from the audio callback.
@@ -101,9 +92,7 @@ const ISOLATOR_OFF: f32 = -1.0;
 impl Engine {
     /// `decks` decks on the system's default output.
     pub fn new(decks: usize, events: &EventSink) -> Result<Self> {
-        Self::with_sink(decks, events, |render| {
-            Ok(Arc::new(CpalSink::open(render)?) as Arc<dyn Sink>)
-        })
+        Self::with_sink(decks, events, |render| Ok(Arc::new(CpalSink::open(render)?) as Arc<dyn Sink>))
     }
 
     /// The same engine on a sink of the caller's choosing, which is how it is tested.
@@ -111,8 +100,7 @@ impl Engine {
     where
         F: FnOnce(Render) -> Result<Arc<dyn Sink>>,
     {
-        let clocks: Vec<Arc<DeckClock>> =
-            (0..decks).map(|_| Arc::new(DeckClock::default())).collect();
+        let clocks: Vec<Arc<DeckClock>> = (0..decks).map(|_| Arc::new(DeckClock::default())).collect();
         let callback_clocks: Vec<Arc<DeckClock>> = clocks.iter().map(Arc::clone).collect();
         let sync = Arc::new(Mutex::new(BeatSync::new(decks, 0)));
         let callback_sync = Arc::clone(&sync);
@@ -132,13 +120,9 @@ impl Engine {
 
         let master = Arc::new(AtomicU32::new(1.0_f32.to_bits()));
         let level = Arc::clone(&master);
-        let gains: Vec<Arc<AtomicU32>> = (0..decks)
-            .map(|_| Arc::new(AtomicU32::new(1.0_f32.to_bits())))
-            .collect();
+        let gains: Vec<Arc<AtomicU32>> = (0..decks).map(|_| Arc::new(AtomicU32::new(1.0_f32.to_bits()))).collect();
         let deck_levels: Vec<Arc<AtomicU32>> = gains.iter().map(Arc::clone).collect();
-        let lows: Vec<Arc<AtomicU32>> = (0..decks)
-            .map(|_| Arc::new(AtomicU32::new(ISOLATOR_OFF.to_bits())))
-            .collect();
+        let lows: Vec<Arc<AtomicU32>> = (0..decks).map(|_| Arc::new(AtomicU32::new(ISOLATOR_OFF.to_bits()))).collect();
         let deck_lows: Vec<Arc<AtomicU32>> = lows.iter().map(Arc::clone).collect();
         let mut isolators: Vec<Option<isolator::Isolator>> = (0..decks).map(|_| None).collect();
         let rate = Arc::new(AtomicU32::new(0));
@@ -156,12 +140,8 @@ impl Engine {
             if let Ok(mut sync) = callback_sync.try_lock() {
                 sync.follow_tempo(&callback_clocks);
             }
-            for ((((reader, level), smooth), low), isolator) in readers
-                .iter_mut()
-                .zip(&deck_levels)
-                .zip(&mut deck_smoothed)
-                .zip(&deck_lows)
-                .zip(&mut isolators)
+            for ((((reader, level), smooth), low), isolator) in
+                readers.iter_mut().zip(&deck_levels).zip(&mut deck_smoothed).zip(&deck_lows).zip(&mut isolators)
             {
                 let target = f32::from_bits(level.load(Ordering::Relaxed));
                 let smooth = smooth.get_or_insert_with(|| Smoothed::new(target, sample_rate, 10.0));
@@ -179,9 +159,8 @@ impl Engine {
                 }
             }
             let target = f32::from_bits(level.load(Ordering::Relaxed));
-            let smoothed = smoothed.get_or_insert_with(|| {
-                Smoothed::new(target, callback_rate.load(Ordering::Relaxed), 10.0)
-            });
+            let smoothed =
+                smoothed.get_or_insert_with(|| Smoothed::new(target, callback_rate.load(Ordering::Relaxed), 10.0));
             for frame in out.chunks_exact_mut(2) {
                 let gain = smoothed.step(target);
                 frame[0] = (frame[0] * gain).clamp(-1.0, 1.0);
@@ -204,24 +183,9 @@ impl Engine {
         let mut handles = Vec::with_capacity(decks);
         for (id, (clock, producer)) in clocks.into_iter().zip(producers).enumerate() {
             clock.set_sample_rate(sample_rate);
-            handles.push(deck::spawn(
-                id,
-                clock,
-                producer,
-                sample_rate,
-                Arc::clone(events),
-            )?);
+            handles.push(deck::spawn(id, clock, producer, sample_rate, Arc::clone(events))?);
         }
-        Ok(Self {
-            decks: handles,
-            sink,
-            sample_rate,
-            master,
-            gains,
-            lows,
-            sync,
-            timeline,
-        })
+        Ok(Self { decks: handles, sink, sample_rate, master, gains, lows, sync, timeline })
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -246,10 +210,7 @@ impl Engine {
         let request = request.max(1);
         if let Some(handle) = self.deck(deck) {
             handle.clock().request_load(request);
-            handle.send(deck::Command::Load {
-                request,
-                path: PathBuf::from(path),
-            });
+            handle.send(deck::Command::Load { request, path: PathBuf::from(path) });
         }
         self.settle();
     }
@@ -302,19 +263,14 @@ impl Engine {
             .collect();
         let link = lock(&self.sync).link();
         if let Some((master, follower)) = link {
-            if [master, follower]
-                .iter()
-                .all(|d| ready.iter().any(|(r, _)| r == d))
-            {
+            if [master, follower].iter().all(|d| ready.iter().any(|(r, _)| r == d)) {
                 self.line_up_paused(follower);
             }
         }
         // Each deck may have just been moved. Wait (briefly) until all have the audio for where
         // they are now queued, so none starts a buffer late on an empty ring.
         let deadline = Instant::now() + READY_WAIT;
-        while ready.iter().any(|(_, handle)| !handle.clock().buffered())
-            && Instant::now() < deadline
-        {
+        while ready.iter().any(|(_, handle)| !handle.clock().buffered()) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(1));
         }
         // As with `play`, a deck that played to its end starts over.
@@ -373,11 +329,7 @@ impl Engine {
         }
         let delta = (delta_ms * f64::from(self.sample_rate) / 1000.0).round() as i64;
         let frame = u64::try_from(clock.position() as i64 + delta).unwrap_or(0);
-        let keep_time = if clock.playing() && !clock.scrubbing() {
-            KeepTime::FromMove
-        } else {
-            KeepTime::No
-        };
+        let keep_time = if clock.playing() && !clock.scrubbing() { KeepTime::FromMove } else { KeepTime::No };
         self.move_to(deck, frame, keep_time);
     }
 
@@ -422,11 +374,7 @@ impl Engine {
         }
         let frame = ms.max(0.0) * f64::from(self.sample_rate) / 1000.0;
         let total = clock.total();
-        let frame = if total > 0 {
-            frame.min(total as f64)
-        } else {
-            frame
-        };
+        let frame = if total > 0 { frame.min(total as f64) } else { frame };
         clock.set_scrub_target(frame.round() as u64);
         handle.send(deck::Command::ScrubTo { frame, at_ms });
     }
@@ -451,10 +399,7 @@ impl Engine {
     fn jump(&self, deck: DeckId, frame: u64) {
         let playing = self.deck(deck).is_some_and(|d| d.clock().playing());
         let moment = self.timeline.read();
-        match playing
-            .then(|| self.on_partner_beat(deck, frame, &moment))
-            .flatten()
-        {
+        match playing.then(|| self.on_partner_beat(deck, frame, &moment)).flatten() {
             Some(target) => self.move_to(deck, target, KeepTime::Since(moment.frames)),
             None => self.seek_frames(deck, frame),
         }
@@ -543,11 +488,7 @@ impl Engine {
         let Some(handle) = self.deck(deck) else {
             return;
         };
-        let tempo = if tempo.is_finite() {
-            tempo.clamp(MIN_TEMPO, MAX_TEMPO)
-        } else {
-            1.0
-        };
+        let tempo = if tempo.is_finite() { tempo.clamp(MIN_TEMPO, MAX_TEMPO) } else { 1.0 };
         handle.clock().set_tempo(tempo);
     }
 
@@ -568,28 +509,18 @@ impl Engine {
         let Some(handle) = self.deck(deck) else {
             return;
         };
-        handle
-            .clock()
-            .set_key_shift(semitones.clamp(-MAX_KEY_SHIFT, MAX_KEY_SHIFT));
+        handle.clock().set_key_shift(semitones.clamp(-MAX_KEY_SHIFT, MAX_KEY_SHIFT));
     }
 
     /// The master level, linear, 0 to 1.
     pub fn set_volume(&self, gain: f32) {
-        let safe = if gain.is_finite() {
-            gain.clamp(0.0, 1.0)
-        } else {
-            1.0
-        };
+        let safe = if gain.is_finite() { gain.clamp(0.0, 1.0) } else { 1.0 };
         self.master.store(safe.to_bits(), Ordering::Relaxed);
     }
 
     /// One deck's own level, linear, 0 to 1, glided like the master so a fader move never clicks.
     pub fn set_deck_gain(&self, deck: DeckId, gain: f32) {
-        let safe = if gain.is_finite() {
-            gain.clamp(0.0, 1.0)
-        } else {
-            1.0
-        };
+        let safe = if gain.is_finite() { gain.clamp(0.0, 1.0) } else { 1.0 };
         if let Some(level) = self.gains.get(deck) {
             level.store(safe.to_bits(), Ordering::Relaxed);
         }
@@ -663,11 +594,7 @@ impl Engine {
         };
         let moment = self.timeline.read();
         // A paused deck may have moved since the callback last ran.
-        let own_at = if own.playing() {
-            moment.positions[deck]
-        } else {
-            own.position()
-        };
+        let own_at = if own.playing() { moment.positions[deck] } else { own.position() };
         let Some(target) = self.on_partner_beat(deck, own_at, &moment) else {
             return;
         };

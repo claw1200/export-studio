@@ -34,7 +34,9 @@ pub struct Preset {
 
 fn whole(value: &serde_json::Value, key: &str, default: i64) -> i64 {
     match value.get(key) {
-        Some(v) => v.as_i64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())).filter(|n| *n != 0).unwrap_or(default),
+        Some(v) => {
+            v.as_i64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())).filter(|n| *n != 0).unwrap_or(default)
+        }
         None => default,
     }
 }
@@ -105,8 +107,14 @@ fn codec_args(preset: &Preset) -> Vec<String> {
     match preset.format {
         "wav" => vec!["-c:a".into(), format!("pcm_s{depth}le")],
         "aiff" => vec!["-c:a".into(), format!("pcm_s{depth}be")],
-        "flac" => [strings(&["-c:a", "flac", "-sample_fmt", if depth == 16 { "s16" } else { "s32" }]), raw(depth != 16)].concat(),
-        "alac" => [strings(&["-c:a", "alac", "-sample_fmt", if depth == 16 { "s16p" } else { "s32p" }]), raw(depth != 16)].concat(),
+        "flac" => {
+            [strings(&["-c:a", "flac", "-sample_fmt", if depth == 16 { "s16" } else { "s32" }]), raw(depth != 16)]
+                .concat()
+        }
+        "alac" => {
+            [strings(&["-c:a", "alac", "-sample_fmt", if depth == 16 { "s16p" } else { "s32p" }]), raw(depth != 16)]
+                .concat()
+        }
         "mp3" => vec!["-c:a".into(), "libmp3lame".into(), "-b:a".into(), format!("{}k", preset.bitrate.unwrap_or(320))],
         _ => vec!["-c:a".into(), "aac".into(), "-b:a".into(), format!("{}k", preset.bitrate.unwrap_or(320))],
     }
@@ -183,9 +191,7 @@ fn run_ffmpeg(command: &[String], partial: &Path) -> Result<()> {
     // CREATE_NO_WINDOW: ffmpeg is a console program and the app has no console to share.
     #[cfg(windows)]
     std::os::windows::process::CommandExt::creation_flags(&mut ffmpeg, 0x0800_0000);
-    let mut child = ffmpeg
-        .spawn()
-        .map_err(|e| fail(format!("Could not start ffmpeg: {e}")))?;
+    let mut child = ffmpeg.spawn().map_err(|e| fail(format!("Could not start ffmpeg: {e}")))?;
     let mut stderr = child.stderr.take();
     let reader = std::thread::spawn(move || {
         let mut text = String::new();
@@ -279,7 +285,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("a.wav");
         pcm_wav(&file);
-        let wav = |depth: i64, rate: i64| clean_preset(&json!({"format": "wav", "bitDepth": depth, "sampleRate": rate})).unwrap();
+        let wav = |depth: i64, rate: i64| {
+            clean_preset(&json!({"format": "wav", "bitDepth": depth, "sampleRate": rate})).unwrap()
+        };
         assert!(matches_format(&file, &wav(16, 44100)));
         assert!(matches_format(&file, &wav(24, 96000)));
         assert!(!matches_format(&file, &clean_preset(&json!({"format": "aiff"})).unwrap()));

@@ -2,10 +2,10 @@
 
 use std::path::Path;
 
-use rb_library::fixture::{self, Rows};
-use rb_library::{Guard, Library};
 use es_engine::import::{import_files, Options};
 use es_engine::sync::{prepare_sync, sync_volume, Progress};
+use rb_library::fixture::{self, Rows};
+use rb_library::{Guard, Library};
 use std::cell::RefCell;
 
 fn wav(path: &Path, seconds: u32) {
@@ -104,7 +104,9 @@ fn a_sync_cancelled_while_copying_leaves_the_stick_without_a_library() {
     let job = prepare_sync(&lib, &volume, &["10".to_owned()], None, None).unwrap();
     let cancel = job.canceller();
     let outcome = job.run(&|progress| {
-        if matches!(&progress, Progress::Step { phase, .. } if phase == "copy") { cancel.cancel(); }
+        if matches!(&progress, Progress::Step { phase, .. } if phase == "copy") {
+            cancel.cancel();
+        }
     });
 
     assert!(matches!(outcome, Err(es_engine::Error::Cancelled)), "{outcome:?}");
@@ -139,7 +141,13 @@ fn a_converted_sync_leaves_the_library_alone_and_the_next_changes_nothing() {
     std::fs::create_dir_all(&music).unwrap();
     let file = music.join("One.wav");
     wav(&file, 1);
-    let out = import_files(&mut lib, &share, &[file.to_string_lossy().into_owned()], &Options { artwork: false, playlist: Some("10".into()) }).unwrap();
+    let out = import_files(
+        &mut lib,
+        &share,
+        &[file.to_string_lossy().into_owned()],
+        &Options { artwork: false, playlist: Some("10".into()) },
+    )
+    .unwrap();
     let volume = dir.path().join("STICK");
     std::fs::create_dir_all(&volume).unwrap();
     let mp3 = es_engine::convert::clean_preset(&serde_json::json!({ "format": "mp3", "bitrate": 128 })).unwrap();

@@ -47,17 +47,11 @@ fn invalid() -> napi::Error {
 }
 
 fn text(value: &Value) -> napi::Result<&str> {
-    value
-        .as_str()
-        .filter(|text| !text.contains('\0') && text.len() <= 255)
-        .ok_or_else(invalid)
+    value.as_str().filter(|text| !text.contains('\0') && text.len() <= 255).ok_or_else(invalid)
 }
 
 fn color(value: &Value) -> napi::Result<i64> {
-    value
-        .as_i64()
-        .filter(|color| (0..=8).contains(color))
-        .ok_or_else(invalid)
+    value.as_i64().filter(|color| (0..=8).contains(color)).ok_or_else(invalid)
 }
 
 fn edit_slots(current: &mut [settings::MenuSlot], value: &Value) -> napi::Result<()> {
@@ -71,24 +65,16 @@ fn edit_slots(current: &mut [settings::MenuSlot], value: &Value) -> napi::Result
         if !ids.insert(id) {
             return Err(invalid());
         }
-        let slot = current
-            .iter_mut()
-            .find(|slot| slot.id == id)
-            .ok_or_else(invalid)?;
+        let slot = current.iter_mut().find(|slot| slot.id == id).ok_or_else(invalid)?;
         slot.visible = row["visible"].as_bool().ok_or_else(invalid)?;
-        slot.seq = row["sequence"]
-            .as_i64()
-            .filter(|seq| *seq >= 0 && *seq <= 1000)
-            .ok_or_else(invalid)?;
+        slot.seq = row["sequence"].as_i64().filter(|seq| *seq >= 0 && *seq <= 1000).ok_or_else(invalid)?;
     }
     Ok(())
 }
 
 pub(crate) fn edited(current: &DeviceSettings, value: &Value) -> napi::Result<DeviceSettings> {
     if value["snapshot"] != view(current)["snapshot"] {
-        return Err(failure(
-            "Device settings changed; reload them before saving",
-        ));
+        return Err(failure("Device settings changed; reload them before saving"));
     }
     let mut next = current.clone();
     let display = &value["display"];

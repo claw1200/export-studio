@@ -75,7 +75,11 @@ pub fn track_row(volume: &Path, track: &Track) -> TrackRow {
     let stored = stored_file_type(track.file_type);
     TrackRow {
         id: track_key(&volume.to_string_lossy(), track.export_id),
-        title: if track.title.is_empty() { Some(stem(name_source)).filter(|s| !s.is_empty()).unwrap_or_else(|| "Untitled".into()) } else { track.title.clone() },
+        title: if track.title.is_empty() {
+            Some(stem(name_source)).filter(|s| !s.is_empty()).unwrap_or_else(|| "Untitled".into())
+        } else {
+            track.title.clone()
+        },
         artist: track.artist.clone(),
         album: track.album.clone(),
         genre: track.genre.clone(),
@@ -97,7 +101,10 @@ pub fn track_row(volume: &Path, track: &Track) -> TrackRow {
         bit_rate: track.bitrate,
         sample_rate: track.sample_rate,
         bit_depth: track.bit_depth,
-        file_type: stored.map_or_else(|| Path::new(name_source).extension().map(|e| e.to_string_lossy().to_uppercase()).unwrap_or_default(), str::to_owned),
+        file_type: stored.map_or_else(
+            || Path::new(name_source).extension().map(|e| e.to_string_lossy().to_uppercase()).unwrap_or_default(),
+            str::to_owned,
+        ),
         stored_type: stored,
         missing: audio.as_ref().is_none_or(|p| !p.is_file()),
         streaming: false,
@@ -163,7 +170,9 @@ pub struct LibraryView {
 #[must_use]
 pub fn library_view(kind: LibraryKind, device: &Device) -> LibraryView {
     match kind {
-        LibraryKind::DeviceLibrary => LibraryView { id: "device", name: "Device Library", playlists: playlists(device) },
+        LibraryKind::DeviceLibrary => {
+            LibraryView { id: "device", name: "Device Library", playlists: playlists(device) }
+        }
         LibraryKind::OneLibrary => LibraryView { id: "one", name: "OneLibrary", playlists: playlists(device) },
     }
 }
@@ -232,18 +241,32 @@ pub fn detail(volume: &Path, key: &str, track: &Track) -> Detail {
     let read = |suffix: &str| base.as_ref().and_then(|b| Tags::read(&b.with_extension(suffix)).ok());
     let (dat, ext, ex2) = (read("DAT"), read("EXT"), read("2EX"));
     let rgb = ext.as_ref().and_then(decode::rgb);
-    let bands = |kind: &str| ex2.as_ref().and_then(|t| decode::bands(t, kind)).map(|b| Bands { length: b.length, bands: b64(&b.bands) });
+    let bands = |kind: &str| {
+        ex2.as_ref().and_then(|t| decode::bands(t, kind)).map(|b| Bands { length: b.length, bands: b64(&b.bands) })
+    };
     let audio = audio_path(volume, track);
     Detail {
         id: key.to_owned(),
         file_exists: audio.as_ref().is_some_and(|p| p.is_file()),
         cues: device_cues(track, ext.as_ref()),
-        beatgrid: dat.as_ref().and_then(decode::beatgrid).map(|g| Grid { times: g.times, beats: g.beats, bpms: g.bpms }),
+        beatgrid: dat.as_ref().and_then(decode::beatgrid).map(|g| Grid {
+            times: g.times,
+            beats: g.beats,
+            bpms: g.bpms,
+        }),
         waveform: Waveform {
             rate: 150,
             three_band: bands("PWV7"),
             three_band_preview: bands("PWV6"),
-            mono: if rgb.is_some() { None } else { ext.as_ref().and_then(decode::mono).map(|m| Mono { length: m.length, heights: b64(&m.heights), whiteness: b64(&m.whiteness) }) },
+            mono: if rgb.is_some() {
+                None
+            } else {
+                ext.as_ref().and_then(decode::mono).map(|m| Mono {
+                    length: m.length,
+                    heights: b64(&m.heights),
+                    whiteness: b64(&m.whiteness),
+                })
+            },
             rgb: rgb.map(|r| Colour { length: r.length, heights: b64(&r.heights), colors: b64(&r.colors) }),
         },
     }
@@ -306,7 +329,11 @@ mod tests {
         let medium = original.with_file_name("cover_m.jpg");
         std::fs::write(&medium, b"medium").unwrap();
         assert_eq!(artwork_file(dir.path(), &track, "m"), Some(medium.clone()));
-        assert_eq!(artwork_file(dir.path(), &track, ""), Some(medium.clone()), "full size is the largest the stick holds");
+        assert_eq!(
+            artwork_file(dir.path(), &track, ""),
+            Some(medium.clone()),
+            "full size is the largest the stick holds"
+        );
         let windows_path = Track { artwork: relative.replace('/', "\\"), ..Track::default() };
         assert_eq!(artwork_file(dir.path(), &windows_path, ""), Some(medium.clone()));
         std::fs::remove_file(original).unwrap();
@@ -327,14 +354,24 @@ mod tests {
 
     fn stick() -> Device {
         let track = |id: i64, title: &str| Track { export_id: id, title: title.into(), ..Track::default() };
-        let history = |id: i64, name: &str, parent_id: i64, attribute: i64, track_ids: Vec<i64>| History { export_id: id, name: name.into(), parent_id, seq: id, attribute, track_ids };
+        let history = |id: i64, name: &str, parent_id: i64, attribute: i64, track_ids: Vec<i64>| History {
+            export_id: id,
+            name: name.into(),
+            parent_id,
+            seq: id,
+            attribute,
+            track_ids,
+        };
         Device {
             kind: LibraryKind::OneLibrary,
             root_name: String::new(),
             device_name: "STICK".into(),
             tracks: vec![track(1, "One"), track(2, "Two")],
             playlists: Vec::new(),
-            histories: vec![history(10, "2024", 0, 1, Vec::new()), history(11, "HISTORY 001", 10, 0, vec![2, 1, 2, 99])],
+            histories: vec![
+                history(10, "2024", 0, 1, Vec::new()),
+                history(11, "HISTORY 001", 10, 0, vec![2, 1, 2, 99]),
+            ],
         }
     }
 

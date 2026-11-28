@@ -75,11 +75,7 @@ impl Rig {
         })
         .unwrap();
         let sink = slot.lock().unwrap().take().unwrap();
-        Self {
-            engine,
-            sink,
-            events,
-        }
+        Self { engine, sink, events }
     }
 
     pub fn load(&self, path: &Path) {
@@ -126,17 +122,10 @@ pub fn wait_for(mut done: impl FnMut() -> bool) {
 
 /// The largest jump between consecutive left-channel samples.
 pub fn largest_step(out: &[f32]) -> f32 {
-    out.chunks_exact(2)
-        .map(|f| f[0])
-        .collect::<Vec<_>>()
-        .windows(2)
-        .map(|w| (w[1] - w[0]).abs())
-        .fold(0.0, f32::max)
+    out.chunks_exact(2).map(|f| f[0]).collect::<Vec<_>>().windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max)
 }
 
 /// Index of the first frame with any sound in it.
 pub fn first_audible(out: &[f32]) -> usize {
-    out.chunks_exact(2)
-        .position(|f| f[0] != 0.0)
-        .expect("no sound at all")
+    out.chunks_exact(2).position(|f| f[0] != 0.0).expect("no sound at all")
 }

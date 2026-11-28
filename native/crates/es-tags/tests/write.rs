@@ -37,7 +37,10 @@ fn every_field_round_trips_through_a_wav_and_repeats_do_not_stack_chunks() {
     write(&path, &edit).unwrap();
     write(&path, &edit).unwrap();
     let f = read(&path).unwrap().fields;
-    assert_eq!((f.title.as_str(), f.original_artist.as_str(), f.comment.as_str(), f.year, f.track_no), ("T", "O", "note", 2020, 3));
+    assert_eq!(
+        (f.title.as_str(), f.original_artist.as_str(), f.comment.as_str(), f.year, f.track_no),
+        ("T", "O", "note", 2020, 3)
+    );
     let bytes = std::fs::read(&path).unwrap();
     assert_eq!(bytes.windows(4).filter(|w| w == b"ID3 " || w == b"id3 ").count(), 1);
 

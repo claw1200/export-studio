@@ -60,7 +60,9 @@ fn open(path: &Path) -> Result<TaggedFile> {
     }
     let probe = Probe::open(path)?.options(ParseOptions::new().read_cover_art(true));
     if probe.file_type().is_none() {
-        return Err(Error::Unsupported(path.extension().map_or_else(String::new, |e| format!(".{}", e.to_string_lossy()))));
+        return Err(Error::Unsupported(
+            path.extension().map_or_else(String::new, |e| format!(".{}", e.to_string_lossy())),
+        ));
     }
     Ok(probe.read()?)
 }
@@ -85,7 +87,8 @@ fn original_artist(tag: &Tag) -> String {
     tag.items()
         .find_map(|item| match item.key() {
             ItemKey::Unknown(name)
-                if name.eq_ignore_ascii_case(VORBIS_ORIGINAL_ARTIST) || name.eq_ignore_ascii_case(MP4_ORIGINAL_ARTIST) =>
+                if name.eq_ignore_ascii_case(VORBIS_ORIGINAL_ARTIST)
+                    || name.eq_ignore_ascii_case(MP4_ORIGINAL_ARTIST) =>
             {
                 item.value().text().map(|s| s.trim().to_owned())
             }
@@ -174,7 +177,9 @@ pub fn write(path: &Path, edit: &Edit) -> Result<()> {
     }
     let probe = Probe::open(path)?;
     if probe.file_type().is_none() {
-        return Err(Error::Unsupported(path.extension().map_or_else(String::new, |e| format!(".{}", e.to_string_lossy()))));
+        return Err(Error::Unsupported(
+            path.extension().map_or_else(String::new, |e| format!(".{}", e.to_string_lossy())),
+        ));
     }
     let mut file = probe.read()?;
     let kind = if file.tag(TagType::Id3v2).is_some() { TagType::Id3v2 } else { file.primary_tag_type() };
@@ -192,12 +197,38 @@ pub fn write(path: &Path, edit: &Edit) -> Result<()> {
         (&edit.genre, ItemKey::Genre, vec![]),
         (&edit.composer, ItemKey::Composer, vec![]),
         (&edit.comment, ItemKey::Comment, vec![]),
-        (&edit.label, ItemKey::Label, if mp4 { vec![freeform("LABEL")] } else if vorbis { vec!["LABEL".into()] } else { vec![] }),
-        (&edit.remixer, ItemKey::Remixer, if mp4 { vec![freeform("REMIXER")] } else if vorbis { vec!["REMIXER".into()] } else { vec![] }),
+        (
+            &edit.label,
+            ItemKey::Label,
+            if mp4 {
+                vec![freeform("LABEL")]
+            } else if vorbis {
+                vec!["LABEL".into()]
+            } else {
+                vec![]
+            },
+        ),
+        (
+            &edit.remixer,
+            ItemKey::Remixer,
+            if mp4 {
+                vec![freeform("REMIXER")]
+            } else if vorbis {
+                vec!["REMIXER".into()]
+            } else {
+                vec![]
+            },
+        ),
         (
             &edit.original_artist,
             ItemKey::OriginalArtist,
-            if mp4 { vec![freeform("ORIGINAL ARTIST")] } else if vorbis { vec!["ORIGINALARTIST".into()] } else { vec![] },
+            if mp4 {
+                vec![freeform("ORIGINAL ARTIST")]
+            } else if vorbis {
+                vec!["ORIGINALARTIST".into()]
+            } else {
+                vec![]
+            },
         ),
     ];
     for (value, key, unknown) in fields {

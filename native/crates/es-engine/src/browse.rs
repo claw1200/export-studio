@@ -29,8 +29,15 @@ pub fn file_row(path: &Path) -> Value {
         set(&mut row, "title", json!(f.title));
     }
     for (key, value) in [
-        ("artist", &f.artist), ("album", &f.album), ("genre", &f.genre), ("label", &f.label), ("remixer", &f.remixer),
-        ("originalArtist", &f.original_artist), ("composer", &f.composer), ("comment", &f.comment), ("key", &info.key),
+        ("artist", &f.artist),
+        ("album", &f.album),
+        ("genre", &f.genre),
+        ("label", &f.label),
+        ("remixer", &f.remixer),
+        ("originalArtist", &f.original_artist),
+        ("composer", &f.composer),
+        ("comment", &f.comment),
+        ("key", &info.key),
     ] {
         set(&mut row, key, json!(value));
     }

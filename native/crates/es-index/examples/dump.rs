@@ -15,7 +15,8 @@ fn main() {
         "tags" => serde_json::to_string(&es_index::tag_nodes(&lib).unwrap()),
         "detail" => {
             let ids = std::env::args().nth(2).expect("comma separated ids");
-            let all: Vec<_> = ids.split(',').map(|id| es_index::detail::track_detail(&lib, &share, id).unwrap()).collect();
+            let all: Vec<_> =
+                ids.split(',').map(|id| es_index::detail::track_detail(&lib, &share, id).unwrap()).collect();
             serde_json::to_string(&all)
         }
         other => panic!("unknown view {other}"),

@@ -6,9 +6,7 @@
 use std::fs::File;
 use std::path::Path;
 
-use rubato::{
-    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
-};
+use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{Decoder, DecoderOptions, CODEC_TYPE_MP3, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymphoniaError;
@@ -82,10 +80,7 @@ impl Streamer {
         let probed = symphonia::default::get_probe().format(
             &hint,
             stream,
-            &FormatOptions {
-                enable_gapless: false,
-                ..Default::default()
-            },
+            &FormatOptions { enable_gapless: false, ..Default::default() },
             &MetadataOptions::default(),
         )?;
         let format = probed.format;
@@ -95,25 +90,13 @@ impl Streamer {
             .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
             .ok_or_else(|| DecodeError::Format("no audio track".into()))?;
         let params = track.codec_params.clone();
-        let source_rate = params
-            .sample_rate
-            .filter(|r| *r > 0)
-            .ok_or_else(|| DecodeError::Format("unknown sample rate".into()))?;
+        let source_rate =
+            params.sample_rate.filter(|r| *r > 0).ok_or_else(|| DecodeError::Format("unknown sample rate".into()))?;
         let decoder = symphonia::default::get_codecs().make(&params, &DecoderOptions::default())?;
-        let output_rate = if output_rate == 0 {
-            source_rate
-        } else {
-            output_rate
-        };
-        let lead = if params.codec == CODEC_TYPE_MP3 {
-            rb_audio::rekordbox_lead_frames(path)
-        } else {
-            0
-        };
-        let total = params
-            .n_frames
-            .map(|n| scale(n.saturating_add_signed(lead), source_rate, output_rate))
-            .unwrap_or(0);
+        let output_rate = if output_rate == 0 { source_rate } else { output_rate };
+        let lead = if params.codec == CODEC_TYPE_MP3 { rb_audio::rekordbox_lead_frames(path) } else { 0 };
+        let total =
+            params.n_frames.map(|n| scale(n.saturating_add_signed(lead), source_rate, output_rate)).unwrap_or(0);
         let resampler = if source_rate == output_rate {
             None
         } else {
@@ -179,8 +162,7 @@ impl Streamer {
             }
             let take = available.min(wanted - written);
             let from = self.ready_at;
-            out[written * 2..(written + take) * 2]
-                .copy_from_slice(&self.ready[from..from + take * 2]);
+            out[written * 2..(written + take) * 2].copy_from_slice(&self.ready[from..from + take * 2]);
             self.ready_at += take * 2;
             written += take;
         }
@@ -194,11 +176,7 @@ impl Streamer {
 
     /// Moves to `frame` (output rate) exactly, and returns where it landed.
     pub fn seek(&mut self, frame: u64) -> Result<u64> {
-        let frame = if self.total > 0 {
-            frame.min(self.total)
-        } else {
-            frame
-        };
+        let frame = if self.total > 0 { frame.min(self.total) } else { frame };
         let source_frame = scale(frame, self.output_rate, self.source_rate);
         self.source.clear();
         self.ready.clear();
@@ -212,13 +190,9 @@ impl Streamer {
         self.lead_left = u64::try_from(self.lead).unwrap_or(0).saturating_sub(source_frame);
         let source_frame = source_frame.saturating_add_signed(-self.lead);
         let seconds = source_frame as f64 / f64::from(self.source_rate);
-        let landed = self.format.seek(
-            SeekMode::Accurate,
-            SeekTo::Time {
-                time: Time::from(seconds),
-                track_id: Some(self.track_id),
-            },
-        );
+        let landed = self
+            .format
+            .seek(SeekMode::Accurate, SeekTo::Time { time: Time::from(seconds), track_id: Some(self.track_id) });
         match landed {
             Ok(seeked) => {
                 self.decoder.reset();
@@ -246,8 +220,7 @@ impl Streamer {
     fn ts_to_frames(&self, ts: u64) -> u64 {
         match self.time_base {
             Some(tb) if tb.denom > 0 => {
-                (u128::from(ts) * u128::from(tb.numer) * u128::from(self.source_rate)
-                    / u128::from(tb.denom)) as u64
+                (u128::from(ts) * u128::from(tb.numer) * u128::from(self.source_rate) / u128::from(tb.denom)) as u64
             }
             _ => ts,
         }
@@ -416,11 +389,9 @@ impl StereoResampler {
         }
         source.drain(..take * 2);
         self.fed += take as u64;
-        let Ok((_, out_frames)) = self.inner.process_into_buffer(
-            &[&self.input[0][..need], &self.input[1][..need]],
-            &mut self.output,
-            None,
-        ) else {
+        let Ok((_, out_frames)) =
+            self.inner.process_into_buffer(&[&self.input[0][..need], &self.input[1][..need]], &mut self.output, None)
+        else {
             return false;
         };
         ready.clear();
@@ -547,10 +518,7 @@ mod tests {
         let k = 24_000usize;
         let expected = k as f64 * 44_100.0 / 48_000.0;
         let got = f64::from(all[k * 2]) * 32768.0;
-        assert!(
-            (got - expected).abs() < 2.0,
-            "frame {k}: {got} vs {expected}"
-        );
+        assert!((got - expected).abs() < 2.0, "frame {k}: {got} vs {expected}");
     }
 
     const MP3_FRAME: usize = 1152;

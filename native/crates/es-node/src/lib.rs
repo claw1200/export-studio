@@ -12,9 +12,7 @@ mod usb_settings;
 
 use es_deck::{DeckEvent, DeckSnapshot, Engine, EventSink};
 use napi::bindgen_prelude::*;
-use napi::threadsafe_function::{
-    ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
-};
+use napi::threadsafe_function::{ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::{Env, JsFunction, Task};
 use napi_derive::napi;
 
@@ -68,12 +66,7 @@ impl From<DeckSnapshot> for DeckSnapshotJs {
 
 fn event_js(event: DeckEvent) -> DeckEventJs {
     match event {
-        DeckEvent::Loaded {
-            deck,
-            load_id,
-            total_frames,
-            sample_rate,
-        } => DeckEventJs {
+        DeckEvent::Loaded { deck, load_id, total_frames, sample_rate } => DeckEventJs {
             kind: "loaded".into(),
             deck: deck as u32,
             load_id: load_id as f64,
@@ -81,11 +74,7 @@ fn event_js(event: DeckEvent) -> DeckEventJs {
             sample_rate,
             message: None,
         },
-        DeckEvent::Error {
-            deck,
-            load_id,
-            message,
-        } => DeckEventJs {
+        DeckEvent::Error { deck, load_id, message } => DeckEventJs {
             kind: "error".into(),
             deck: deck as u32,
             load_id: load_id as f64,
@@ -114,10 +103,8 @@ impl AudioEngine {
         decks: u32,
         #[napi(ts_arg_type = "(event: DeckEventJs) => void")] on_event: JsFunction,
     ) -> Result<Self> {
-        let mut tsfn: ThreadsafeFunction<DeckEventJs, ErrorStrategy::Fatal> = on_event
-            .create_threadsafe_function(0, |ctx: ThreadSafeCallContext<DeckEventJs>| {
-                Ok(vec![ctx.value])
-            })?;
+        let mut tsfn: ThreadsafeFunction<DeckEventJs, ErrorStrategy::Fatal> =
+            on_event.create_threadsafe_function(0, |ctx: ThreadSafeCallContext<DeckEventJs>| Ok(vec![ctx.value]))?;
         // Events must not keep the process alive on their own.
         tsfn.unref(&env)?;
         let events: EventSink = Arc::new(move |event| {
@@ -125,9 +112,7 @@ impl AudioEngine {
         });
         let engine = Engine::new(decks.max(1) as usize, &events)
             .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-        Ok(Self {
-            engine: Some(engine),
-        })
+        Ok(Self { engine: Some(engine) })
     }
 
     /// Stops playback and drops the device and decode threads. Further commands do nothing.
@@ -331,9 +316,7 @@ impl AudioEngine {
 
     #[napi]
     pub fn snapshot(&self, deck: u32) -> Option<DeckSnapshotJs> {
-        self.engine()
-            .and_then(|e| e.snapshot(deck_index(deck)))
-            .map(Into::into)
+        self.engine().and_then(|e| e.snapshot(deck_index(deck))).map(Into::into)
     }
 
     #[napi]
@@ -390,11 +373,7 @@ impl Task for Analyse {
 /// Decodes and analyses a file off the main thread. Null when it is too short to draw.
 #[napi(ts_return_type = "Promise<WaveJs | null>")]
 pub fn analyse(path: String, bands: bool, quality: u32) -> AsyncTask<Analyse> {
-    AsyncTask::new(Analyse {
-        path,
-        bands,
-        quality,
-    })
+    AsyncTask::new(Analyse { path, bands, quality })
 }
 
 #[napi(object)]
@@ -450,10 +429,7 @@ impl Task for AnalyseTrack {
             beat_numbers: Uint8Array::new(a.beats.iter().map(|b| b.number).collect()),
             beat_tempos: Uint16Array::new(a.beats.iter().map(|b| b.tempo_x100).collect()),
             beat_times: Uint32Array::new(a.beats.iter().map(|b| b.time_ms).collect()),
-            key: a.key.map(|k| KeyJs {
-                tonic: k.tonic as u32,
-                minor: k.minor,
-            }),
+            key: a.key.map(|k| KeyJs { tonic: k.tonic as u32, minor: k.minor }),
             waveform: Uint8Array::new(a.waveform),
         })
     }

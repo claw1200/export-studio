@@ -14,22 +14,11 @@ fn play_and_pause_fade_instead_of_clicking() {
     rig.load(&dc("playpause", RATE * 3));
     rig.engine.play(0);
     let start = rig.pull(4096);
-    assert!(
-        largest_step(&start) <= fade_step(),
-        "start stepped {}",
-        largest_step(&start)
-    );
-    assert!(
-        value(start[start.len() - 2]) > 25_000,
-        "should reach full level"
-    );
+    assert!(largest_step(&start) <= fade_step(), "start stepped {}", largest_step(&start));
+    assert!(value(start[start.len() - 2]) > 25_000, "should reach full level");
     rig.engine.pause(0);
     let stop = rig.pull(4096);
-    assert!(
-        largest_step(&stop) <= fade_step(),
-        "stop stepped {}",
-        largest_step(&stop)
-    );
+    assert!(largest_step(&stop) <= fade_step(), "stop stepped {}", largest_step(&stop));
     assert_eq!(stop[stop.len() - 2], 0.0, "paused deck is silent");
 }
 
@@ -41,11 +30,7 @@ fn a_seek_while_playing_fades_out_and_back_in() {
     let _ = rig.pull(4096);
     rig.engine.seek(0, 3000.0);
     let around = rig.pull(8192);
-    assert!(
-        largest_step(&around) <= fade_step(),
-        "seek stepped {}",
-        largest_step(&around)
-    );
+    assert!(largest_step(&around) <= fade_step(), "seek stepped {}", largest_step(&around));
     let dips = around.chunks_exact(2).any(|f| f[0].abs() < 0.05);
     assert!(dips, "the join should pass through silence");
 }
@@ -56,11 +41,7 @@ fn a_seek_lands_on_the_exact_frame() {
     rig.load(&ramp("seekexact", RATE * 4));
     rig.engine.seek(0, 1234.5);
     let frame = (1234.5_f64 * f64::from(RATE) / 1000.0).round() as u64;
-    assert_eq!(
-        rig.position(),
-        frame,
-        "a paused seek shows where it landed at once"
-    );
+    assert_eq!(rig.position(), frame, "a paused seek shows where it landed at once");
     rig.settle_ring();
     rig.engine.play(0);
     let out = rig.pull(4096);
@@ -68,10 +49,7 @@ fn a_seek_lands_on_the_exact_frame() {
     // from it exactly.
     let first = first_audible(&out);
     let i = first + usize::from(FADE_FRAMES) + 10;
-    assert_eq!(
-        value(out[i * 2]),
-        ((frame + (i - first) as u64) % 30_000) as i64
-    );
+    assert_eq!(value(out[i * 2]), ((frame + (i - first) as u64) % 30_000) as i64);
 }
 
 #[test]
@@ -93,11 +71,7 @@ fn playing_to_the_end_fades_and_stops() {
     rig.load(&dc("end", frames));
     rig.engine.play(0);
     let out = rig.pull(frames as usize + 4096);
-    assert!(
-        largest_step(&out) <= fade_step(),
-        "end stepped {}",
-        largest_step(&out)
-    );
+    assert!(largest_step(&out) <= fade_step(), "end stepped {}", largest_step(&out));
     assert!(!rig.engine.snapshot(0).unwrap().playing);
     assert_eq!(out[out.len() - 2], 0.0);
 }
@@ -122,10 +96,7 @@ fn a_loop_seam_plays_straight_through() {
             expected = from as i64;
         }
     }
-    assert!(
-        values.iter().skip(open).any(|&v| v == from as i64),
-        "the loop wrapped"
-    );
+    assert!(values.iter().skip(open).any(|&v| v == from as i64), "the loop wrapped");
 }
 
 #[test]
@@ -145,31 +116,16 @@ fn exit_plays_on_past_the_out_point_and_reloop_returns_to_the_in_point() {
     assert!(at > to + 4000, "carried on past the out point, at {at}");
     let snap = rig.engine.snapshot(0).unwrap();
     assert!(!snap.looping);
-    assert_eq!(
-        (snap.loop_in_frames, snap.loop_out_frames),
-        (from, to),
-        "the loop is kept for RELOOP"
-    );
+    assert_eq!((snap.loop_in_frames, snap.loop_out_frames), (from, to), "the loop is kept for RELOOP");
 
     rig.engine.set_looping(0, true);
     assert_eq!(rig.position(), from, "RELOOP goes to the in point");
     rig.settle_ring();
     let out = rig.pull(16_000);
     // Past the fade out of where it was and the fade in at the in point.
-    let values: Vec<i64> = out
-        .chunks_exact(2)
-        .skip(4096)
-        .map(|f| value(f[0]))
-        .collect();
-    let outside = values
-        .iter()
-        .position(|&v| !(from as i64..to as i64).contains(&v));
-    assert_eq!(
-        outside,
-        None,
-        "stays inside the loop: {:?}",
-        outside.map(|i| values[i])
-    );
+    let values: Vec<i64> = out.chunks_exact(2).skip(4096).map(|f| value(f[0])).collect();
+    let outside = values.iter().position(|&v| !(from as i64..to as i64).contains(&v));
+    assert_eq!(outside, None, "stays inside the loop: {:?}", outside.map(|i| values[i]));
 }
 
 #[test]
@@ -185,11 +141,7 @@ fn an_exited_loop_resized_behind_the_playhead_leaves_it_in_place() {
     assert_eq!(rig.position(), at, "the playhead did not move");
     let snap = rig.engine.snapshot(0).unwrap();
     assert!(!snap.looping, "the loop stays exited");
-    assert_eq!(
-        (snap.loop_in_frames, snap.loop_out_frames),
-        (24_000, 36_000),
-        "the range changed"
-    );
+    assert_eq!((snap.loop_in_frames, snap.loop_out_frames), (24_000, 36_000), "the range changed");
 }
 
 #[test]
@@ -208,12 +160,8 @@ fn the_newest_load_wins() {
 #[test]
 fn a_missing_file_reports_an_error() {
     let rig = Rig::new();
-    rig.engine
-        .load(0, std::path::Path::new("/nonexistent/track.mp3"), 7);
+    rig.engine.load(0, std::path::Path::new("/nonexistent/track.mp3"), 7);
     wait_for(|| !rig.events.lock().unwrap().is_empty());
     let events = rig.events.lock().unwrap();
-    assert!(matches!(
-        events[0],
-        es_deck::DeckEvent::Error { load_id: 7, .. }
-    ));
+    assert!(matches!(events[0], es_deck::DeckEvent::Error { load_id: 7, .. }));
 }

@@ -67,10 +67,8 @@ fn profiles(stft: &Stft, beats: &[f64], low_onset: &dyn Fn(f64) -> f64) -> Profi
         for f in f0..f1.min(stft.frames) {
             let frame = stft.frame(f);
             for b in 0..BANDS {
-                bands[b] += frame[edges[b]..edges[b + 1].max(edges[b] + 1)]
-                    .iter()
-                    .map(|&m| f64::from(m * m))
-                    .sum::<f64>();
+                bands[b] +=
+                    frame[edges[b]..edges[b + 1].max(edges[b] + 1)].iter().map(|&m| f64::from(m * m)).sum::<f64>();
             }
             for (bin, p) in pitch.iter().enumerate() {
                 if let Some(pc) = p {
@@ -123,9 +121,7 @@ fn novelty(p: &Profiles) -> Vec<f64> {
             }
         }
     }
-    let chord: Vec<f64> = (0..n)
-        .map(|b| if b == 0 { 0.0 } else { distance(&p.chroma[b], &p.chroma[b - 1]) })
-        .collect();
+    let chord: Vec<f64> = (0..n).map(|b| if b == 0 { 0.0 } else { distance(&p.chroma[b], &p.chroma[b - 1]) }).collect();
     for (series, weight) in [(&chord, CHORD_WEIGHT), (&p.kick, KICK_WEIGHT)] {
         let mean = series.iter().sum::<f64>() / n.max(1) as f64;
         let sd = (series.iter().map(|r| (r - mean) * (r - mean)).sum::<f64>() / n.max(1) as f64).sqrt();
@@ -140,11 +136,7 @@ fn novelty(p: &Profiles) -> Vec<f64> {
 
 /// The first beat whose loudness reaches a fair share of the track's typical loudness.
 fn first_sounding(p: &Profiles) -> usize {
-    let loudness: Vec<f64> = p
-        .bands
-        .iter()
-        .map(|b| b.iter().map(|db| 10f64.powf(*db)).sum::<f64>().log10())
-        .collect();
+    let loudness: Vec<f64> = p.bands.iter().map(|b| b.iter().map(|db| 10f64.powf(*db)).sum::<f64>().log10()).collect();
     let mut sorted = loudness.clone();
     sorted.sort_by(f64::total_cmp);
     let typical = sorted[sorted.len() / 2];
@@ -165,16 +157,10 @@ pub fn first_downbeat(stft: &Stft, beats: &[f64], low_onset: &dyn Fn(f64) -> f64
     // Most tracks start on a bar line, so the first beat with sound in it gets a head start.
     let spread = scores.iter().copied().fold(f64::MIN, f64::max) - scores.iter().copied().fold(f64::MAX, f64::min);
     scores[first_sounding(&p) % 4] += START_WEIGHT * spread;
-    scores
-        .iter()
-        .enumerate()
-        .fold((0, f64::MIN), |best, (i, &s)| if s > best.1 { (i, s) } else { best })
-        .0
+    scores.iter().enumerate().fold((0, f64::MIN), |best, (i, &s)| if s > best.1 { (i, s) } else { best }).0
 }
 
 /// Beat numbers 1 to 4 for `count` beats, the first bar starting at `first`.
 pub fn numbers(count: usize, first: usize) -> Vec<u8> {
-    (0..count)
-        .map(|i| ((i + 4 - first % 4) % 4 + 1) as u8)
-        .collect()
+    (0..count).map(|i| ((i + 4 - first % 4) % 4 + 1) as u8).collect()
 }

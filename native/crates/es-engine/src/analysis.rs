@@ -42,7 +42,11 @@ fn check(grid: &Grid) -> Result<()> {
 }
 
 /// Write `data` to each path through a temporary file; on any failure put back what was there before.
-fn write_all(writes: &[(PathBuf, Vec<u8>)], previous: &[(PathBuf, Option<Vec<u8>>)], then: impl FnOnce() -> Result<()>) -> Result<()> {
+fn write_all(
+    writes: &[(PathBuf, Vec<u8>)],
+    previous: &[(PathBuf, Option<Vec<u8>>)],
+    then: impl FnOnce() -> Result<()>,
+) -> Result<()> {
     let result = (|| -> Result<()> {
         for (path, data) in writes {
             if let Some(parent) = path.parent() {
@@ -57,7 +61,13 @@ fn write_all(writes: &[(PathBuf, Vec<u8>)], previous: &[(PathBuf, Option<Vec<u8>
         for (path, old) in previous {
             let restored = match old {
                 Some(bytes) => std::fs::write(path, bytes),
-                None => std::fs::remove_file(path).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }),
+                None => std::fs::remove_file(path).or_else(|e| {
+                    if e.kind() == std::io::ErrorKind::NotFound {
+                        Ok(())
+                    } else {
+                        Err(e)
+                    }
+                }),
             };
             if let Err(e) = restored {
                 eprintln!("[es-engine] could not restore {}: {e}", path.display());
@@ -83,7 +93,10 @@ pub fn set_beatgrid(lib: &mut Library, share: &Path, id: &str, grid: &Grid, move
     let times: Vec<u32> = grid.times.iter().map(|t| u32::try_from(*t).unwrap_or(0)).collect();
     let beats: Vec<u16> = grid.beats.iter().map(|b| u16::try_from(*b).unwrap_or(0)).collect();
     let bpms: Vec<f64> = grid.bpms.iter().map(|b| (b * 100.0).round_ties_even() / 100.0).collect();
-    let mut writes = vec![(dat.clone(), patch_tags(&old_dat, &[("PQTZ", build_beatgrid(pqtz, &times, &beats, &bpms))], &[]).map_err(other)?)];
+    let mut writes = vec![(
+        dat.clone(),
+        patch_tags(&old_dat, &[("PQTZ", build_beatgrid(pqtz, &times, &beats, &bpms))], &[]).map_err(other)?,
+    )];
     let mut previous = vec![(dat.clone(), Some(old_dat.clone()))];
 
     let ext = dat.with_extension("EXT");
@@ -91,7 +104,10 @@ pub fn set_beatgrid(lib: &mut Library, share: &Path, id: &str, grid: &Grid, move
         let old_ext = std::fs::read(&ext).map_err(other)?;
         let ext_tags = Tags::parse(old_ext.clone()).map_err(other)?;
         if let Some(pqt2) = ext_tags.first("PQT2") {
-            writes.push((ext.clone(), patch_tags(&old_ext, &[("PQT2", clear_extended_beatgrid(pqt2))], &[]).map_err(other)?));
+            writes.push((
+                ext.clone(),
+                patch_tags(&old_ext, &[("PQT2", clear_extended_beatgrid(pqt2))], &[]).map_err(other)?,
+            ));
             previous.push((ext, Some(old_ext)));
         }
     }
@@ -130,17 +146,22 @@ pub struct Options {
 pub fn apply_analysis(lib: &mut Library, share: &Path, id: &str, result: &Analysis, options: Options) -> Result<()> {
     let files = lib.track_files(id)?.ok_or_else(|| Error::Other(format!("Unknown track {id}")))?;
     let features = build::features_from_bytes(&result.waveform);
-    let audio_name = Path::new(&files.folder_path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let audio_name =
+        Path::new(&files.folder_path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
 
     let relative = match files.analysis_path.clone() {
         Some(path) => path,
         None => {
-            let uuid = lib.track_uuid(id)?.filter(|u| u.len() > 3).ok_or_else(|| Error::Other("This track has no UUID".into()))?;
+            let uuid = lib
+                .track_uuid(id)?
+                .filter(|u| u.len() > 3)
+                .ok_or_else(|| Error::Other("This track has no UUID".into()))?;
             format!("/PIONEER/USBANLZ/{}/{}/ANLZ0000.DAT", &uuid[..3], &uuid[3..])
         }
     };
     let dat = share.join(relative.trim_matches(['/', '\\']));
-    let kinds: Vec<(&str, &[&str], PathBuf)> = build::WAVE_TAGS.iter().map(|(kind, tags)| (*kind, *tags, dat.with_extension(kind))).collect();
+    let kinds: Vec<(&str, &[&str], PathBuf)> =
+        build::WAVE_TAGS.iter().map(|(kind, tags)| (*kind, *tags, dat.with_extension(kind))).collect();
     let existing: Vec<Option<(Vec<u8>, Tags)>> = kinds
         .iter()
         .map(|(_, _, path)| match std::fs::read(path) {
@@ -181,11 +202,13 @@ pub fn apply_analysis(lib: &mut Library, share: &Path, id: &str, result: &Analys
         }
     }
 
-    let present: Vec<PathBuf> = kinds.iter().zip(&existing).filter(|(_, e)| e.is_some()).map(|((_, _, p), _)| p.clone()).collect();
+    let present: Vec<PathBuf> =
+        kinds.iter().zip(&existing).filter(|(_, e)| e.is_some()).map(|((_, _, p), _)| p.clone()).collect();
     if !present.is_empty() {
         back_up_once(id, &present).map_err(other)?;
     }
-    let previous: Vec<(PathBuf, Option<Vec<u8>>)> = writes.iter().map(|(p, _)| (p.clone(), std::fs::read(p).ok())).collect();
+    let previous: Vec<(PathBuf, Option<Vec<u8>>)> =
+        writes.iter().map(|(p, _)| (p.clone(), std::fs::read(p).ok())).collect();
     let write = AnalysisWrite {
         relative_path: &relative,
         bpm_x100: write_grid.then(|| (result.bpm * 100.0).round_ties_even() as i64),

@@ -31,12 +31,14 @@ fn trim_end(mut text: String) -> String {
 
 #[must_use]
 pub fn fat_safe(name: &str) -> String {
-    let replaced: String = name
-        .nfc()
-        .map(|c| if "/\\:*?\"<>|".contains(c) || u32::from(c) < 0x20 { '_' } else { c })
-        .collect();
+    let replaced: String =
+        name.nfc().map(|c| if "/\\:*?\"<>|".contains(c) || u32::from(c) < 0x20 { '_' } else { c }).collect();
     let cleaned = trim_end(replaced);
-    if cleaned.is_empty() { "Unknown".into() } else { cleaned }
+    if cleaned.is_empty() {
+        "Unknown".into()
+    } else {
+        cleaned
+    }
 }
 
 #[must_use]
@@ -46,7 +48,11 @@ pub fn dir_name(name: &str) -> String {
         return safe;
     }
     let cut = trim_end(safe.chars().take(DIR_NAME_MAX).collect());
-    if cut.is_empty() { "Unknown".into() } else { cut }
+    if cut.is_empty() {
+        "Unknown".into()
+    } else {
+        cut
+    }
 }
 
 #[must_use]
@@ -147,7 +153,8 @@ pub(crate) fn existing_copy(source: &Path, wanted: &Path) -> Option<PathBuf> {
 /// Copy `source` beside `wanted` under a free name, never replacing a file. The copy is checked byte for byte.
 fn copy_new(source: &Path, wanted: &Path) -> Result<PathBuf> {
     let parent = wanted.parent().ok_or_else(|| Error::Other("a copy needs a folder".into()))?;
-    let name = wanted.file_name().ok_or_else(|| Error::Other("a copy needs a name".into()))?.to_string_lossy().into_owned();
+    let name =
+        wanted.file_name().ok_or_else(|| Error::Other("a copy needs a name".into()))?.to_string_lossy().into_owned();
     fs::create_dir_all(parent).map_err(|e| Error::Other(e.to_string()))?;
     for n in 0..TRIES {
         let target = parent.join(if n == 0 { name.clone() } else { numbered(&name, n) });
@@ -163,7 +170,11 @@ fn copy_new(source: &Path, wanted: &Path) -> Result<PathBuf> {
             out.sync_all()
         })();
         let verified = copied.map_err(|e| e.to_string()).and_then(|()| {
-            if same_bytes(source, &target) { Ok(()) } else { Err(format!("the copy of {} did not match the device's file", source.display())) }
+            if same_bytes(source, &target) {
+                Ok(())
+            } else {
+                Err(format!("the copy of {} did not match the device's file", source.display()))
+            }
         });
         if let Err(message) = verified {
             let _ = fs::remove_file(&target);

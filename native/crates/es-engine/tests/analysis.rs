@@ -1,10 +1,10 @@
 use std::path::Path;
 
+use es_engine::analysis::{apply_analysis, set_beatgrid, Analysis, Grid, Options};
+use es_engine::import::{import_files, Options as ImportOptions};
 use rb_anlz::decode::{self, Tags};
 use rb_library::fixture;
 use rb_library::{CueMove, Guard, Library};
-use es_engine::analysis::{apply_analysis, set_beatgrid, Analysis, Grid, Options};
-use es_engine::import::{import_files, Options as ImportOptions};
 
 fn wav(path: &Path) {
     let data = 16000u32;
@@ -29,7 +29,15 @@ fn scene() -> (tempfile::TempDir, Library, String) {
     let share = lib.share_dir();
     let file = dir.path().join("Song.wav");
     wav(&file);
-    let id = import_files(&mut lib, &share, &[file.to_string_lossy().into_owned()], &ImportOptions { artwork: false, playlist: None }).unwrap().ids[0].clone();
+    let id = import_files(
+        &mut lib,
+        &share,
+        &[file.to_string_lossy().into_owned()],
+        &ImportOptions { artwork: false, playlist: None },
+    )
+    .unwrap()
+    .ids[0]
+        .clone();
     (dir, lib, id)
 }
 

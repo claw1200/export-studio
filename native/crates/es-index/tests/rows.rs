@@ -1,6 +1,6 @@
+use es_index::{history_nodes, playlist_nodes, track_rows};
 use rb_library::fixture::{self, Rows};
 use rb_library::{Guard, Library};
-use es_index::{history_nodes, playlist_nodes, track_rows};
 
 #[test]
 fn rows_resolve_names_and_ignore_removed_tracks() {
@@ -20,8 +20,11 @@ fn rows_resolve_names_and_ignore_removed_tracks() {
         rows.playlist("10", "Mix", 0).unwrap();
         rows.song("10", "1", 1).unwrap();
         rows.song("10", "2", 2).unwrap();
-        conn.execute("INSERT INTO djmdHistory (ID, Name, Attribute, ParentID, Seq) VALUES ('h1', 'Set', 0, 'root', 1)", [])
-            .unwrap();
+        conn.execute(
+            "INSERT INTO djmdHistory (ID, Name, Attribute, ParentID, Seq) VALUES ('h1', 'Set', 0, 'root', 1)",
+            [],
+        )
+        .unwrap();
         conn.execute("INSERT INTO djmdSongHistory (ID, HistoryID, ContentID, TrackNo) VALUES ('s1', 'h1', '2', 1)", [])
             .unwrap();
         conn.execute("INSERT INTO djmdSongHistory (ID, HistoryID, ContentID, TrackNo) VALUES ('s2', 'h1', '1', 2)", [])

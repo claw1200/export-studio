@@ -13,22 +13,13 @@ fn a_deck_gain_scales_only_that_deck() {
     rig.engine.play_together(&[0, 1]);
     let both = rig.pull(8192);
     let full = value(both[both.len() - 2]);
-    assert!(
-        (full - 26_000).abs() < 100,
-        "two halves make the whole: {full}"
-    );
+    assert!((full - 26_000).abs() < 100, "two halves make the whole: {full}");
 
     rig.engine.set_deck_gain(1, 0.0);
     let one = rig.pull(8192);
     let alone = value(one[one.len() - 2]);
-    assert!(
-        (alone * 2 - full).abs() < 200,
-        "silencing deck B should leave deck A alone: {alone} of {full}"
-    );
-    assert!(
-        largest_step(&one) < 0.01,
-        "the level glides rather than steps"
-    );
+    assert!((alone * 2 - full).abs() < 200, "silencing deck B should leave deck A alone: {alone} of {full}");
+    assert!(largest_step(&one) < 0.01, "the level glides rather than steps");
 
     rig.engine.set_deck_gain(0, 0.0);
     let none = rig.pull(8192);
@@ -76,28 +67,15 @@ fn a_killed_low_takes_the_bass_out_of_only_that_deck() {
     rig.engine.play_together(&[0, 1]);
     let both = rig.pull(8192);
     let full = value(both[both.len() - 2]);
-    assert!(
-        (full - 26_000).abs() < 100,
-        "with the low up the isolator passes the bass: {full}"
-    );
+    assert!((full - 26_000).abs() < 100, "with the low up the isolator passes the bass: {full}");
 
     rig.engine.set_deck_low(0, Some(0.0));
     let killed = rig.pull(16_384);
     let left = value(killed[killed.len() - 2]);
-    assert!(
-        (left * 2 - full).abs() < 200,
-        "killing deck A's low leaves deck B's bass alone: {left} of {full}"
-    );
-    assert!(
-        largest_step(&killed) < 0.01,
-        "the low glides out rather than stepping"
-    );
+    assert!((left * 2 - full).abs() < 200, "killing deck A's low leaves deck B's bass alone: {left} of {full}");
+    assert!(largest_step(&killed) < 0.01, "the low glides out rather than stepping");
 
     rig.engine.set_deck_low(0, None);
     let back = rig.pull(16_384);
-    assert_eq!(
-        value(back[back.len() - 2]),
-        full,
-        "out of the path, the deck plays untouched"
-    );
+    assert_eq!(value(back[back.len() - 2]), full, "out of the path, the deck plays untouched");
 }

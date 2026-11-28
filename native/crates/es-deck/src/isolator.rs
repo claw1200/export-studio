@@ -46,20 +46,8 @@ impl Biquad {
         let (sin, cos) = w0.sin_cos();
         let alpha = sin / (2.0 * q);
         let a0 = 1.0 + alpha;
-        let (b0, b1) = if high {
-            ((1.0 + cos) / 2.0, -(1.0 + cos))
-        } else {
-            ((1.0 - cos) / 2.0, 1.0 - cos)
-        };
-        Self {
-            b0: b0 / a0,
-            b1: b1 / a0,
-            b2: b0 / a0,
-            a1: -2.0 * cos / a0,
-            a2: (1.0 - alpha) / a0,
-            z1: 0.0,
-            z2: 0.0,
-        }
+        let (b0, b1) = if high { ((1.0 + cos) / 2.0, -(1.0 + cos)) } else { ((1.0 - cos) / 2.0, 1.0 - cos) };
+        Self { b0: b0 / a0, b1: b1 / a0, b2: b0 / a0, a1: -2.0 * cos / a0, a2: (1.0 - alpha) / a0, z1: 0.0, z2: 0.0 }
     }
 
     fn step(&mut self, x: f64) -> f64 {
@@ -81,10 +69,7 @@ impl Crossover {
     fn new(sample_rate: f64) -> Self {
         let low = Biquad::new(CROSSOVER_HZ, BUTTERWORTH_Q, sample_rate, false);
         let high = Biquad::new(CROSSOVER_HZ, BUTTERWORTH_Q, sample_rate, true);
-        Self {
-            low: [low; 2],
-            high: [high; 2],
-        }
+        Self { low: [low; 2], high: [high; 2] }
     }
 
     /// The input split into the band below the crossover and the rest.
@@ -184,10 +169,7 @@ mod tests {
     fn killed_low_removes_the_bass_and_keeps_the_rest() {
         assert!(db(level_at(50.0, Some(0.0))) < -45.0, "50 Hz should be gone");
         assert!(db(level_at(100.0, Some(0.0))) < -20.0, "100 Hz should be well down");
-        assert!(
-            (db(level_at(200.0, Some(0.0))) + 6.0).abs() < 0.5,
-            "the crossover is 6 dB down"
-        );
+        assert!((db(level_at(200.0, Some(0.0))) + 6.0).abs() < 0.5, "the crossover is 6 dB down");
         assert!(db(level_at(1000.0, Some(0.0))).abs() < 0.1, "1 kHz is untouched");
     }
 

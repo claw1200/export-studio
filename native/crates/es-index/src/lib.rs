@@ -175,7 +175,11 @@ pub fn track_rows(lib: &Library, share: &Path, ids: Option<&[String]>) -> Result
 }
 
 fn root_if_empty(parent: String) -> String {
-    if parent.is_empty() { "root".into() } else { parent }
+    if parent.is_empty() {
+        "root".into()
+    } else {
+        parent
+    }
 }
 
 pub fn playlist_nodes(lib: &Library) -> Result<Vec<Node>> {

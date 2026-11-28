@@ -39,11 +39,7 @@ fn a_paused_drag_is_heard_and_lands_exactly_under_the_pointer() {
     rig.engine.scrub_begin(0);
     let (audio, last) = drag(&rig, 1000.0, 60);
     let moving = &audio[audio.len() / 2..];
-    assert!(
-        rms(moving) > 0.1,
-        "a normal-speed drag is audible, rms {}",
-        rms(moving)
-    );
+    assert!(rms(moving) > 0.1, "a normal-speed drag is audible, rms {}", rms(moving));
 
     rig.engine.scrub_end(0);
     let landed = (last * f64::from(RATE) / 1000.0).round() as u64;
@@ -51,11 +47,7 @@ fn a_paused_drag_is_heard_and_lands_exactly_under_the_pointer() {
     assert!(!snap.scrubbing && !snap.playing);
     assert_eq!(snap.position_frames, landed, "lands on the pointer");
     let after = rig.pull(4096);
-    assert_eq!(
-        after[after.len() - 2],
-        0.0,
-        "silent once let go while paused"
-    );
+    assert_eq!(after[after.len() - 2], 0.0, "silent once let go while paused");
     assert_eq!(rig.position(), landed, "and stays there");
 }
 
@@ -69,17 +61,11 @@ fn letting_go_of_a_drag_while_playing_plays_on_from_the_pointer() {
     let (_, last) = drag(&rig, 2000.0, 20);
     rig.engine.scrub_end(0);
     let landed = (last * f64::from(RATE) / 1000.0).round() as u64;
-    assert!(
-        rig.engine.snapshot(0).unwrap().playing,
-        "still playing after the drag"
-    );
+    assert!(rig.engine.snapshot(0).unwrap().playing, "still playing after the drag");
     rig.settle_ring();
     let _ = rig.pull(4096);
     let at = rig.position();
-    assert!(
-        at > landed && at <= landed + 4096,
-        "plays on from {landed}, now at {at}"
-    );
+    assert!(at > landed && at <= landed + 4096, "plays on from {landed}, now at {at}");
 }
 
 #[test]
@@ -91,11 +77,7 @@ fn taking_hold_of_a_playing_deck_silences_it_at_once_without_a_click() {
     rig.engine.scrub_begin(0);
     let held = rig.pull(2048);
     let fade = 26_000.0 / 32_768.0 / f32::from(FADE_FRAMES) + 1e-4;
-    assert!(
-        largest_step(&held) <= fade,
-        "stepped {}",
-        largest_step(&held)
-    );
+    assert!(largest_step(&held) <= fade, "stepped {}", largest_step(&held));
     let tail = &held[held.len() - 512..];
     assert!(
         tail.iter().all(|v| v.abs() < 1e-3),

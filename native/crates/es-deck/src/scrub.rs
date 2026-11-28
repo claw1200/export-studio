@@ -92,8 +92,7 @@ impl PcmWindow {
         let head = head.max(0.0) as u64;
         let end = head.saturating_add(keep);
         if self.end() > end {
-            self.data
-                .truncate((end.saturating_sub(self.start) as usize) * 2);
+            self.data.truncate((end.saturating_sub(self.start) as usize) * 2);
         }
         let first = head.saturating_sub(keep);
         if first > self.start {
@@ -119,16 +118,8 @@ impl PcmWindow {
         let base = at.floor();
         let t = (at - base) as f32;
         let i = base as i64;
-        let p = [
-            self.frame(i - 1),
-            self.frame(i),
-            self.frame(i + 1),
-            self.frame(i + 2),
-        ];
-        (
-            catmull_rom([p[0].0, p[1].0, p[2].0, p[3].0], t),
-            catmull_rom([p[0].1, p[1].1, p[2].1, p[3].1], t),
-        )
+        let p = [self.frame(i - 1), self.frame(i), self.frame(i + 1), self.frame(i + 2)];
+        (catmull_rom([p[0].0, p[1].0, p[2].0, p[3].0], t), catmull_rom([p[0].1, p[1].1, p[2].1, p[3].1], t))
     }
 }
 
@@ -171,10 +162,7 @@ impl ScrubFilter {
         let a2 = g * a1;
         let a3 = g * a2;
         let mut out = [0.0f32; 2];
-        for (ch, x) in [f64::from(input.0), f64::from(input.1)]
-            .into_iter()
-            .enumerate()
-        {
+        for (ch, x) in [f64::from(input.0), f64::from(input.1)].into_iter().enumerate() {
             let [ic1, ic2] = self.state[ch];
             let v3 = x - ic2;
             let v1 = a1 * ic1 + a2 * v3;
@@ -250,11 +238,7 @@ impl Scrubber {
             if dt > 0.0 {
                 let measured = (frame - last_frame) / (dt / 1000.0 * self.sample_rate);
                 // A gap much longer than usual means the pointer rested in between.
-                let measured = if dt > STOPPED_INTERVALS * self.interval_ms * 4.0 {
-                    0.0
-                } else {
-                    measured
-                };
+                let measured = if dt > STOPPED_INTERVALS * self.interval_ms * 4.0 { 0.0 } else { measured };
                 self.speed += (measured.clamp(-MAX_RATE, MAX_RATE) - self.speed) * SPEED_SMOOTH;
                 self.interval_ms += (dt.min(100.0) - self.interval_ms) * INTERVAL_SMOOTH;
             }
@@ -286,11 +270,7 @@ impl Scrubber {
         }
         // The head runs ahead of the pointer to cover the ring's latency, so it is past the
         // pointer when the pointer stops. It stops too, rather than backing up audibly.
-        let wanted = if stopped {
-            0.0
-        } else {
-            (self.speed + CORRECT * error / block).clamp(-MAX_RATE, MAX_RATE)
-        };
+        let wanted = if stopped { 0.0 } else { (self.speed + CORRECT * error / block).clamp(-MAX_RATE, MAX_RATE) };
         let smooth = if stopped { STOP_SMOOTH } else { SMOOTH };
         let mut next = self.rate + (wanted - self.rate) * smooth;
         let resting = self.speed == 0.0 && next.abs() < REST_RATE;
@@ -360,11 +340,7 @@ mod tests {
         let mut next_event = 0.0;
         while now < ms + rest_ms {
             while next_event <= now && next_event <= ms {
-                s.point(
-                    from + speed * next_event / 1000.0 * RATE as f64,
-                    next_event,
-                    now,
-                );
+                s.point(from + speed * next_event / 1000.0 * RATE as f64, next_event, now);
                 next_event += 8.0;
             }
             s.render(&w, &mut block, now);
@@ -385,16 +361,10 @@ mod tests {
         let (ahead, fwd, _) = drag(from, 1.0, 400.0, 0.0);
         let (back, rev, _) = drag(from, -1.0, 400.0, 0.0);
         for (a, b) in ahead.iter().zip(&back) {
-            assert!(
-                ((a - from) + (b - from)).abs() < 1e-6,
-                "{a} and {b} are not mirrored"
-            );
+            assert!(((a - from) + (b - from)).abs() < 1e-6, "{a} and {b} are not mirrored");
         }
         let (f, r) = (rms(&fwd), rms(&rev));
-        assert!(
-            (f - r).abs() / f < 0.05,
-            "forward {f} and backward {r} differ in level"
-        );
+        assert!((f - r).abs() / f < 0.05, "forward {f} and backward {r} differ in level");
     }
 
     #[test]
@@ -403,15 +373,9 @@ mod tests {
         let (heads, audio, s) = drag(from, 1.0, 600.0, 0.0);
         let travelled = heads.last().unwrap() - from;
         let pointer = 0.6 * RATE as f64;
-        assert!(
-            (travelled - pointer).abs() < 0.08 * pointer,
-            "head moved {travelled}, pointer {pointer}"
-        );
+        assert!((travelled - pointer).abs() < 0.08 * pointer, "head moved {travelled}, pointer {pointer}");
         assert!((s.rate() - 1.0).abs() < 0.1, "rate settled at {}", s.rate());
-        assert!(
-            rms(&audio[audio.len() / 2..]) > 0.2,
-            "full-speed scrub is audible"
-        );
+        assert!(rms(&audio[audio.len() / 2..]) > 0.2, "full-speed scrub is audible");
     }
 
     #[test]
@@ -419,12 +383,7 @@ mod tests {
         let from = 5.0 * RATE as f64;
         let (_, audio, s) = drag(from, 1.5, 300.0, 400.0);
         assert!(s.settled(), "head still moving at rate {}", s.rate());
-        assert!(
-            (s.head() - s.target()).abs() < 1.0,
-            "rests at {} not {}",
-            s.head(),
-            s.target()
-        );
+        assert!((s.head() - s.target()).abs() < 1.0, "rests at {} not {}", s.head(), s.target());
         let tail = &audio[audio.len() - BLOCK_FRAMES * 2..];
         assert!(tail.iter().all(|v| v.abs() < 1e-3), "silent at rest");
     }
@@ -434,16 +393,9 @@ mod tests {
         let from = 5.0 * RATE as f64;
         let (heads, audio, s) = drag(from, 0.1, 1000.0, 0.0);
         for pair in heads.windows(2).skip(4) {
-            assert!(
-                pair[1] >= pair[0],
-                "the head went backwards on a slow forward drag"
-            );
+            assert!(pair[1] >= pair[0], "the head went backwards on a slow forward drag");
         }
-        assert!(
-            (s.rate() - 0.1).abs() < 0.03,
-            "rate {} for a 0.1x drag",
-            s.rate()
-        );
+        assert!((s.rate() - 0.1).abs() < 0.03, "rate {} for a 0.1x drag", s.rate());
         // Slow is dark and quiet: a 1 kHz tone at 0.1x is a 100 Hz tone, mostly passed, but
         // nothing in it may blow up.
         assert!(audio.iter().all(|v| v.is_finite() && v.abs() <= 1.0));
@@ -461,10 +413,7 @@ mod tests {
                 peak = peak.max(l.abs());
             }
         }
-        assert!(
-            peak < 0.01,
-            "Nyquist tone leaks {peak} through the slow filter"
-        );
+        assert!(peak < 0.01, "Nyquist tone leaks {peak} through the slow filter");
         assert!(f.cutoff_for(10.0) <= CUTOFF_CEILING * RATE as f64);
         assert!((f.cutoff_for(0.0) - CUTOFF_MIN).abs() < 1e-9);
     }

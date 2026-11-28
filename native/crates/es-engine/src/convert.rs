@@ -6,7 +6,10 @@ use rb_anlz::decode::Tags;
 use rb_anlz::write::{patch_tags, path_tag, timeline_patches};
 use rb_library::{ConversionTarget, Library, Stream};
 
-pub use es_convert::{build_command, clean_preset, convert_file, delay_offset_ms, encode, ffmpeg_path, matches_format, output_path, Preset};
+pub use es_convert::{
+    build_command, clean_preset, convert_file, delay_offset_ms, encode, ffmpeg_path, matches_format, output_path,
+    Preset,
+};
 
 use crate::import::file_type_code;
 use crate::{Error, Result};
@@ -51,7 +54,14 @@ fn convert_one(lib: &mut Library, share: &Path, id: &str, preset: &Preset, mode:
         let info = es_tags::read(&target).map_err(|e| Error::Other(e.to_string()))?;
         let offset = delay_offset_ms(&source, &target).unwrap_or(0);
         let nonzero = |v: i64| (v != 0).then_some(v);
-        let old_files: Vec<PathBuf> = files.analysis_path.as_deref().map(|rel| rb_anlz::files(share, rel)).unwrap_or_default().into_iter().filter(|p| p.is_file()).collect();
+        let old_files: Vec<PathBuf> = files
+            .analysis_path
+            .as_deref()
+            .map(|rel| rb_anlz::files(share, rel))
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| p.is_file())
+            .collect();
         let carries = old_files.iter().any(|p| p.extension().is_some_and(|e| e == "DAT"));
         let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let extension = target.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
@@ -102,7 +112,14 @@ fn convert_one(lib: &mut Library, share: &Path, id: &str, preset: &Preset, mode:
 
 /// Encode each track's audio file to `preset` and point the library at the result. A track that fails is left
 /// as it was.
-pub fn convert_tracks(lib: &mut Library, share: &Path, ids: &[String], preset: &Preset, mode: Mode, progress: &dyn Fn(usize, usize, Option<&str>)) -> Outcome {
+pub fn convert_tracks(
+    lib: &mut Library,
+    share: &Path,
+    ids: &[String],
+    preset: &Preset,
+    mode: Mode,
+    progress: &dyn Fn(usize, usize, Option<&str>),
+) -> Outcome {
     let mut ordered: Vec<&String> = Vec::new();
     for id in ids {
         if !ordered.contains(&id) {

@@ -84,28 +84,23 @@ pub(crate) fn spawn(
 ) -> std::io::Result<DeckHandle> {
     let (tx, rx) = std::sync::mpsc::channel();
     let worker_clock = Arc::clone(&clock);
-    std::thread::Builder::new()
-        .name(format!("es-deck-{deck}"))
-        .spawn(move || {
-            let mut worker = Worker {
-                deck,
-                clock: worker_clock,
-                producer,
-                device_rate,
-                events,
-                streamer: None,
-                generation: 0,
-                fresh: 0,
-                fresh_generation: 0,
-                scrub: None,
-                started: Instant::now(),
-            };
-            worker.run(&rx);
-        })?;
-    Ok(DeckHandle {
-        commands: tx,
-        clock,
-    })
+    std::thread::Builder::new().name(format!("es-deck-{deck}")).spawn(move || {
+        let mut worker = Worker {
+            deck,
+            clock: worker_clock,
+            producer,
+            device_rate,
+            events,
+            streamer: None,
+            generation: 0,
+            fresh: 0,
+            fresh_generation: 0,
+            scrub: None,
+            started: Instant::now(),
+        };
+        worker.run(&rx);
+    })?;
+    Ok(DeckHandle { commands: tx, clock })
 }
 
 struct Worker {
@@ -180,11 +175,7 @@ impl Worker {
     }
 
     fn error(&self, load_id: u64, message: String) {
-        (self.events)(DeckEvent::Error {
-            deck: self.deck,
-            load_id,
-            message,
-        });
+        (self.events)(DeckEvent::Error { deck: self.deck, load_id, message });
     }
 
     fn load(&mut self, request: u64, path: &std::path::Path) {
@@ -294,10 +285,8 @@ impl Worker {
         self.generation = self.clock.generation();
         self.clock.set_end_of_stream(false);
         let head = self.clock.position() as f64;
-        self.scrub = Some(Scrub {
-            head: Scrubber::new(head, self.device_rate, self.now_ms()),
-            window: PcmWindow::default(),
-        });
+        self.scrub =
+            Some(Scrub { head: Scrubber::new(head, self.device_rate, self.now_ms()), window: PcmWindow::default() });
     }
 
     /// Keeps decoded audio around the scrub head: refilled after a jump, extended a step at a
@@ -403,9 +392,7 @@ impl Worker {
         let start = streamer.position();
         // Only up to the out point, so the jump lands on the frame.
         let room = active.map_or(BLOCK_FRAMES, |(_, to)| {
-            usize::try_from(to.saturating_sub(start))
-                .unwrap_or(BLOCK_FRAMES)
-                .clamp(1, BLOCK_FRAMES)
+            usize::try_from(to.saturating_sub(start)).unwrap_or(BLOCK_FRAMES).clamp(1, BLOCK_FRAMES)
         });
         let mut block = Block::empty(generation, start);
         let frames = match streamer.fill(&mut block.samples[..room * 2]) {

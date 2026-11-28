@@ -51,10 +51,7 @@ fn a_follower_started_over_a_playing_master_lands_on_its_beat() {
         rig.engine.play(1);
         let _ = rig.pull(RATE as usize);
         let error = phase_error(&rig, BEAT as f64);
-        assert!(
-            error.abs() < TOLERANCE,
-            "from {start_ms} ms: off by {error} frames"
-        );
+        assert!(error.abs() < TOLERANCE, "from {start_ms} ms: off by {error} frames");
     }
 }
 
@@ -63,10 +60,7 @@ fn a_follower_at_another_tempo_keeps_the_masters_and_its_beat() {
     let rig = two_decks("s-tempo", 126.0);
     rig.engine.set_sync(Some((0, 1)));
     let tempo = rig.engine.snapshot(1).unwrap().tempo;
-    assert!(
-        (tempo - 120.0 / 126.0).abs() < 1e-9,
-        "takes the master's tempo: {tempo}"
-    );
+    assert!((tempo - 120.0 / 126.0).abs() < 1e-9, "takes the master's tempo: {tempo}");
     rig.engine.play(0);
     let _ = rig.pull(RATE as usize / 2);
     rig.engine.seek(1, 3_100.0);
@@ -90,11 +84,7 @@ fn a_master_started_under_a_playing_follower_joins_its_beat() {
     let _ = rig.pull(RATE as usize);
     let error = phase_error(&rig, BEAT as f64);
     assert!(error.abs() < TOLERANCE, "off by {error} frames");
-    assert_eq!(
-        position(&rig, 1),
-        follower_before + u64::from(RATE),
-        "the deck already playing was left alone"
-    );
+    assert_eq!(position(&rig, 1), follower_before + u64::from(RATE), "the deck already playing was left alone");
 }
 
 #[test]
@@ -106,17 +96,11 @@ fn a_cue_hold_plays_where_it_is_until_play_latches_it() {
     rig.engine.seek(1, 1_100.0);
     rig.engine.play_unsynced(1);
     let _ = rig.pull(RATE as usize / 2);
-    assert!(
-        phase_error(&rig, BEAT as f64).abs() > TOLERANCE,
-        "the hold was not moved onto the beat"
-    );
+    assert!(phase_error(&rig, BEAT as f64).abs() > TOLERANCE, "the hold was not moved onto the beat");
     rig.engine.align(1);
     let _ = rig.pull(RATE as usize / 2);
     let error = phase_error(&rig, BEAT as f64);
-    assert!(
-        error.abs() < TOLERANCE,
-        "off by {error} frames once latched"
-    );
+    assert!(error.abs() < TOLERANCE, "off by {error} frames once latched");
 }
 
 #[test]
@@ -151,10 +135,7 @@ fn without_sync_a_deck_starts_where_it_was() {
     rig.engine.play(1);
     let _ = rig.pull(4096);
     let at = position(&rig, 1);
-    assert!(
-        at > u64::from(RATE) * 11 / 10,
-        "it plays on from 1.1 s: {at}"
-    );
+    assert!(at > u64::from(RATE) * 11 / 10, "it plays on from 1.1 s: {at}");
     assert!(phase_error(&rig, BEAT as f64).abs() > TOLERANCE);
 }
 
@@ -170,10 +151,7 @@ fn handing_the_master_over_moves_neither_deck() {
     rig.engine.set_sync(Some((1, 0)));
     let _ = rig.pull(RATE as usize / 2);
     let half = u64::from(RATE) / 2;
-    assert_eq!(
-        (position(&rig, 0), position(&rig, 1)),
-        (before.0 + half, before.1 + half)
-    );
+    assert_eq!((position(&rig, 0), position(&rig, 1)), (before.0 + half, before.1 + half));
 }
 
 #[test]
@@ -188,10 +166,7 @@ fn a_follower_at_the_start_of_its_track_moves_forward_onto_the_beat() {
         rig.engine.play(1);
         let _ = rig.pull(RATE as usize / 2);
         let error = phase_error(&rig, BEAT as f64);
-        assert!(
-            error.abs() < TOLERANCE,
-            "with the master from {master_ms} ms: off by {error} frames"
-        );
+        assert!(error.abs() < TOLERANCE, "with the master from {master_ms} ms: off by {error} frames");
     }
 }
 
@@ -235,8 +210,7 @@ fn the_master_jumping_lands_on_the_followers_beat() {
 #[test]
 fn entering_a_loop_while_both_play_lands_on_the_partners_beat() {
     let rig = both_playing_in_phase("s-loop", true);
-    rig.engine
-        .set_loop(1, OFF_BEAT_MS, OFF_BEAT_MS + 4_000.0, true);
+    rig.engine.set_loop(1, OFF_BEAT_MS, OFF_BEAT_MS + 4_000.0, true);
     let _ = rig.pull(RATE as usize);
     let error = phase_error(&rig, BEAT as f64);
     assert!(error.abs() < TOLERANCE, "off by {error} frames");
@@ -247,10 +221,7 @@ fn without_sync_a_jump_goes_exactly_where_it_was_sent() {
     let rig = both_playing_in_phase("s-jump-unsynced", false);
     rig.engine.seek(1, OFF_BEAT_MS);
     let _ = rig.pull(RATE as usize);
-    assert!(
-        phase_error(&rig, BEAT as f64).abs() > TOLERANCE,
-        "left off the beat"
-    );
+    assert!(phase_error(&rig, BEAT as f64).abs() > TOLERANCE, "left off the beat");
 }
 
 #[test]
@@ -262,9 +233,5 @@ fn a_paused_synced_deck_goes_exactly_where_it_was_sent() {
     rig.engine.seek(1, OFF_BEAT_MS);
     let _ = rig.pull(RATE as usize / 10);
     let asked = (OFF_BEAT_MS * f64::from(RATE) / 1000.0).round() as u64;
-    assert_eq!(
-        position(&rig, 1),
-        asked,
-        "CUE moves a paused deck to the frame"
-    );
+    assert_eq!(position(&rig, 1), asked, "CUE moves a paused deck to the frame");
 }

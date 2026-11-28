@@ -33,11 +33,7 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Self {
-            tempo: TempoOptions::default(),
-            grid: true,
-            key: true,
-        }
+        Self { tempo: TempoOptions::default(), grid: true, key: true }
     }
 }
 
@@ -90,13 +86,7 @@ pub fn analyse_samples(mono: &[f32], sample_rate: f64, options: &Options) -> Ana
         || options.key.then(|| key::analyse(mono, sample_rate)).flatten(),
     );
     let (bpm, beats) = grid.unwrap_or_default();
-    Analysis {
-        duration,
-        bpm,
-        beats,
-        key,
-        waveform: waveform::features(mono, sample_rate),
-    }
+    Analysis { duration, bpm, beats, key, waveform: waveform::features(mono, sample_rate) }
 }
 
 fn beatgrid(mono: &[f32], sample_rate: f64, duration: f64, opts: &TempoOptions) -> Option<(f64, Vec<Beat>)> {
@@ -106,19 +96,8 @@ fn beatgrid(mono: &[f32], sample_rate: f64, duration: f64, opts: &TempoOptions) 
     );
     let onset = onset::smooth(&onset::flux(&stft, ONSET_HZ.0, ONSET_HZ.1), 1);
     let low = onset::smooth(&onset::flux(&stft, KICK_HZ.0, KICK_HZ.1), 1);
-    let bands: Vec<_> = tempo::PHASE_BANDS
-        .iter()
-        .map(|&(a, b)| onset::smooth(&onset::flux(&stft, a, b), 1))
-        .collect();
-    let grid = tempo::estimate(
-        &tempo::Inputs {
-            bands: &bands,
-            onset: &onset,
-            attacks: &attacks,
-            duration,
-        },
-        opts,
-    )?;
+    let bands: Vec<_> = tempo::PHASE_BANDS.iter().map(|&(a, b)| onset::smooth(&onset::flux(&stft, a, b), 1)).collect();
+    let grid = tempo::estimate(&tempo::Inputs { bands: &bands, onset: &onset, attacks: &attacks, duration }, opts)?;
     let first = downbeat::first_downbeat(&stft, &grid.beats, &|t| f64::from(low.at_time(t)));
     let numbers = downbeat::numbers(grid.beats.len(), first);
     let beats = grid
@@ -200,13 +179,8 @@ mod tests {
     fn dynamic_follows_a_tempo_change() {
         let mut audio = track(120.0, 48.0, 0.0, &[220.0]);
         audio.extend(track(128.0, 48.0, 0.0, &[220.0]));
-        let options = Options {
-            tempo: TempoOptions {
-                dynamic: true,
-                ..TempoOptions::default()
-            },
-            ..Options::default()
-        };
+        let options =
+            Options { tempo: TempoOptions { dynamic: true, ..TempoOptions::default() }, ..Options::default() };
         let a = analyse_samples(&audio, RATE, &options);
         let tempos: Vec<u16> = a.beats.iter().map(|b| b.tempo_x100).collect();
         assert_eq!(tempos.first(), Some(&12_000));

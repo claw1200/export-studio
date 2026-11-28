@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use rb_library::fixture;
-use rb_library::{Guard, Library};
 use es_engine::import::{import_files, Options};
 use es_engine::relocate::{find_missing, relocate};
+use rb_library::fixture;
+use rb_library::{Guard, Library};
 
 fn wav(path: &Path) {
     let data = 16000u32;
@@ -29,7 +29,13 @@ fn a_moved_file_is_found_and_the_track_pointed_at_it() {
     let share = lib.share_dir();
     let old = dir.path().join("Old Song.wav");
     wav(&old);
-    let out = import_files(&mut lib, &share, &[old.to_string_lossy().into_owned()], &Options { artwork: false, playlist: None }).unwrap();
+    let out = import_files(
+        &mut lib,
+        &share,
+        &[old.to_string_lossy().into_owned()],
+        &Options { artwork: false, playlist: None },
+    )
+    .unwrap();
     let id = out.ids[0].clone();
 
     let new_dir = dir.path().join("moved/deeper");
@@ -56,8 +62,17 @@ fn relocating_to_a_missing_file_changes_nothing() {
     let share = lib.share_dir();
     let file = dir.path().join("a.wav");
     wav(&file);
-    let id = import_files(&mut lib, &share, &[file.to_string_lossy().into_owned()], &Options { artwork: false, playlist: None }).unwrap().ids[0].clone();
-    let err = relocate(&mut lib, &share, &[(id.clone(), dir.path().join("nope.wav").to_string_lossy().into_owned())]).unwrap_err();
+    let id = import_files(
+        &mut lib,
+        &share,
+        &[file.to_string_lossy().into_owned()],
+        &Options { artwork: false, playlist: None },
+    )
+    .unwrap()
+    .ids[0]
+        .clone();
+    let err = relocate(&mut lib, &share, &[(id.clone(), dir.path().join("nope.wav").to_string_lossy().into_owned())])
+        .unwrap_err();
     assert!(err.to_string().contains("Can't find nope.wav"));
     assert_eq!(Path::new(&lib.track_files(&id).unwrap().unwrap().folder_path), file);
 }

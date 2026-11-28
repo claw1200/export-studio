@@ -2,12 +2,12 @@
 
 use std::path::Path;
 
-use rb_anlz::decode::{self, Tags};
-use rb_library::fixture;
-use rb_library::{Guard, Library};
 use es_engine::analysis::{apply_analysis, Analysis, Options as AnalysisOptions};
 use es_engine::convert::{clean_preset, convert_tracks, delay_offset_ms, ffmpeg_path, Mode};
 use es_engine::import::{import_files, Options};
+use rb_anlz::decode::{self, Tags};
+use rb_library::fixture;
+use rb_library::{Guard, Library};
 use serde_json::json;
 
 fn wav(path: &Path) {
@@ -33,7 +33,15 @@ fn scene() -> (tempfile::TempDir, Library, String, std::path::PathBuf) {
     let share = lib.share_dir();
     let file = dir.path().join("Song.wav");
     wav(&file);
-    let id = import_files(&mut lib, &share, &[file.to_string_lossy().into_owned()], &Options { artwork: false, playlist: None }).unwrap().ids[0].clone();
+    let id = import_files(
+        &mut lib,
+        &share,
+        &[file.to_string_lossy().into_owned()],
+        &Options { artwork: false, playlist: None },
+    )
+    .unwrap()
+    .ids[0]
+        .clone();
     lib.write(|tx| tx.set_hot_cue(&id, 1, 500, None)).unwrap();
     (dir, lib, id, file)
 }
@@ -78,7 +86,8 @@ fn a_delay_moves_the_grid_and_the_detail_waveforms() {
         bpm: 128.0,
         duration: 1.0,
     };
-    apply_analysis(&mut lib, &share, &id, &analysis, AnalysisOptions { overwrite: true, grid: true, key: false }).unwrap();
+    apply_analysis(&mut lib, &share, &id, &analysis, AnalysisOptions { overwrite: true, grid: true, key: false })
+        .unwrap();
     let relative = lib.track_files(&id).unwrap().unwrap().analysis_path.unwrap();
     let read = |suffix: &str| Tags::read(&rb_anlz::file(&share, &relative, suffix).unwrap()).unwrap();
     let before = decode::rgb(&read("EXT")).unwrap();
@@ -91,11 +100,17 @@ fn a_delay_moves_the_grid_and_the_detail_waveforms() {
     let offset = delay_offset_ms(&wav_file, Path::new(&mp3)).unwrap();
     assert!(offset > 0, "an MP3 starts later than its WAV");
 
-    assert_eq!(decode::beatgrid(&read("DAT")).unwrap().times, [0, 469, 938].map(|t| t + u32::try_from(offset).unwrap()));
+    assert_eq!(
+        decode::beatgrid(&read("DAT")).unwrap().times,
+        [0, 469, 938].map(|t| t + u32::try_from(offset).unwrap())
+    );
     let columns = usize::try_from((offset * 150 + 500) / 1000).unwrap();
     let after = decode::rgb(&read("EXT")).unwrap();
     assert_eq!(after.length, before.length + columns);
-    assert!(after.heights[..columns].iter().chain(&after.colors[..columns * 3]).all(|v| *v == 0), "the new start is silent");
+    assert!(
+        after.heights[..columns].iter().chain(&after.colors[..columns * 3]).all(|v| *v == 0),
+        "the new start is silent"
+    );
     assert_eq!(after.heights[columns..], before.heights[..]);
     assert_eq!(after.colors[columns * 3..], before.colors[..]);
     let bands = decode::bands(&read("2EX"), "PWV7").unwrap();

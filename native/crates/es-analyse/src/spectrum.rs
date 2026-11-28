@@ -32,54 +32,36 @@ impl Stft {
 }
 
 pub fn hann(n: usize) -> Vec<f32> {
-    (0..n)
-        .map(|i| 0.5 - 0.5 * (2.0 * PI * i as f32 / n as f32).cos())
-        .collect()
+    (0..n).map(|i| 0.5 - 0.5 * (2.0 * PI * i as f32 / n as f32).cos()).collect()
 }
 
 /// Magnitude spectra of `samples` in frames of `frame` every `hop` samples, Hann windowed.
 /// Frames run past the end with zeros, so the last samples are covered.
 pub fn stft(samples: &[f32], sample_rate: f64, frame: usize, hop: usize) -> Stft {
-    let frames = if samples.is_empty() {
-        0
-    } else {
-        samples.len().div_ceil(hop)
-    };
+    let frames = if samples.is_empty() { 0 } else { samples.len().div_ceil(hop) };
     let bins = frame / 2 + 1;
     let window = hann(frame);
     // A full-scale sine peaks at 1, whatever the frame size.
     let scale = 2.0 / window.iter().sum::<f32>();
     let fft: Arc<dyn RealToComplex<f32>> = RealFftPlanner::<f32>::new().plan_fft_forward(frame);
     let mut mags = vec![0.0f32; frames * bins];
-    mags.par_chunks_mut(bins * 64)
-        .enumerate()
-        .for_each(|(chunk, out)| {
-            let mut input = fft.make_input_vec();
-            let mut spectrum = fft.make_output_vec();
-            let mut scratch = fft.make_scratch_vec();
-            for (j, row) in out.chunks_mut(bins).enumerate() {
-                let t = chunk * 64 + j;
-                let start = t * hop;
-                for (i, slot) in input.iter_mut().enumerate() {
-                    *slot = samples.get(start + i).copied().unwrap_or(0.0) * window[i];
-                }
-                if fft
-                    .process_with_scratch(&mut input, &mut spectrum, &mut scratch)
-                    .is_err()
-                {
-                    continue;
-                }
-                for (m, c) in row.iter_mut().zip(&spectrum) {
-                    *m = c.norm() * scale;
-                }
+    mags.par_chunks_mut(bins * 64).enumerate().for_each(|(chunk, out)| {
+        let mut input = fft.make_input_vec();
+        let mut spectrum = fft.make_output_vec();
+        let mut scratch = fft.make_scratch_vec();
+        for (j, row) in out.chunks_mut(bins).enumerate() {
+            let t = chunk * 64 + j;
+            let start = t * hop;
+            for (i, slot) in input.iter_mut().enumerate() {
+                *slot = samples.get(start + i).copied().unwrap_or(0.0) * window[i];
             }
-        });
-    Stft {
-        frame,
-        hop,
-        sample_rate,
-        mags,
-        bins,
-        frames,
-    }
+            if fft.process_with_scratch(&mut input, &mut spectrum, &mut scratch).is_err() {
+                continue;
+            }
+            for (m, c) in row.iter_mut().zip(&spectrum) {
+                *m = c.norm() * scale;
+            }
+        }
+    });
+    Stft { frame, hop, sample_rate, mags, bins, frames }
 }

@@ -38,12 +38,7 @@ impl Biquad {
             Pass::Low => ((1.0 - cos) / 2.0, 1.0 - cos),
             Pass::High => ((1.0 + cos) / 2.0, -(1.0 + cos)),
         };
-        Self {
-            b: [b0 / a0, b1 / a0, b0 / a0],
-            a: [-2.0 * cos / a0, (1.0 - alpha) / a0],
-            x: [0.0; 2],
-            y: [0.0; 2],
-        }
+        Self { b: [b0 / a0, b1 / a0, b0 / a0], a: [-2.0 * cos / a0, (1.0 - alpha) / a0], x: [0.0; 2], y: [0.0; 2] }
     }
 
     fn run(&mut self, x: f64) -> f64 {
@@ -69,41 +64,39 @@ pub fn features(mono: &[f32], sample_rate: f64) -> Vec<u8> {
     let parts = rayon::current_num_threads().max(1);
     let per_part = count.div_ceil(parts).max(1);
     let mut out = vec![0u8; count * LANES];
-    out.par_chunks_mut(per_part * LANES)
-        .enumerate()
-        .for_each(|(part, chunk)| {
-            let first = part * per_part;
-            let mut low = Biquad::new(Pass::Low, sample_rate, LOW_HZ);
-            let mut mid_hp = Biquad::new(Pass::High, sample_rate, LOW_HZ);
-            let mut mid_lp = Biquad::new(Pass::Low, sample_rate, HIGH_HZ);
-            let mut high = Biquad::new(Pass::High, sample_rate, HIGH_HZ);
-            let start = (first as f64 * step).floor() as usize;
-            for &x in &mono[start.saturating_sub(warmup)..start.min(mono.len())] {
+    out.par_chunks_mut(per_part * LANES).enumerate().for_each(|(part, chunk)| {
+        let first = part * per_part;
+        let mut low = Biquad::new(Pass::Low, sample_rate, LOW_HZ);
+        let mut mid_hp = Biquad::new(Pass::High, sample_rate, LOW_HZ);
+        let mut mid_lp = Biquad::new(Pass::Low, sample_rate, HIGH_HZ);
+        let mut high = Biquad::new(Pass::High, sample_rate, HIGH_HZ);
+        let start = (first as f64 * step).floor() as usize;
+        for &x in &mono[start.saturating_sub(warmup)..start.min(mono.len())] {
+            let x = f64::from(x);
+            low.run(x);
+            mid_lp.run(mid_hp.run(x));
+            high.run(x);
+        }
+        for (j, entry) in chunk.chunks_mut(LANES).enumerate() {
+            let k = first + j;
+            let a = ((k as f64 * step).floor() as usize).min(mono.len());
+            let b = (((k + 1) as f64 * step).floor() as usize).min(mono.len());
+            let mut peak = [0.0f64; 4];
+            let mut energy = [0.0f64; 4];
+            for &x in &mono[a..b] {
                 let x = f64::from(x);
-                low.run(x);
-                mid_lp.run(mid_hp.run(x));
-                high.run(x);
-            }
-            for (j, entry) in chunk.chunks_mut(LANES).enumerate() {
-                let k = first + j;
-                let a = ((k as f64 * step).floor() as usize).min(mono.len());
-                let b = (((k + 1) as f64 * step).floor() as usize).min(mono.len());
-                let mut peak = [0.0f64; 4];
-                let mut energy = [0.0f64; 4];
-                for &x in &mono[a..b] {
-                    let x = f64::from(x);
-                    let v = [x, low.run(x), mid_lp.run(mid_hp.run(x)), high.run(x)];
-                    for i in 0..4 {
-                        peak[i] = peak[i].max(v[i].abs());
-                        energy[i] += v[i] * v[i];
-                    }
-                }
-                let n = (b - a).max(1) as f64;
+                let v = [x, low.run(x), mid_lp.run(mid_hp.run(x)), high.run(x)];
                 for i in 0..4 {
-                    entry[i * 2] = quantise(peak[i]);
-                    entry[i * 2 + 1] = quantise((energy[i] / n).sqrt() * std::f64::consts::SQRT_2);
+                    peak[i] = peak[i].max(v[i].abs());
+                    energy[i] += v[i] * v[i];
                 }
             }
-        });
+            let n = (b - a).max(1) as f64;
+            for i in 0..4 {
+                entry[i * 2] = quantise(peak[i]);
+                entry[i * 2 + 1] = quantise((energy[i] / n).sqrt() * std::f64::consts::SQRT_2);
+            }
+        }
+    });
     out
 }

@@ -7,12 +7,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
 use crate::usb::UsbOp;
-use rb_library::{Library, TrackEdit};
 use es_engine::library::{LibraryService, ServiceEvent};
 use napi::bindgen_prelude::AsyncTask;
 use napi::threadsafe_function::{ErrorStrategy, ThreadSafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::{Env, JsFunction, Task};
 use napi_derive::napi;
+use rb_library::{Library, TrackEdit};
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -58,10 +58,9 @@ impl Core {
                 }
                 self.emit("convert.progress", &data);
             }
-            ServiceEvent::UsbImportProgress { done, total, name } => self.emit(
-                "usb.progress",
-                &json!({ "phase": "import", "done": done, "total": total, "name": name }),
-            ),
+            ServiceEvent::UsbImportProgress { done, total, name } => {
+                self.emit("usb.progress", &json!({ "phase": "import", "done": done, "total": total, "name": name }))
+            }
             ServiceEvent::UsbSyncProgress(progress) => {
                 let data = match progress {
                     es_engine::sync::Progress::Step { phase, done, total, unit, file, name } => {
@@ -106,8 +105,19 @@ fn whole(value: &serde_json::Value, label: &str, limit: i64) -> napi::Result<i64
 fn parse_edit(fields: &str) -> napi::Result<TrackEdit> {
     let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(fields).map_err(failure)?;
     let known = [
-        "title", "comment", "year", "trackNo", "rating", "color", "artist", "remixer", "originalArtist", "composer",
-        "album", "genre", "label",
+        "title",
+        "comment",
+        "year",
+        "trackNo",
+        "rating",
+        "color",
+        "artist",
+        "remixer",
+        "originalArtist",
+        "composer",
+        "album",
+        "genre",
+        "label",
     ];
     let mut unknown: Vec<&str> = map.keys().map(String::as_str).filter(|k| !known.contains(k)).collect();
     if !unknown.is_empty() {
@@ -247,7 +257,11 @@ impl Run {
         let Some(job) = job else { return Ok(json!(false)) };
         let emit = |event| self.core.emit_service_event(event);
         let made = job.run(&emit).map_err(failure)?;
-        if daily { Ok(json!(true)) } else { json_of(&made) }
+        if daily {
+            Ok(json!(true))
+        } else {
+            json_of(&made)
+        }
     }
 
     fn perform(&self, service: &mut LibraryService) -> napi::Result<Value> {
@@ -298,19 +312,21 @@ impl Run {
             Op::HistoryTracks(id) => return json_of(&service.history_tracks(id).map_err(failure)?),
             Op::TrackDetail(id) => return json_of(&service.track_detail(id).map_err(failure)?),
             Op::TrackPreviews(ids) => {
-                let (device, own): (Vec<String>, Vec<String>) = ids.iter().cloned().partition(|id| id.starts_with("usb:"));
-                let mut by_id: std::collections::HashMap<String, es_index::detail::Preview> = service
-                    .previews(&own)
-                    .map_err(failure)?
-                    .into_iter()
-                    .map(|row| (row.id.clone(), row))
-                    .collect();
+                let (device, own): (Vec<String>, Vec<String>) =
+                    ids.iter().cloned().partition(|id| id.starts_with("usb:"));
+                let mut by_id: std::collections::HashMap<String, es_index::detail::Preview> =
+                    service.previews(&own).map_err(failure)?.into_iter().map(|row| (row.id.clone(), row)).collect();
                 let devices = &self.core.devices;
                 for row in es_index::device::previews(&mut |volume| devices.load(volume).ok().flatten(), &device) {
                     by_id.insert(row.id.clone(), row);
                 }
                 let mut seen = std::collections::HashSet::new();
-                let ordered: Vec<_> = ids.iter().filter(|id| seen.insert(id.as_str())).take(80).filter_map(|id| by_id.remove(id)).collect();
+                let ordered: Vec<_> = ids
+                    .iter()
+                    .filter(|id| seen.insert(id.as_str()))
+                    .take(80)
+                    .filter_map(|id| by_id.remove(id))
+                    .collect();
                 return json_of(&ordered);
             }
             Op::TrackFindMissing(ids, directory) => {
@@ -330,9 +346,9 @@ impl Run {
                         .filter(|id| !id.is_empty())
                         .ok_or_else(|| failure("tracks must be a list of track ids"))?;
                     let has_cache = item.get("size").is_some() && item.get("mtime").is_some();
-                    let cached_size = item
-                        .get("size")
-                        .and_then(|size| size.as_i64().or_else(|| size.as_str().and_then(|value| value.trim().parse().ok())));
+                    let cached_size = item.get("size").and_then(|size| {
+                        size.as_i64().or_else(|| size.as_str().and_then(|value| value.trim().parse().ok()))
+                    });
                     let cached_mtime = item.get("mtime").and_then(|mtime| match mtime {
                         Value::Null => None,
                         Value::String(value) => Some(value.clone()),
@@ -371,10 +387,8 @@ impl Run {
             }
             Op::TrackRelocate(body) => {
                 let parsed: serde_json::Map<String, Value> = serde_json::from_str(body).map_err(failure)?;
-                let moves: Vec<(String, String)> = parsed
-                    .into_iter()
-                    .map(|(id, path)| (id, path.as_str().unwrap_or_default().to_owned()))
-                    .collect();
+                let moves: Vec<(String, String)> =
+                    parsed.into_iter().map(|(id, path)| (id, path.as_str().unwrap_or_default().to_owned())).collect();
                 return json_of(&service.track_relocate(&moves).map_err(failure)?);
             }
             Op::BeatgridSet(id, body) => {
@@ -399,9 +413,14 @@ impl Run {
                             .iter()
                             .filter_map(|item| {
                                 Some(rb_library::CueMove {
-                                    id: item.get("id").map(|value| value.as_str().map_or_else(|| value.to_string(), str::to_owned))?,
+                                    id: item
+                                        .get("id")
+                                        .map(|value| value.as_str().map_or_else(|| value.to_string(), str::to_owned))?,
                                     start_ms: item.get("start")?.as_f64()?.round_ties_even() as i64,
-                                    end_ms: item.get("end").and_then(Value::as_f64).map(|end| end.round_ties_even() as i64),
+                                    end_ms: item
+                                        .get("end")
+                                        .and_then(Value::as_f64)
+                                        .map(|end| end.round_ties_even() as i64),
                                 })
                             })
                             .collect()
@@ -431,7 +450,10 @@ impl Run {
                     .decode(result.get("waveform").and_then(Value::as_str).unwrap_or(""))
                     .map_err(failure)?;
                 let key = result.get("key").filter(|value| !value.is_null()).map(|value| {
-                    (value.get("tonic").and_then(Value::as_i64).unwrap_or(0), value.get("minor").and_then(Value::as_bool).unwrap_or(false))
+                    (
+                        value.get("tonic").and_then(Value::as_i64).unwrap_or(0),
+                        value.get("minor").and_then(Value::as_bool).unwrap_or(false),
+                    )
                 });
                 let analysis = es_engine::analysis::Analysis {
                     beats,
@@ -440,7 +462,9 @@ impl Run {
                     bpm: result.get("bpm").and_then(Value::as_f64).unwrap_or(0.0),
                     duration: result.get("duration").and_then(Value::as_f64).unwrap_or(0.0),
                 };
-                let flag = |name: &str, default: bool| options.get(name).map_or(default, |value| value.as_bool().unwrap_or(false));
+                let flag = |name: &str, default: bool| {
+                    options.get(name).map_or(default, |value| value.as_bool().unwrap_or(false))
+                };
                 let chosen = es_engine::analysis::Options {
                     overwrite: flag("overwrite", false),
                     grid: flag("grid", true),
@@ -450,7 +474,8 @@ impl Run {
             }
             Op::Convert { ids, preset, mode } => {
                 let mode = es_engine::convert::Mode::parse(mode).map_err(failure)?;
-                let preset = es_engine::convert::clean_preset(&serde_json::from_str(preset).map_err(failure)?).map_err(failure)?;
+                let preset = es_engine::convert::clean_preset(&serde_json::from_str(preset).map_err(failure)?)
+                    .map_err(failure)?;
                 let emit = |event| self.core.emit_service_event(event);
                 return json_of(&service.track_convert(ids, &preset, mode, &emit).map_err(failure)?);
             }
@@ -480,7 +505,8 @@ impl Run {
                 return json_of(&service.playlist_tree_move(id, parent, *index as usize).map_err(failure)?);
             }
             Op::PlaylistCreate { name, parent, folder, ids } => {
-                let (id, playlists) = service.playlist_create(name, parent.as_deref(), *folder, ids).map_err(failure)?;
+                let (id, playlists) =
+                    service.playlist_create(name, parent.as_deref(), *folder, ids).map_err(failure)?;
                 return json_of(&json!({ "id": id, "playlists": playlists }));
             }
             Op::PlaylistRename(id, name) => return json_of(&service.playlist_rename(id, name).map_err(failure)?),
@@ -678,10 +704,11 @@ impl RekordboxLibrary {
         env: Env,
         #[napi(ts_arg_type = "(event: string, data: string) => void")] callback: JsFunction,
     ) -> napi::Result<()> {
-        let mut handler: Events = callback.create_threadsafe_function(0, |ctx: ThreadSafeCallContext<(String, String)>| {
-            let (event, data) = ctx.value;
-            Ok(vec![ctx.env.create_string(&event)?, ctx.env.create_string(&data)?])
-        })?;
+        let mut handler: Events =
+            callback.create_threadsafe_function(0, |ctx: ThreadSafeCallContext<(String, String)>| {
+                let (event, data) = ctx.value;
+                Ok(vec![ctx.env.create_string(&event)?, ctx.env.create_string(&data)?])
+            })?;
         // Events must not keep the process alive on their own.
         handler.unref(&env)?;
         *self.core.events.lock().map_err(|_| failure("the event lock was poisoned"))? = Some(handler);
@@ -876,7 +903,13 @@ impl RekordboxLibrary {
     }
 
     #[napi(ts_return_type = "Promise<unknown>")]
-    pub fn usb_sync(&self, volume: String, playlist_ids: Vec<String>, decisions: Option<Value>, convert: Option<Value>) -> AsyncTask<Run> {
+    pub fn usb_sync(
+        &self,
+        volume: String,
+        playlist_ids: Vec<String>,
+        decisions: Option<Value>,
+        convert: Option<Value>,
+    ) -> AsyncTask<Run> {
         self.run(Op::Usb(UsbOp::Sync { volume, playlists: playlist_ids, decisions, convert }))
     }
 

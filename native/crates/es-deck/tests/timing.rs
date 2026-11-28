@@ -17,8 +17,7 @@ type Path<'a> = (&'a str, f64, &'a dyn Fn(&Rig));
 fn bursts(name: &str, frames: u32) -> std::path::PathBuf {
     wav(name, frames, |i| {
         if i % BURST_EVERY < BURST_LEN {
-            ((f64::from(i) * 2.0 * std::f64::consts::PI * 1000.0 / f64::from(RATE)).sin()
-                * 20_000.0) as i16
+            ((f64::from(i) * 2.0 * std::f64::consts::PI * 1000.0 / f64::from(RATE)).sin() * 20_000.0) as i16
         } else {
             0
         }
@@ -68,15 +67,9 @@ fn lag_after(name: &str, tempo: f64, before: impl Fn(&Rig), switch: impl Fn(&Rig
 }
 
 fn assert_on_time(what: &str, lags: &[f64]) {
-    assert!(
-        lags.len() >= 4,
-        "{what}: too few bursts heard after the switch: {lags:?}"
-    );
+    assert!(lags.len() >= 4, "{what}: too few bursts heard after the switch: {lags:?}");
     for lag in lags {
-        assert!(
-            lag.abs() < TOLERANCE_MS,
-            "{what}: a burst was {lag:+.2} ms off the beat: {lags:?}"
-        );
+        assert!(lag.abs() < TOLERANCE_MS, "{what}: a burst was {lag:+.2} ms off the beat: {lags:?}");
     }
 }
 
@@ -88,23 +81,13 @@ fn shifting_the_key_onto_the_stretcher_keeps_time() {
 
 #[test]
 fn clearing_the_key_shift_off_the_stretcher_keeps_time() {
-    let lags = lag_after(
-        "t-key-off",
-        1.0,
-        |r| r.engine.set_key_shift(0, 1),
-        |r| r.engine.set_key_shift(0, 0),
-    );
+    let lags = lag_after("t-key-off", 1.0, |r| r.engine.set_key_shift(0, 1), |r| r.engine.set_key_shift(0, 0));
     assert_on_time("key +1 to 0", &lags);
 }
 
 #[test]
 fn switching_master_tempo_keeps_time_both_ways() {
-    let on = lag_after(
-        "t-mt-on",
-        1.04,
-        |r| r.engine.set_tempo(0, 1.04),
-        |r| r.engine.set_master_tempo(0, true),
-    );
+    let on = lag_after("t-mt-on", 1.04, |r| r.engine.set_tempo(0, 1.04), |r| r.engine.set_master_tempo(0, true));
     assert_on_time("master tempo on", &on);
     let off = lag_after(
         "t-mt-off",
@@ -135,22 +118,13 @@ fn every_path_starts_on_the_frame_it_was_sent_to() {
         setup(&rig);
         // A quarter of a second before the second burst.
         let lead = RATE / 4;
-        rig.engine.seek(
-            0,
-            f64::from(BURST_EVERY * 2 - lead) * 1000.0 / f64::from(RATE),
-        );
+        rig.engine.seek(0, f64::from(BURST_EVERY * 2 - lead) * 1000.0 / f64::from(RATE));
         rig.settle_ring();
         rig.engine.play(0);
         let out = rig.pull(RATE as usize);
-        let first = out
-            .chunks_exact(2)
-            .position(|f| f[0].abs() > 0.15)
-            .expect("no burst");
+        let first = out.chunks_exact(2).position(|f| f[0].abs() > 0.15).expect("no burst");
         let off = (first as f64 - f64::from(lead) / tempo) / f64::from(RATE) * 1000.0;
-        assert!(
-            off.abs() < TOLERANCE_MS,
-            "{name}: burst heard {off:+.2} ms from where it belongs"
-        );
+        assert!(off.abs() < TOLERANCE_MS, "{name}: burst heard {off:+.2} ms from where it belongs");
     }
 }
 
@@ -196,11 +170,7 @@ fn a_deck_moved_just_before_starting_together_still_starts_with_the_other() {
     let _ = rig.pull(4096);
     let a = rig.engine.snapshot(0).unwrap().position_frames;
     let b = rig.engine.snapshot(1).unwrap().position_frames;
-    assert_eq!(
-        b - a,
-        u64::from(RATE) * 2,
-        "both decks moved the same distance from where they started"
-    );
+    assert_eq!(b - a, u64::from(RATE) * 2, "both decks moved the same distance from where they started");
 }
 
 #[test]
@@ -235,10 +205,7 @@ fn nudging_one_deck_onto_another_lines_them_up_exactly() {
     let _ = rig.pull(8192);
     let a = rig.engine.snapshot(0).unwrap().position_frames;
     let b = rig.engine.snapshot(1).unwrap().position_frames;
-    assert_eq!(
-        b, a,
-        "deck B landed exactly level with deck A, with no time lost to the jump"
-    );
+    assert_eq!(b, a, "deck B landed exactly level with deck A, with no time lost to the jump");
 }
 
 #[test]
@@ -254,8 +221,5 @@ fn a_paused_deck_moved_twice_plays_from_the_second_move() {
     let past_fade = first_audible(&out) + usize::from(FADE_FRAMES) * 2;
     let heard = value(out[past_fade * 2]);
     let expected = (i64::from(RATE) * 2 + past_fade as i64 - first_audible(&out) as i64) % 30_000;
-    assert!(
-        (heard - expected).abs() <= 1,
-        "playing from 2 s, not 1 s: heard {heard}, expected {expected}"
-    );
+    assert!((heard - expected).abs() <= 1, "playing from 2 s, not 1 s: heard {heard}, expected {expected}");
 }

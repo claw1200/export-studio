@@ -45,61 +45,54 @@ impl CpalSink {
     pub fn open(render: Render) -> Result<Self> {
         let (ready_tx, ready_rx) = mpsc::channel::<Result<u32>>();
         let (tx, rx) = mpsc::channel::<SinkCommand>();
-        let thread = thread::Builder::new()
-            .name("es-audio-device".into())
-            .spawn(move || {
-                let stream = match build_stream(render) {
-                    Ok((stream, rate)) => {
-                        let _ = ready_tx.send(Ok(rate));
-                        stream
+        let thread = thread::Builder::new().name("es-audio-device".into()).spawn(move || {
+            let stream = match build_stream(render) {
+                Ok((stream, rate)) => {
+                    let _ = ready_tx.send(Ok(rate));
+                    stream
+                }
+                Err(e) => {
+                    let _ = ready_tx.send(Err(e));
+                    return;
+                }
+            };
+            let mut running = false;
+            let mut stop_pending = false;
+            loop {
+                let command = if stop_pending {
+                    match rx.recv_timeout(IDLE_GRACE) {
+                        Ok(c) => Some(c),
+                        Err(RecvTimeoutError::Timeout) => None,
+                        Err(RecvTimeoutError::Disconnected) => break,
                     }
-                    Err(e) => {
-                        let _ = ready_tx.send(Err(e));
-                        return;
+                } else {
+                    match rx.recv() {
+                        Ok(c) => Some(c),
+                        Err(_) => break,
                     }
                 };
-                let mut running = false;
-                let mut stop_pending = false;
-                loop {
-                    let command = if stop_pending {
-                        match rx.recv_timeout(IDLE_GRACE) {
-                            Ok(c) => Some(c),
-                            Err(RecvTimeoutError::Timeout) => None,
-                            Err(RecvTimeoutError::Disconnected) => break,
+                match command {
+                    Some(SinkCommand::Start) => {
+                        stop_pending = false;
+                        if !running {
+                            running = stream.play().is_ok();
                         }
-                    } else {
-                        match rx.recv() {
-                            Ok(c) => Some(c),
-                            Err(_) => break,
-                        }
-                    };
-                    match command {
-                        Some(SinkCommand::Start) => {
-                            stop_pending = false;
-                            if !running {
-                                running = stream.play().is_ok();
-                            }
-                        }
-                        Some(SinkCommand::Stop) => stop_pending = running,
-                        Some(SinkCommand::Quit) => break,
-                        None => {
-                            stop_pending = false;
-                            if running {
-                                let _ = stream.pause();
-                                running = false;
-                            }
+                    }
+                    Some(SinkCommand::Stop) => stop_pending = running,
+                    Some(SinkCommand::Quit) => break,
+                    None => {
+                        stop_pending = false;
+                        if running {
+                            let _ = stream.pause();
+                            running = false;
                         }
                     }
                 }
-            })?;
-        let sample_rate = ready_rx
-            .recv()
-            .map_err(|_| EngineError::Device("the audio thread did not start".into()))??;
-        Ok(Self {
-            sample_rate,
-            commands: Mutex::new(tx),
-            thread: Some(thread),
-        })
+            }
+        })?;
+        let sample_rate =
+            ready_rx.recv().map_err(|_| EngineError::Device("the audio thread did not start".into()))??;
+        Ok(Self { sample_rate, commands: Mutex::new(tx), thread: Some(thread) })
     }
 
     fn send(&self, command: SinkCommand) {
@@ -134,9 +127,7 @@ impl Sink for CpalSink {
 fn build_stream(render: Render) -> Result<(cpal::Stream, u32)> {
     let host = cpal::default_host();
     let device = host.default_output_device().ok_or(EngineError::NoDevice)?;
-    let supported = device
-        .default_output_config()
-        .map_err(|e| EngineError::Device(e.to_string()))?;
+    let supported = device.default_output_config().map_err(|e| EngineError::Device(e.to_string()))?;
     let format = supported.sample_format();
     let config: cpal::StreamConfig = supported.into();
     let rate = config.sample_rate.0;
@@ -145,20 +136,14 @@ fn build_stream(render: Render) -> Result<(cpal::Stream, u32)> {
         SampleFormat::I16 => output::<i16>(&device, &config, render),
         SampleFormat::U16 => output::<u16>(&device, &config, render),
         SampleFormat::I32 => output::<i32>(&device, &config, render),
-        other => Err(EngineError::Device(format!(
-            "unsupported sample format {other}"
-        ))),
+        other => Err(EngineError::Device(format!("unsupported sample format {other}"))),
     }?;
     // Built paused: nothing plays until a deck asks for it.
     let _ = stream.pause();
     Ok((stream, rate))
 }
 
-fn output<T>(
-    device: &cpal::Device,
-    config: &cpal::StreamConfig,
-    mut render: Render,
-) -> Result<cpal::Stream>
+fn output<T>(device: &cpal::Device, config: &cpal::StreamConfig, mut render: Render) -> Result<cpal::Stream>
 where
     T: SizedSample + FromSample<f32>,
 {
@@ -173,9 +158,7 @@ where
                     let buffer = &mut stereo[..frames * 2];
                     buffer.fill(0.0);
                     render(buffer);
-                    for (frame, pair) in
-                        chunk.chunks_exact_mut(channels).zip(buffer.chunks_exact(2))
-                    {
+                    for (frame, pair) in chunk.chunks_exact_mut(channels).zip(buffer.chunks_exact(2)) {
                         if channels == 1 {
                             frame[0] = T::from_sample((pair[0] + pair[1]) * 0.5);
                             continue;
@@ -203,11 +186,7 @@ pub struct NullSink {
 
 impl NullSink {
     pub fn new(render: Render, sample_rate: u32) -> Self {
-        Self {
-            sample_rate,
-            render: Mutex::new(render),
-            running: Arc::default(),
-        }
+        Self { sample_rate, render: Mutex::new(render), running: Arc::default() }
     }
 
     /// Renders `frames` frames of interleaved stereo, as the device callback would.
@@ -234,12 +213,10 @@ impl Sink for NullSink {
     }
 
     fn start(&self) {
-        self.running
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.running.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn stop(&self) {
-        self.running
-            .store(false, std::sync::atomic::Ordering::Relaxed);
+        self.running.store(false, std::sync::atomic::Ordering::Relaxed);
     }
 }

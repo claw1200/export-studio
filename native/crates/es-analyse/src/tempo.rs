@@ -25,13 +25,7 @@ pub struct TempoOptions {
 
 impl Default for TempoOptions {
     fn default() -> Self {
-        Self {
-            min_bpm: 70.0,
-            max_bpm: 180.0,
-            dynamic: false,
-            high_precision: true,
-            round_bpm: true,
-        }
+        Self { min_bpm: 70.0, max_bpm: 180.0, dynamic: false, high_precision: true, round_bpm: true }
     }
 }
 
@@ -58,7 +52,8 @@ const BEAT_AFTER_PEAK: f64 = 0.002;
 /// Hits further than this share of a period from the first fit are dropped before refitting.
 const OUTLIER_SHARE: f64 = 0.04;
 /// Bands whose onsets vote on whether a grid sits on the beat or the off-beat, in Hz.
-pub const PHASE_BANDS: [(f64, f64); 5] = [(60.0, 120.0), (120.0, 250.0), (250.0, 1_000.0), (1_000.0, 4_000.0), (4_000.0, 16_000.0)];
+pub const PHASE_BANDS: [(f64, f64); 5] =
+    [(60.0, 120.0), (120.0, 250.0), (250.0, 1_000.0), (1_000.0, 4_000.0), (4_000.0, 16_000.0)];
 /// Logistic weights for those votes, fitted to rekordbox's grids on a few hundred tracks: kick
 /// bodies and claps mark the beat, hats the off-beat.
 const OFFBEAT_WEIGHTS: [f64; 5] = [0.635, -1.409, -3.101, -2.652, 2.917];
@@ -139,9 +134,7 @@ fn autocorrelation(values: &[f32], max_lag: usize) -> Vec<f32> {
         return vec![0.0; max_lag + 1];
     }
     let zero = out[0].max(1e-12);
-    (0..=max_lag.min(n - 1))
-        .map(|lag| out[lag] / zero * n as f32 / (n - lag) as f32)
-        .collect()
+    (0..=max_lag.min(n - 1)).map(|lag| out[lag] / zero * n as f32 / (n - lag) as f32).collect()
 }
 
 fn interp(values: &[f32], x: f64) -> f64 {
@@ -164,9 +157,7 @@ fn coarse_bpm(env: &Envelope, opts: &TempoOptions) -> Option<f64> {
     let acf = autocorrelation(&env.values, max_lag);
     let score = |bpm: f64| {
         let lag = 60.0 * env.rate / bpm;
-        let comb: f64 = (1..=ACF_MULTIPLES)
-            .map(|k| interp(&acf, lag * k as f64) / k as f64)
-            .sum();
+        let comb: f64 = (1..=ACF_MULTIPLES).map(|k| interp(&acf, lag * k as f64) / k as f64).sum();
         comb.max(0.0) * prior(bpm).powf(TIE_PRIOR)
     };
     let lo = opts.min_bpm / 2.0;
@@ -303,11 +294,7 @@ fn envelope_peak(env: &Envelope, time: f64) -> Option<(f64, f64)> {
     if at < 0 || best <= 0.0 {
         return None;
     }
-    let (a, b, c) = (
-        f64::from(env.values[at as usize - 1]),
-        f64::from(best),
-        f64::from(env.values[at as usize + 1]),
-    );
+    let (a, b, c) = (f64::from(env.values[at as usize - 1]), f64::from(best), f64::from(env.values[at as usize + 1]));
     let denom = a - 2.0 * b + c;
     let shift = if denom.abs() > 1e-12 { 0.5 * (a - c) / denom } else { 0.0 };
     Some((env.time(at as f64 + shift.clamp(-0.5, 0.5)) + BEAT_AFTER_PEAK, b))
@@ -341,7 +328,14 @@ fn is_offbeat(inputs: &Inputs, period: f64, phase: f64, from: f64, to: f64) -> b
 }
 
 /// Fits one constant-tempo segment over `from..to`, starting from a rough period.
-fn fit_segment(inputs: &Inputs, rough_period: f64, spread: f64, from: f64, to: f64, opts: &TempoOptions) -> Option<Segment> {
+fn fit_segment(
+    inputs: &Inputs,
+    rough_period: f64,
+    spread: f64,
+    from: f64,
+    to: f64,
+    opts: &TempoOptions,
+) -> Option<Segment> {
     let (period, mut phase, score) = comb_fit(inputs.onset, rough_period, spread, from, to);
     if score <= 0.0 {
         return None;
@@ -356,10 +350,7 @@ fn fit_segment(inputs: &Inputs, rough_period: f64, spread: f64, from: f64, to: f
     for k in first..=last {
         let predicted = phase + k as f64 * period;
         let found = if opts.high_precision {
-            inputs
-                .attacks
-                .near(predicted, period * ATTACK_REACH)
-                .map(|hit| (hit.time, f64::from(hit.strength)))
+            inputs.attacks.near(predicted, period * ATTACK_REACH).map(|hit| (hit.time, f64::from(hit.strength)))
         } else {
             envelope_peak(inputs.onset, predicted)
         };
@@ -516,10 +507,5 @@ pub fn estimate(inputs: &Inputs, opts: &TempoOptions) -> Option<Grid> {
             (to - s.from, s.bpm())
         })
         .fold((f64::MIN, bpm), |a, b| if b.0 > a.0 { b } else { a });
-    Some(Grid {
-        bpm: longest.1,
-        segments,
-        beats,
-        tempos,
-    })
+    Some(Grid { bpm: longest.1, segments, beats, tempos })
 }

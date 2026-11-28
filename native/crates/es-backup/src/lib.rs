@@ -182,14 +182,16 @@ fn is_automatic_archive_name(path: &Path) -> bool {
     let Some(date) = parts.next() else { return false };
     let Some(time) = parts.next() else { return false };
     let Some(reason) = parts.next() else { return false };
-    if date.len() != 8 || !date.bytes().all(|byte| byte.is_ascii_digit()) || time.len() != 6 || !time.bytes().all(|byte| byte.is_ascii_digit()) {
+    if date.len() != 8
+        || !date.bytes().all(|byte| byte.is_ascii_digit())
+        || time.len() != 6
+        || !time.bytes().all(|byte| byte.is_ascii_digit())
+    {
         return false;
     }
     AUTO_REASONS.iter().any(|automatic| {
         reason == *automatic
-            || reason
-                .strip_prefix(&format!("{automatic}-"))
-                .is_some_and(|suffix| suffix.parse::<u32>().is_ok())
+            || reason.strip_prefix(&format!("{automatic}-")).is_some_and(|suffix| suffix.parse::<u32>().is_ok())
     })
 }
 
@@ -203,10 +205,7 @@ fn automatic_archive_created(path: &Path) -> Option<f64> {
         return None;
     }
     let local = NaiveDateTime::parse_from_str(&format!("{date}-{time}"), "%Y%m%d-%H%M%S").ok()?;
-    Local
-        .from_local_datetime(&local)
-        .earliest()
-        .map(|created| created.timestamp_millis() as f64 / 1000.0)
+    Local.from_local_datetime(&local).earliest().map(|created| created.timestamp_millis() as f64 / 1000.0)
 }
 
 fn temp_dir(prefix: &str) -> Result<PathBuf> {
@@ -308,7 +307,9 @@ impl Backups {
         let mut candidates: Vec<PathBuf> = entries
             .flatten()
             .map(|entry| entry.path())
-            .filter(|path| path.extension().is_some_and(|extension| extension == "zip") && is_automatic_archive_name(path))
+            .filter(|path| {
+                path.extension().is_some_and(|extension| extension == "zip") && is_automatic_archive_name(path)
+            })
             .collect();
         candidates.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
 
@@ -374,7 +375,13 @@ impl Backups {
                 }
             }
             for path in share_files(dir) {
-                let arc = path.strip_prefix(dir).unwrap_or(&path).components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
+                let arc = path
+                    .strip_prefix(dir)
+                    .unwrap_or(&path)
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
                 entries.push((path, arc));
             }
             let manifest = json!({
@@ -417,7 +424,13 @@ impl Backups {
         fail(format!("The library could not be backed up because it failed its check: {last}"))
     }
 
-    fn write(&self, entries: &[(PathBuf, String)], manifest: Value, reason: &str, progress: Progress<'_>) -> Result<Value> {
+    fn write(
+        &self,
+        entries: &[(PathBuf, String)],
+        manifest: Value,
+        reason: &str,
+        progress: Progress<'_>,
+    ) -> Result<Value> {
         fs::create_dir_all(&self.root)?;
         let now = chrono::Local::now();
         let base = format!("exportstudio-{}-{reason}", now.format("%Y%m%d-%H%M%S"));
@@ -440,10 +453,16 @@ impl Backups {
         let total = entries.len();
         let written = (|| -> Result<()> {
             let mut zip = ZipWriter::new(File::create(&partial)?);
-            let deflated = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated).compression_level(Some(1)).large_file(true);
+            let deflated = SimpleFileOptions::default()
+                .compression_method(CompressionMethod::Deflated)
+                .compression_level(Some(1))
+                .large_file(true);
             let stored = SimpleFileOptions::default().compression_method(CompressionMethod::Stored).large_file(true);
             for (done, (path, arc)) in entries.iter().enumerate() {
-                let is_image = path.extension().and_then(|e| e.to_str()).is_some_and(|e| STORED_SUFFIXES.contains(&e.to_ascii_lowercase().as_str()));
+                let is_image = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| STORED_SUFFIXES.contains(&e.to_ascii_lowercase().as_str()));
                 zip.start_file(arc, if is_image { stored } else { deflated })?;
                 io::copy(&mut File::open(path)?, &mut zip)?;
                 let done = done + 1;
@@ -452,7 +471,9 @@ impl Backups {
                 }
             }
             zip.start_file(MANIFEST, deflated)?;
-            zip.write_all(serde_json::to_string_pretty(&manifest).map_err(|e| Error::Message(e.to_string()))?.as_bytes())?;
+            zip.write_all(
+                serde_json::to_string_pretty(&manifest).map_err(|e| Error::Message(e.to_string()))?.as_bytes(),
+            )?;
             zip.finish()?;
             fs::rename(&partial, &final_path)?;
             Ok(())
@@ -503,10 +524,15 @@ impl Backups {
         progress(json!({ "stage": "checking", "reason": "restore", "done": 0, "total": 0 }));
 
         let mut zip = ZipArchive::new(File::open(&path)?)?;
-        let names: Vec<String> = (0..zip.len()).filter_map(|i| zip.by_index(i).ok().filter(|f| !f.is_dir()).and_then(|f| f.name().ok().map(|n| n.into_owned()))).collect();
+        let names: Vec<String> = (0..zip.len())
+            .filter_map(|i| {
+                zip.by_index(i).ok().filter(|f| !f.is_dir()).and_then(|f| f.name().ok().map(|n| n.into_owned()))
+            })
+            .collect();
         for name in &names {
             let mut sink = io::sink();
-            io::copy(&mut zip.by_name(name)?, &mut sink).map_err(|_| Error::Message(format!("The backup is damaged ({name})")))?;
+            io::copy(&mut zip.by_name(name)?, &mut sink)
+                .map_err(|_| Error::Message(format!("The backup is damaged ({name})")))?;
         }
         if let Some(bad) = names.iter().find(|n| !safe_member(n)) {
             return fail(format!("The backup contains an unexpected file: {bad}"));
@@ -527,7 +553,9 @@ impl Backups {
                 io::copy(&mut zip.by_name(name)?, &mut File::create(&target)?)?;
                 let done = done + 1;
                 if done % 50 == 0 || done == members.len() {
-                    progress(json!({ "stage": "extracting", "reason": "restore", "done": done, "total": members.len() }));
+                    progress(
+                        json!({ "stage": "extracting", "reason": "restore", "done": done, "total": members.len() }),
+                    );
                 }
             }
             let name = src.file_name().unwrap_or_default().to_string_lossy().into_owned();
@@ -555,7 +583,8 @@ impl Backups {
         let db_dir = src.parent().unwrap_or_else(|| Path::new("."));
         let name = src.file_name().unwrap_or_default().to_string_lossy().into_owned();
         let replaced = self.root.join(format!("replaced-{stamp}"));
-        let mut targets: Vec<(String, String)> = DB_SUFFIXES.iter().map(|s| (format!("{name}{s}"), format!("{DB_ARC}{s}"))).collect();
+        let mut targets: Vec<(String, String)> =
+            DB_SUFFIXES.iter().map(|s| (format!("{name}{s}"), format!("{DB_ARC}{s}"))).collect();
         targets.extend(SIDE_FILES.iter().map(|n| ((*n).to_owned(), (*n).to_owned())));
         targets.push(("share/PIONEER".into(), "share/PIONEER".into()));
         let mut moved_out = Vec::new();
@@ -619,7 +648,13 @@ impl Backups {
         walk(&replaced.join("share").join("PIONEER"), &mut share);
         share.sort();
         for p in share {
-            let arc = p.strip_prefix(replaced).unwrap_or(&p).components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
+            let arc = p
+                .strip_prefix(replaced)
+                .unwrap_or(&p)
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
             entries.push((p, arc));
         }
         if !replaced.join(&name).exists() || entries.is_empty() {

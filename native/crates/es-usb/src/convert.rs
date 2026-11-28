@@ -43,7 +43,11 @@ impl AudioConverter for Ffmpeg {
         let narrow = |value: i64| u32::try_from(value).unwrap_or(0);
         let requested = narrow(self.preset.bitrate.unwrap_or(0));
         // Only MP3 is encoded at a constant bitrate; AAC's is an average the encoder may undershoot.
-        let bitrate = if self.preset.format == "mp3" { requested } else { Some(narrow(info.bitrate)).filter(|b| *b > 0).unwrap_or(requested) };
+        let bitrate = if self.preset.format == "mp3" {
+            requested
+        } else {
+            Some(narrow(info.bitrate)).filter(|b| *b > 0).unwrap_or(requested)
+        };
         Ok(ConvertedAudio {
             offset_ms: es_convert::delay_offset_ms(source, destination).unwrap_or(0),
             bitrate,
@@ -65,7 +69,11 @@ impl AudioConverter for Ffmpeg {
                 let rate = u64::try_from(self.preset.sample_rate.unwrap_or(48_000)).unwrap_or(48_000);
                 let pcm = rate * depth / 8 * 2;
                 // Lossless compression roughly halves music; an estimate only.
-                if matches!(format, "flac" | "alac") { pcm * 3 / 5 } else { pcm }
+                if matches!(format, "flac" | "alac") {
+                    pcm * 3 / 5
+                } else {
+                    pcm
+                }
             }
         };
         seconds.saturating_mul(bytes_per_second).saturating_add(64 * 1024)
@@ -84,7 +92,8 @@ mod tests {
     fn profiles_name_the_format_and_its_quality() {
         let mp3 = preset(&serde_json::json!({ "format": "mp3", "bitrate": 320 })).map(Ffmpeg::new);
         assert_eq!(mp3.as_ref().map(|c| (c.profile(), c.extension())), Some(("es-ffmpeg-v1:mp3-320k", "mp3")));
-        let alac = preset(&serde_json::json!({ "format": "alac", "bitDepth": 24, "sampleRate": 96000 })).map(Ffmpeg::new);
+        let alac =
+            preset(&serde_json::json!({ "format": "alac", "bitDepth": 24, "sampleRate": 96000 })).map(Ffmpeg::new);
         assert_eq!(alac.as_ref().map(|c| (c.profile(), c.extension())), Some(("es-ffmpeg-v1:alac-24-96000", "m4a")));
     }
 

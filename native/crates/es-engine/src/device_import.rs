@@ -13,9 +13,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use rb_library::{DeviceData, Library, NewCue, PlaylistKind, TrackEdit};
 use rb_device::paths::volume_path;
 use rb_device::{Cue as DeviceCue, Device, History, Playlist, Track as DeviceTrack};
+use rb_library::{DeviceData, Library, NewCue, PlaylistKind, TrackEdit};
 
 use crate::import::{import_files, Options as FileOptions};
 use crate::place::{candidate, destination, existing_copy, place_copy};
@@ -160,7 +160,11 @@ fn sessions(device: &Device) -> Vec<&History> {
 
 fn history_name(row: &History) -> String {
     let name = row.name.trim();
-    if name.is_empty() { "Untitled".into() } else { name.into() }
+    if name.is_empty() {
+        "Untitled".into()
+    } else {
+        name.into()
+    }
 }
 
 /// The library's histories, as name and plays, to recognise a session imported before.
@@ -177,7 +181,8 @@ fn known_histories(lib: &Library) -> Result<Vec<(String, Vec<String>)>> {
 /// Tracks in the order the playlists list them, then the histories, each once.
 fn ordered_tracks(children: &Children<'_>, device: &Device) -> Vec<i64> {
     let mut seen = Vec::new();
-    let mut stack: Vec<&Playlist> = children.get(&0).map(|rows| rows.iter().rev().copied().collect()).unwrap_or_default();
+    let mut stack: Vec<&Playlist> =
+        children.get(&0).map(|rows| rows.iter().rev().copied().collect()).unwrap_or_default();
     while let Some(row) = stack.pop() {
         if row.folder {
             if let Some(inner) = children.get(&row.export_id) {
@@ -216,7 +221,9 @@ fn target_root(options: &Options) -> (PathBuf, bool) {
         Some(folder) => (folder.clone(), false),
         None => {
             let music = options.music.clone().unwrap_or_else(|| {
-                std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map_or_else(|| PathBuf::from("."), |h| PathBuf::from(h).join("Music"))
+                std::env::var_os("HOME")
+                    .or_else(|| std::env::var_os("USERPROFILE"))
+                    .map_or_else(|| PathBuf::from("."), |h| PathBuf::from(h).join("Music"))
             });
             (destination(&music), true)
         }
@@ -262,12 +269,25 @@ pub fn preview(lib: &Library, volume: &Path, device: &Device, options: &Options)
     let mut playlists = Vec::new();
     plan_playlists(&kids, 0, Some("root"), 0, &known, &mut playlists);
     let histories = plan_histories(lib, db_id, volume, device, &root, contents)?;
-    Ok(Plan { destination: root, layout: if contents { "Contents/Artist/Album" } else { "Artist/Album" }, playlists, histories, tracks })
+    Ok(Plan {
+        destination: root,
+        layout: if contents { "Contents/Artist/Album" } else { "Artist/Album" },
+        playlists,
+        histories,
+        tracks,
+    })
 }
 
 /// The stick's sessions, and whether the library has each already. A play resolves to the library
 /// track an import would use: the library's own copy, or an earlier import's copy of the same file.
-fn plan_histories(lib: &Library, db_id: i64, volume: &Path, device: &Device, root: &Path, contents: bool) -> Result<Vec<PlannedHistory>> {
+fn plan_histories(
+    lib: &Library,
+    db_id: i64,
+    volume: &Path,
+    device: &Device,
+    root: &Path,
+    contents: bool,
+) -> Result<Vec<PlannedHistory>> {
     let sessions = sessions(device);
     if sessions.is_empty() {
         return Ok(Vec::new());
@@ -282,8 +302,13 @@ fn plan_histories(lib: &Library, db_id: i64, volume: &Path, device: &Device, roo
                 let track = device.track(id)?;
                 library_copy(lib, db_id, track).or_else(|| {
                     let audio = audio_of(volume, track)?;
-                    let file_name = if track.filename.is_empty() { audio.file_name()?.to_string_lossy().into_owned() } else { track.filename.clone() };
-                    let copy = existing_copy(&audio, &candidate(root, &track.artist, &track.album, &file_name, contents))?;
+                    let file_name = if track.filename.is_empty() {
+                        audio.file_name()?.to_string_lossy().into_owned()
+                    } else {
+                        track.filename.clone()
+                    };
+                    let copy =
+                        existing_copy(&audio, &candidate(root, &track.artist, &track.album, &file_name, contents))?;
                     // The library stores paths with forward slashes, as an import does.
                     by_path.get(&copy.to_string_lossy().replace('\\', "/")).cloned()
                 })
@@ -294,24 +319,45 @@ fn plan_histories(lib: &Library, db_id: i64, volume: &Path, device: &Device, roo
         .into_iter()
         .map(|row| {
             let name = history_name(row);
-            let plays: Option<Vec<String>> = row.track_ids.iter().filter(|t| device.track(**t).is_some()).map(|t| resolve(*t)).collect();
+            let plays: Option<Vec<String>> =
+                row.track_ids.iter().filter(|t| device.track(**t).is_some()).map(|t| resolve(*t)).collect();
             let exists = plays.is_some_and(|plays| known.iter().any(|(n, ids)| *n == name && *ids == plays));
             PlannedHistory { name, tracks: row.track_ids.len(), exists }
         })
         .collect())
 }
 
-fn find<'a>(nodes: &'a [rb_library::PlaylistNode], parent: &str, folder: bool, name: &str) -> Option<&'a rb_library::PlaylistNode> {
+fn find<'a>(
+    nodes: &'a [rb_library::PlaylistNode],
+    parent: &str,
+    folder: bool,
+    name: &str,
+) -> Option<&'a rb_library::PlaylistNode> {
     let kind = if folder { PlaylistKind::Folder } else { PlaylistKind::Playlist };
-    nodes.iter().find(|n| n.parent_id == parent && n.kind == kind && (if n.name.trim().is_empty() { "Untitled" } else { n.name.trim() }) == name)
+    nodes.iter().find(|n| {
+        n.parent_id == parent
+            && n.kind == kind
+            && (if n.name.trim().is_empty() { "Untitled" } else { n.name.trim() }) == name
+    })
 }
 
 fn name_of(row: &Playlist) -> String {
     let name = row.name.trim();
-    if name.is_empty() { "Untitled".into() } else { name.into() }
+    if name.is_empty() {
+        "Untitled".into()
+    } else {
+        name.into()
+    }
 }
 
-fn plan_playlists(kids: &Children<'_>, parent_export: i64, parent: Option<&str>, depth: usize, known: &Known, out: &mut Vec<PlannedPlaylist>) {
+fn plan_playlists(
+    kids: &Children<'_>,
+    parent_export: i64,
+    parent: Option<&str>,
+    depth: usize,
+    known: &Known,
+    out: &mut Vec<PlannedPlaylist>,
+) {
     for row in kids.get(&parent_export).map(Vec::as_slice).unwrap_or_default() {
         let name = name_of(row);
         let found = match known.lookup(row, parent, &name) {
@@ -324,7 +370,13 @@ fn plan_playlists(kids: &Children<'_>, parent_export: i64, parent: Option<&str>,
             Match::Existing(node) => Some(node),
             Match::New => None,
         };
-        out.push(PlannedPlaylist { name, folder: row.folder, depth, tracks: if row.folder { 0 } else { row.track_ids.len() }, exists: found.is_some() });
+        out.push(PlannedPlaylist {
+            name,
+            folder: row.folder,
+            depth,
+            tracks: if row.folder { 0 } else { row.track_ids.len() },
+            exists: found.is_some(),
+        });
         if row.folder {
             plan_playlists(kids, row.export_id, found.map(|n| n.id.as_str()), depth + 1, known, out);
         }
@@ -353,9 +405,20 @@ fn from_device_cue(cue: &DeviceCue) -> NewCue {
 }
 
 /// Give a freshly imported track the analysis files, cues and numbers it had on the stick.
-fn carry(lib: &mut Library, share: &Path, volume: &Path, track: &DeviceTrack, content_id: &str, placed: &Path) -> Result<()> {
+fn carry(
+    lib: &mut Library,
+    share: &Path,
+    volume: &Path,
+    track: &DeviceTrack,
+    content_id: &str,
+    placed: &Path,
+) -> Result<()> {
     let uuid = lib.track_uuid(content_id)?.ok_or_else(|| Error::Other("the new track has no UUID".into()))?;
-    let relative = format!("/PIONEER/USBANLZ/{}/{}/ANLZ0000.DAT", uuid.chars().take(3).collect::<String>(), uuid.chars().skip(3).collect::<String>());
+    let relative = format!(
+        "/PIONEER/USBANLZ/{}/{}/ANLZ0000.DAT",
+        uuid.chars().take(3).collect::<String>(),
+        uuid.chars().skip(3).collect::<String>()
+    );
     let dat = share.join(relative.trim_start_matches('/'));
     let name = placed.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let path_tag = rb_anlz::write::path_tag(&format!("?/{name}"));
@@ -371,7 +434,8 @@ fn carry(lib: &mut Library, share: &Path, volume: &Path, track: &DeviceTrack, co
                 continue;
             }
             let data = std::fs::read(&from).map_err(|e| Error::Other(e.to_string()))?;
-            let patched = rb_anlz::write::replace_tags(&data, &[("PPTH", path_tag.clone())]).map_err(|e| Error::Other(e.to_string()))?;
+            let patched = rb_anlz::write::replace_tags(&data, &[("PPTH", path_tag.clone())])
+                .map_err(|e| Error::Other(e.to_string()))?;
             let to = dat.with_extension(suffix);
             if let Some(parent) = to.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| Error::Other(e.to_string()))?;
@@ -464,7 +528,11 @@ fn create_playlists(
 ) -> rb_library::Result<()> {
     for row in kids.get(&parent_export).map(Vec::as_slice).unwrap_or_default() {
         let name = name_of(row);
-        let ids: Vec<String> = if row.folder { Vec::new() } else { row.track_ids.iter().filter_map(|t| resolved.get(t).cloned()).collect() };
+        let ids: Vec<String> = if row.folder {
+            Vec::new()
+        } else {
+            row.track_ids.iter().filter_map(|t| resolved.get(t).cloned()).collect()
+        };
         let (id, is_new) = match known.lookup(row, Some(parent.as_deref().unwrap_or("root")), &name) {
             Match::Retired => {
                 if row.folder {
@@ -485,7 +553,11 @@ fn create_playlists(
         };
         if row.folder {
             // Nothing inside a folder that was just made can already exist.
-            let inner = if is_new { &Known { existing: Vec::new(), policy: known.policy, origins: known.origins.clone() } } else { known };
+            let inner = if is_new {
+                &Known { existing: Vec::new(), policy: known.policy, origins: known.origins.clone() }
+            } else {
+                known
+            };
             create_playlists(tx, kids, row.export_id, Some(id), inner, resolved, created)?;
         }
     }
@@ -524,7 +596,11 @@ pub fn import_device(
             outcome.failed.push((title, "Audio file is missing on the USB".into()));
             continue;
         };
-        let file_name = if track.filename.is_empty() { audio.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default() } else { track.filename.clone() };
+        let file_name = if track.filename.is_empty() {
+            audio.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+        } else {
+            track.filename.clone()
+        };
         let wanted = candidate(&root, &track.artist, &track.album, &file_name, contents);
         let (placed, created) = match place_copy(&audio, &wanted) {
             Ok(done) => done,
@@ -533,7 +609,12 @@ pub fn import_device(
                 continue;
             }
         };
-        let imported = import_files(lib, share, &[placed.to_string_lossy().into_owned()], &FileOptions { artwork: true, playlist: None });
+        let imported = import_files(
+            lib,
+            share,
+            &[placed.to_string_lossy().into_owned()],
+            &FileOptions { artwork: true, playlist: None },
+        );
         let done = match imported {
             Ok(done) if done.failed.is_empty() && !done.ids.is_empty() => done,
             other => {
@@ -541,14 +622,20 @@ pub fn import_device(
                     let _ = std::fs::remove_file(&placed);
                 }
                 let error = match other {
-                    Ok(done) => done.failed.first().map_or_else(|| "Couldn’t import the track".to_owned(), |f| f.error.clone()),
+                    Ok(done) => {
+                        done.failed.first().map_or_else(|| "Couldn’t import the track".to_owned(), |f| f.error.clone())
+                    }
                     Err(e) => e.to_string(),
                 };
                 outcome.failed.push((title, error));
                 continue;
             }
         };
-        if created { outcome.copied += 1 } else { outcome.reused += 1 }
+        if created {
+            outcome.copied += 1
+        } else {
+            outcome.reused += 1
+        }
         let content_id = done.ids[0].clone();
         if !done.added.is_empty() {
             if let Err(e) = carry(lib, share, volume, track, &content_id, &placed) {
@@ -560,7 +647,14 @@ pub fn import_device(
     progress(Progress { done: order.len(), total: order.len(), name: String::new() });
 
     let known = Known::new(lib, volume, options.policy)?;
-    let wrapper_name = format!("Imported from {}", if device.device_name.is_empty() { volume.file_name().map_or_else(|| "device".into(), |n| n.to_string_lossy().into_owned()) } else { device.device_name.clone() });
+    let wrapper_name = format!(
+        "Imported from {}",
+        if device.device_name.is_empty() {
+            volume.file_name().map_or_else(|| "device".into(), |n| n.to_string_lossy().into_owned())
+        } else {
+            device.device_name.clone()
+        }
+    );
     let mut known_histories = known_histories(lib)?;
     let mut created = 0;
     let mut histories = 0;

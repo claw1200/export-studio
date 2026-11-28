@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
+use es_engine::import::{import_files, Options};
 use rb_library::fixture::{self, Rows};
 use rb_library::{Guard, Library};
-use es_engine::import::{import_files, Options};
 use tempfile::TempDir;
 
 /// A silent mono 16-bit WAV, long enough to read.

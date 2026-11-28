@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 use std::time::SystemTime;
 
-use rb_device::{paths::pioneer_dir, volumes, Device, LibraryKind, Volume};
 use es_engine::device_import::{self, PlaylistPolicy, TrackStatus};
 use es_engine::sync::SyncCancel;
+use rb_device::{paths::pioneer_dir, volumes, Device, LibraryKind, Volume};
 use serde_json::{json, Value};
 
 use crate::library::{failure, json_of, Core};
@@ -27,10 +27,27 @@ pub(crate) enum UsbOp {
     HistoryTracks(String, String),
     Detail(String),
     Media(String),
-    ImportPreview { volume: String, folder: Option<String>, policy: Option<String> },
-    Import { volume: String, folder: Option<String>, policy: Option<String> },
-    SyncReview { volume: String, playlists: Vec<String>, convert: Option<serde_json::Value> },
-    Sync { volume: String, playlists: Vec<String>, decisions: Option<serde_json::Value>, convert: Option<serde_json::Value> },
+    ImportPreview {
+        volume: String,
+        folder: Option<String>,
+        policy: Option<String>,
+    },
+    Import {
+        volume: String,
+        folder: Option<String>,
+        policy: Option<String>,
+    },
+    SyncReview {
+        volume: String,
+        playlists: Vec<String>,
+        convert: Option<serde_json::Value>,
+    },
+    Sync {
+        volume: String,
+        playlists: Vec<String>,
+        decisions: Option<serde_json::Value>,
+        convert: Option<serde_json::Value>,
+    },
     RecoveryStatus(String),
     Recover(String),
 }
@@ -150,7 +167,12 @@ impl UsbOp {
     fn changes_stick(&self) -> bool {
         matches!(
             self,
-            Self::Eject(_) | Self::Format(_) | Self::SetSettings(..) | Self::Import { .. } | Self::Recover(_) | Self::Sync { .. }
+            Self::Eject(_)
+                | Self::Format(_)
+                | Self::SetSettings(..)
+                | Self::Import { .. }
+                | Self::Recover(_)
+                | Self::Sync { .. }
         )
     }
 }
@@ -189,7 +211,9 @@ impl RunningSync {
     }
 
     pub(crate) fn cancel(&self) {
-        if let Some(sync) = self.current().as_ref() { sync.cancel(); }
+        if let Some(sync) = self.current().as_ref() {
+            sync.cancel();
+        }
     }
 
     fn current(&self) -> MutexGuard<'_, Option<SyncCancel>> {
@@ -203,7 +227,8 @@ pub(crate) fn sync_off_lock(core: &Core, service: MutexGuard<'_, LibraryService>
     let UsbOp::Sync { volume, playlists, decisions, convert } = op else { unreachable!("not a sync") };
     let _changing = core.stick_gate.enter()?;
     let volume = listed(volume)?;
-    let decisions = decisions.as_ref().map(|value| serde_json::from_value(value.clone())).transpose().map_err(failure)?;
+    let decisions =
+        decisions.as_ref().map(|value| serde_json::from_value(value.clone())).transpose().map_err(failure)?;
     let convert = preset(convert.as_ref())?;
     let job = service.usb_sync_job(&volume, playlists, decisions.as_ref(), convert.as_ref()).map_err(failure)?;
     drop(service);
@@ -272,13 +297,17 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
         }
         UsbOp::Selection(volume) => {
             let (ids, db_id) = service.playlist_selection().map_err(failure)?;
-            json_of(&json!({ "playlistIds": rb_device::selection::recorded_playlist_ids(&mounted(volume)?, &ids, db_id) }))
+            json_of(
+                &json!({ "playlistIds": rb_device::selection::recorded_playlist_ids(&mounted(volume)?, &ids, db_id) }),
+            )
         }
         UsbOp::Tracks(volume, playlist) => {
             let volume = mounted(volume)?;
             match core.devices.load(&volume)? {
                 None => Ok(json!([])),
-                Some(device) => json_of(&es_index::device::tracks(&volume, &device, playlist.as_deref()).map_err(failure)?),
+                Some(device) => {
+                    json_of(&es_index::device::tracks(&volume, &device, playlist.as_deref()).map_err(failure)?)
+                }
             }
         }
         UsbOp::HistoryTracks(volume, history) => {
@@ -289,7 +318,8 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
             }
         }
         UsbOp::Detail(key) => {
-            let (volume, export_id) = es_index::device::parse_track_key(key).ok_or_else(|| failure("Not a device track"))?;
+            let (volume, export_id) =
+                es_index::device::parse_track_key(key).ok_or_else(|| failure("Not a device track"))?;
             let volume = mounted(&volume)?;
             let device = require(core.devices.load(&volume)?)?;
             let track = device.track(export_id).ok_or_else(|| failure(format!("Unknown device track {key}")))?;
@@ -307,7 +337,8 @@ pub(crate) fn perform(core: &Core, service: &mut LibraryService, op: &UsbOp) -> 
             let state = service.session().ok_or_else(|| failure("Library not open"))?;
             let volume = listed(volume)?;
             let device = require(core.devices.load(&volume)?)?;
-            let plan = device_import::preview(state.database(), &volume, &device, &import_options(folder, policy)?).map_err(failure)?;
+            let plan = device_import::preview(state.database(), &volume, &device, &import_options(folder, policy)?)
+                .map_err(failure)?;
             let status = |s: TrackStatus| match s {
                 TrackStatus::Reuse => "reuse",
                 TrackStatus::Copy => "copy",

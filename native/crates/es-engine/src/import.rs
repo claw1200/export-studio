@@ -107,7 +107,8 @@ pub fn import_files(lib: &mut Library, share: &Path, paths: &[String], options: 
             outcome.failed.push(Failure { path: raw.clone(), error: format!("rekordbox can't import {shown} files") });
             continue;
         }
-        let Some(size) = path.is_absolute().then(|| std::fs::metadata(path).ok().filter(|m| m.is_file())).flatten() else {
+        let Some(size) = path.is_absolute().then(|| std::fs::metadata(path).ok().filter(|m| m.is_file())).flatten()
+        else {
             outcome.failed.push(Failure { path: raw.clone(), error: "File not found".into() });
             continue;
         };
@@ -162,7 +163,8 @@ pub fn import_files(lib: &mut Library, share: &Path, paths: &[String], options: 
                 ids.push(id.clone());
                 continue;
             }
-            let stem = Path::new(&item.facts.name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let stem =
+                Path::new(&item.facts.name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
             let id = if let Some((id, _)) = rows.first() {
                 tx.revive_track(id, &item.facts, &stream_of(&item.info))?;
                 id.clone()

@@ -26,11 +26,6 @@ pub struct Block {
 
 impl Block {
     pub fn empty(generation: u32, position: u64) -> Self {
-        Self {
-            generation,
-            position,
-            frames: 0,
-            samples: [0.0; BLOCK_FRAMES * 2],
-        }
+        Self { generation, position, frames: 0, samples: [0.0; BLOCK_FRAMES * 2] }
     }
 }

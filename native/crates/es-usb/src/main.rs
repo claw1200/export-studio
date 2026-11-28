@@ -48,7 +48,9 @@ struct Job {
     conversion: Option<serde_json::Value>,
 }
 
-fn default_operation() -> String { "export".into() }
+fn default_operation() -> String {
+    "export".into()
+}
 
 fn emit(value: &serde_json::Value) -> io::Result<()> {
     let mut output = io::stdout().lock();
@@ -77,7 +79,9 @@ fn cancel_requested_on_input() -> Arc<AtomicBool> {
     let flag = Arc::clone(&requested);
     std::thread::spawn(move || {
         let asks_to_cancel = io::stdin().lock().lines().map_while(Result::ok).any(|line| line.trim() == "cancel");
-        if asks_to_cancel { flag.store(true, Ordering::SeqCst); }
+        if asks_to_cancel {
+            flag.store(true, Ordering::SeqCst);
+        }
     });
     requested
 }
@@ -113,11 +117,7 @@ fn run(path: &Path) -> Result<(), JobError> {
         playlists: job.playlists,
         my_tags: job.my_tags,
     };
-    let options = rb_usb::Options {
-        settings_dir: job.settings_dir,
-        decisions: job.decisions,
-        converter,
-    };
+    let options = rb_usb::Options { settings_dir: job.settings_dir, decisions: job.decisions, converter };
     if job.operation == "inspect" {
         let inspection = rb_usb::inspect(&job.destination, &source, &options)?;
         emit(&serde_json::json!({ "event": "result", "inspection": inspection }))?;
@@ -132,7 +132,8 @@ fn run(path: &Path) -> Result<(), JobError> {
         &source,
         &options,
         &mut |event| {
-            let file = event.file.map(|file| serde_json::json!({ "done": file.done, "total": file.total, "unit": file.unit }));
+            let file =
+                event.file.map(|file| serde_json::json!({ "done": file.done, "total": file.total, "unit": file.unit }));
             let _ = emit(&serde_json::json!({
                 "event": "progress", "phase": phase(event.stage),
                 "done": event.done, "total": event.total, "unit": event.unit, "file": file, "name": event.title,
@@ -198,7 +199,10 @@ mod tests {
         };
         assert!(job(serde_json::Value::Null).is_ok_and(|c| c.is_none()));
         let wav = job(serde_json::json!({ "format": "wav", "bitDepth": 16, "sampleRate": 44100 })).ok().flatten();
-        assert_eq!(wav.map(|c| (c.extension().to_owned(), c.profile().to_owned())), Some(("wav".into(), "es-ffmpeg-v1:wav-16-44100".into())));
+        assert_eq!(
+            wav.map(|c| (c.extension().to_owned(), c.profile().to_owned())),
+            Some(("wav".into(), "es-ffmpeg-v1:wav-16-44100".into()))
+        );
         assert!(job(serde_json::json!({ "format": "ogg" })).is_err());
     }
 

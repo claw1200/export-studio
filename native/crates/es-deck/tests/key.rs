@@ -4,18 +4,13 @@ use common::*;
 
 /// A sine at `hz`, at most about two thirds of full scale.
 fn sine(name: &str, frames: u32, hz: f64) -> std::path::PathBuf {
-    wav(name, frames, |i| {
-        ((f64::from(i) * 2.0 * std::f64::consts::PI * hz / f64::from(RATE)).sin() * 20_000.0) as i16
-    })
+    wav(name, frames, |i| ((f64::from(i) * 2.0 * std::f64::consts::PI * hz / f64::from(RATE)).sin() * 20_000.0) as i16)
 }
 
 /// Cycles per second of the left channel, from its upward zero crossings.
 fn frequency(out: &[f32]) -> f64 {
     let left: Vec<f32> = out.chunks_exact(2).map(|f| f[0]).collect();
-    let crossings = left
-        .windows(2)
-        .filter(|w| w[0] < 0.0 && w[1] >= 0.0)
-        .count();
+    let crossings = left.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
     crossings as f64 * f64::from(RATE) / left.len() as f64
 }
 
@@ -84,11 +79,7 @@ fn back_at_no_shift_the_file_plays_exactly() {
     let out = rig.pull(4096);
     let values: Vec<i64> = out.chunks_exact(2).map(|f| value(f[0])).collect();
     for pair in values.windows(2) {
-        assert_eq!(
-            pair[1],
-            (pair[0] + 1) % 30_000,
-            "frames are the file's, one after another"
-        );
+        assert_eq!(pair[1], (pair[0] + 1) % 30_000, "frames are the file's, one after another");
     }
 }
 

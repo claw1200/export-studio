@@ -87,18 +87,9 @@ fn auto_due(backups: &Backups) -> bool {
     due
 }
 
-fn back_up(
-    backups: &Backups,
-    source: &Path,
-    reason: &str,
-    emit: &impl Fn(ServiceEvent),
-) -> Result<Option<Value>> {
-    let made = backups.create(source, reason, &|progress| {
-        emit(ServiceEvent::BackupProgress(progress))
-    });
-    emit(ServiceEvent::BackupProgress(
-        json!({ "stage": "done", "reason": reason }),
-    ));
+fn back_up(backups: &Backups, source: &Path, reason: &str, emit: &impl Fn(ServiceEvent)) -> Result<Option<Value>> {
+    let made = backups.create(source, reason, &|progress| emit(ServiceEvent::BackupProgress(progress)));
+    emit(ServiceEvent::BackupProgress(json!({ "stage": "done", "reason": reason })));
     let made = made?;
     if made.is_some() {
         emit(ServiceEvent::BackupChanged);
@@ -111,16 +102,8 @@ pub enum ServiceEvent {
     BackupProgress(Value),
     BackupChanged,
     LibraryReloaded,
-    ConvertProgress {
-        done: usize,
-        total: usize,
-        id: Option<String>,
-    },
-    UsbImportProgress {
-        done: usize,
-        total: usize,
-        name: String,
-    },
+    ConvertProgress { done: usize, total: usize, id: Option<String> },
+    UsbImportProgress { done: usize, total: usize, name: String },
     UsbSyncProgress(crate::sync::Progress),
 }
 
@@ -215,9 +198,7 @@ fn tag_edit(change: &TrackEdit) -> es_tags::Edit {
         composer: change.composer.clone(),
         comment: change.comment.clone(),
         year: change.year.map(|year| u32::try_from(year).unwrap_or(0)),
-        track_no: change
-            .track_no
-            .map(|number| u32::try_from(number).unwrap_or(0)),
+        track_no: change.track_no.map(|number| u32::try_from(number).unwrap_or(0)),
     }
 }
 
@@ -235,10 +216,7 @@ impl LibraryService {
     fn with_backup_root(root: PathBuf) -> Self {
         let verify = |path: &Path| {
             rb_library::verify(path)
-                .map(|counts| es_backup::Counts {
-                    tracks: counts.tracks,
-                    playlists: counts.playlists,
-                })
+                .map(|counts| es_backup::Counts { tracks: counts.tracks, playlists: counts.playlists })
                 .map_err(|error| es_backup::Error::Message(error.to_string()))
         };
         Self {
@@ -283,18 +261,12 @@ impl LibraryService {
     }
 
     fn read_model(&self) -> Result<LibraryRead<'_>> {
-        let session = self
-            .session
-            .as_ref()
-            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        let session = self.session.as_ref().ok_or_else(|| crate::Error::Other("Library not open".into()))?;
         Ok(LibraryRead::new(session.database()))
     }
 
     pub fn info(&self) -> Result<LibraryInfo> {
-        let session = self
-            .session
-            .as_ref()
-            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        let session = self.session.as_ref().ok_or_else(|| crate::Error::Other("Library not open".into()))?;
         Ok(LibraryInfo {
             db_path: session.source().to_string_lossy().into_owned(),
             snapshot_time: session.snapshot_time(),
@@ -361,25 +333,13 @@ impl LibraryService {
     }
 
     pub fn playlist_selection(&self) -> Result<(Vec<String>, u64)> {
-        let database = self
-            .session
-            .as_ref()
-            .ok_or_else(|| crate::Error::Other("Library not open".into()))?
-            .database();
-        let ids = database
-            .playlists()?
-            .into_iter()
-            .map(|playlist| playlist.id)
-            .collect();
+        let database = self.session.as_ref().ok_or_else(|| crate::Error::Other("Library not open".into()))?.database();
+        let ids = database.playlists()?.into_iter().map(|playlist| playlist.id).collect();
         Ok((ids, u64::try_from(database.db_id()?).unwrap_or(0)))
     }
 
     pub fn inspect_tracks(&self, requests: &[InspectionRequest]) -> Result<Vec<TrackInspection>> {
-        let database = self
-            .session
-            .as_ref()
-            .ok_or_else(|| crate::Error::Other("Library not open".into()))?
-            .database();
+        let database = self.session.as_ref().ok_or_else(|| crate::Error::Other("Library not open".into()))?.database();
         let mut inspected = Vec::new();
         for request in requests.iter().take(80) {
             let files = database
@@ -398,11 +358,9 @@ impl LibraryService {
             }
             let path = Path::new(&files.folder_path);
             if request.has_cache {
-                if let Some((size, mtime)) = crate::inspect::same_fingerprint(
-                    path,
-                    request.cached_size,
-                    request.cached_mtime.as_deref(),
-                ) {
+                if let Some((size, mtime)) =
+                    crate::inspect::same_fingerprint(path, request.cached_size, request.cached_mtime.as_deref())
+                {
                     inspected.push(TrackInspection {
                         id: request.id.clone(),
                         size,
@@ -428,10 +386,7 @@ impl LibraryService {
     }
 
     fn edit<T>(&mut self, change: impl FnOnce(&mut Tx<'_>) -> rb_library::Result<T>) -> Result<T> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        let session = self.session.as_mut().ok_or_else(|| crate::Error::Other("Library not open".into()))?;
         session.with_live(|database| Ok(database.write(change)?))
     }
 
@@ -445,12 +400,7 @@ impl LibraryService {
         self.playlist_tracks(id)
     }
 
-    pub fn playlist_move(
-        &mut self,
-        id: &str,
-        track_ids: &[String],
-        index: usize,
-    ) -> Result<Vec<String>> {
+    pub fn playlist_move(&mut self, id: &str, track_ids: &[String], index: usize) -> Result<Vec<String>> {
         self.edit(|tx| tx.move_in_playlist(id, track_ids, index))?;
         self.playlist_tracks(id)
     }
@@ -468,11 +418,7 @@ impl LibraryService {
         track_ids: &[String],
     ) -> Result<(String, Vec<es_index::Node>)> {
         let fallback = if folder { "New folder" } else { "New playlist" };
-        let name = if name.trim().is_empty() {
-            fallback
-        } else {
-            name.trim()
-        };
+        let name = if name.trim().is_empty() { fallback } else { name.trim() };
         let parent = parent.filter(|parent| *parent != "root");
         let id = self.edit(|tx| tx.create_playlist(name, parent, folder, track_ids))?;
         Ok((id, self.playlists()?))
@@ -492,20 +438,12 @@ impl LibraryService {
         self.playlists()
     }
 
-    pub fn tag_add(
-        &mut self,
-        tag_id: &str,
-        track_ids: &[String],
-    ) -> Result<Vec<es_index::TrackRow>> {
+    pub fn tag_add(&mut self, tag_id: &str, track_ids: &[String]) -> Result<Vec<es_index::TrackRow>> {
         self.edit(|tx| tx.add_tag(tag_id, track_ids))?;
         self.tracks_by_id(track_ids)
     }
 
-    pub fn tag_remove(
-        &mut self,
-        tag_id: &str,
-        track_ids: &[String],
-    ) -> Result<Vec<es_index::TrackRow>> {
+    pub fn tag_remove(&mut self, tag_id: &str, track_ids: &[String]) -> Result<Vec<es_index::TrackRow>> {
         self.edit(|tx| tx.remove_tag(tag_id, track_ids))?;
         self.tracks_by_id(track_ids)
     }
@@ -521,12 +459,7 @@ impl LibraryService {
         self.cues(id)
     }
 
-    pub fn cue_add_memory(
-        &mut self,
-        id: &str,
-        ms: i64,
-        end_ms: Option<i64>,
-    ) -> Result<Vec<es_index::detail::Cue>> {
+    pub fn cue_add_memory(&mut self, id: &str, ms: i64, end_ms: Option<i64>) -> Result<Vec<es_index::detail::Cue>> {
         self.edit(|tx| tx.add_memory_cue(id, ms, end_ms))?;
         self.cues(id)
     }
@@ -536,48 +469,28 @@ impl LibraryService {
         self.cues(id)
     }
 
-    pub fn cue_set_color(
-        &mut self,
-        id: &str,
-        cue_id: &str,
-        color: Option<i64>,
-    ) -> Result<Vec<es_index::detail::Cue>> {
+    pub fn cue_set_color(&mut self, id: &str, cue_id: &str, color: Option<i64>) -> Result<Vec<es_index::detail::Cue>> {
         self.edit(|tx| tx.set_cue_color(id, cue_id, color))?;
         self.cues(id)
     }
 
     pub fn remove_tracks(&mut self, ids: &[String]) -> Result<RemovedTracks> {
         let removed = self.edit(|tx| tx.remove_tracks(ids))?;
-        let share = self
-            .session
-            .as_ref()
-            .ok_or_else(|| crate::Error::Other("Library not open".into()))?
-            .database()
-            .share_dir();
+        let share =
+            self.session.as_ref().ok_or_else(|| crate::Error::Other("Library not open".into()))?.database().share_dir();
         for item in &removed {
             if let Some(path) = &item.analysis_path {
                 if let Err(error) = rb_anlz::discard(&rb_anlz::files(&share, path)) {
-                    eprintln!(
-                        "[es-engine] could not delete analysis files for {}: {error}",
-                        item.id
-                    );
+                    eprintln!("[es-engine] could not delete analysis files for {}: {error}", item.id);
                 }
             }
         }
         let mut ids: Vec<String> = removed.into_iter().map(|item| item.id).collect();
         ids.sort_unstable();
-        Ok(RemovedTracks {
-            ids,
-            playlists: self.playlists()?,
-        })
+        Ok(RemovedTracks { ids, playlists: self.playlists()? })
     }
 
-    pub fn track_update(
-        &mut self,
-        ids: &[String],
-        change: &TrackEdit,
-        write_tags: bool,
-    ) -> Result<TrackUpdateResult> {
+    pub fn track_update(&mut self, ids: &[String], change: &TrackEdit, write_tags: bool) -> Result<TrackUpdateResult> {
         let mut unique = ids.to_vec();
         unique.dedup();
         if change != &TrackEdit::default() && !unique.is_empty() {
@@ -603,33 +516,24 @@ impl LibraryService {
                     match es_tags::write(path, &file_edit) {
                         Ok(()) => {
                             if let Ok(metadata) = path.metadata() {
-                                sizes
-                                    .push((id.clone(), i64::try_from(metadata.len()).unwrap_or(0)));
+                                sizes.push((id.clone(), i64::try_from(metadata.len()).unwrap_or(0)));
                             }
                         }
                         Err(error) => {
-                            let name = path.file_name().map_or_else(
-                                || files.folder_path.clone(),
-                                |name| name.to_string_lossy().into_owned(),
-                            );
+                            let name = path
+                                .file_name()
+                                .map_or_else(|| files.folder_path.clone(), |name| name.to_string_lossy().into_owned());
                             tag_errors.push(format!("{name}: {error}"));
                         }
                     }
                 }
                 if !sizes.is_empty() {
-                    self.edit(|tx| {
-                        sizes
-                            .iter()
-                            .try_for_each(|(id, size)| tx.set_file_size(id, *size))
-                    })?;
+                    self.edit(|tx| sizes.iter().try_for_each(|(id, size)| tx.set_file_size(id, *size)))?;
                 }
             }
         }
 
-        Ok(TrackUpdateResult {
-            tracks: self.tracks_by_id(&unique)?,
-            tag_errors,
-        })
+        Ok(TrackUpdateResult { tracks: self.tracks_by_id(&unique)?, tag_errors })
     }
 
     pub fn track_import(
@@ -638,15 +542,9 @@ impl LibraryService {
         playlist: Option<String>,
         artwork: bool,
     ) -> Result<TrackImportResult> {
-        let session = self
-            .session
-            .as_ref()
-            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        let session = self.session.as_ref().ok_or_else(|| crate::Error::Other("Library not open".into()))?;
         let share = session.database().share_dir();
-        let options = crate::import::Options {
-            artwork,
-            playlist: playlist.clone(),
-        };
+        let options = crate::import::Options { artwork, playlist: playlist.clone() };
         let outcome = self
             .session
             .as_mut()
@@ -656,10 +554,7 @@ impl LibraryService {
         let failed = outcome
             .failed
             .into_iter()
-            .map(|failure| TrackImportFailure {
-                path: failure.path,
-                error: failure.error,
-            })
+            .map(|failure| TrackImportFailure { path: failure.path, error: failure.error })
             .collect();
         Ok(TrackImportResult {
             tracks: self.tracks_by_id(&outcome.added)?,
@@ -670,17 +565,10 @@ impl LibraryService {
         })
     }
 
-    pub fn track_relocate(
-        &mut self,
-        moves: &[(String, String)],
-    ) -> Result<Vec<es_index::TrackRow>> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+    pub fn track_relocate(&mut self, moves: &[(String, String)]) -> Result<Vec<es_index::TrackRow>> {
+        let session = self.session.as_mut().ok_or_else(|| crate::Error::Other("Library not open".into()))?;
         let share = session.database().share_dir();
-        let ids =
-            session.with_live(|database| crate::relocate::relocate(database, &share, moves))?;
+        let ids = session.with_live(|database| crate::relocate::relocate(database, &share, moves))?;
         self.tracks_by_id(&ids)
     }
 
@@ -690,20 +578,11 @@ impl LibraryService {
         grid: &crate::analysis::Grid,
         cues: &[rb_library::CueMove],
     ) -> Result<BeatgridResult> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        let session = self.session.as_mut().ok_or_else(|| crate::Error::Other("Library not open".into()))?;
         let share = session.database().share_dir();
-        let bpm = session.with_live(|database| {
-            crate::analysis::set_beatgrid(database, &share, id, grid, cues)
-        })?;
+        let bpm = session.with_live(|database| crate::analysis::set_beatgrid(database, &share, id, grid, cues))?;
         let reads = self.read_model()?;
-        Ok(BeatgridResult {
-            beatgrid: reads.beatgrid(id)?,
-            cues: reads.cues(id)?,
-            bpm,
-        })
+        Ok(BeatgridResult { beatgrid: reads.beatgrid(id)?, cues: reads.cues(id)?, bpm })
     }
 
     pub fn track_apply_analysis(
@@ -712,14 +591,9 @@ impl LibraryService {
         analysis: &crate::analysis::Analysis,
         options: crate::analysis::Options,
     ) -> Result<Option<es_index::TrackRow>> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        let session = self.session.as_mut().ok_or_else(|| crate::Error::Other("Library not open".into()))?;
         let share = session.database().share_dir();
-        session.with_live(|database| {
-            crate::analysis::apply_analysis(database, &share, id, analysis, options)
-        })?;
+        session.with_live(|database| crate::analysis::apply_analysis(database, &share, id, analysis, options))?;
         Ok(self.tracks_by_id(&[id.to_owned()])?.into_iter().next())
     }
 
@@ -730,36 +604,18 @@ impl LibraryService {
         mode: crate::convert::Mode,
         emit: &impl Fn(ServiceEvent),
     ) -> Result<TrackConvertResult> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        let session = self.session.as_mut().ok_or_else(|| crate::Error::Other("Library not open".into()))?;
         let share = session.database().share_dir();
         let outcome = session.with_live(|database| {
-            Ok(crate::convert::convert_tracks(
-                database,
-                &share,
-                ids,
-                preset,
-                mode,
-                &|done, total, id| {
-                    emit(ServiceEvent::ConvertProgress {
-                        done,
-                        total,
-                        id: id.map(str::to_owned),
-                    });
-                },
-            ))
+            Ok(crate::convert::convert_tracks(database, &share, ids, preset, mode, &|done, total, id| {
+                emit(ServiceEvent::ConvertProgress { done, total, id: id.map(str::to_owned) });
+            }))
         })?;
         Ok(TrackConvertResult {
             tracks: self.tracks_by_id(&outcome.ids)?,
             ids: outcome.ids,
             originals: outcome.originals,
-            failed: outcome
-                .failed
-                .into_iter()
-                .map(|(id, error)| TrackConvertFailure { id, error })
-                .collect(),
+            failed: outcome.failed.into_iter().map(|(id, error)| TrackConvertFailure { id, error }).collect(),
         })
     }
 
@@ -770,26 +626,16 @@ impl LibraryService {
         options: &crate::device_import::Options,
         emit: &impl Fn(ServiceEvent),
     ) -> Result<crate::device_import::Outcome> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or_else(|| crate::Error::Other("Library not open".into()))?;
+        let session = self.session.as_mut().ok_or_else(|| crate::Error::Other("Library not open".into()))?;
         let share = session.database().share_dir();
         session.with_live(|database| {
-            crate::device_import::import_device(
-                database,
-                &share,
-                volume,
-                device,
-                options,
-                &|progress| {
-                    emit(ServiceEvent::UsbImportProgress {
-                        done: progress.done,
-                        total: progress.total,
-                        name: progress.name,
-                    });
-                },
-            )
+            crate::device_import::import_device(database, &share, volume, device, options, &|progress| {
+                emit(ServiceEvent::UsbImportProgress {
+                    done: progress.done,
+                    total: progress.total,
+                    name: progress.name,
+                });
+            })
         })
     }
 
@@ -802,11 +648,7 @@ impl LibraryService {
         decisions: Option<&rb_model::conflict::Decisions>,
         convert: Option<&crate::convert::Preset>,
     ) -> Result<crate::sync::SyncJob> {
-        let database = self
-            .session
-            .as_ref()
-            .ok_or_else(|| crate::Error::Other("Library not open".into()))?
-            .database();
+        let database = self.session.as_ref().ok_or_else(|| crate::Error::Other("Library not open".into()))?.database();
         crate::sync::prepare_sync(database, volume, playlist_ids, decisions, convert)
     }
 
@@ -816,11 +658,7 @@ impl LibraryService {
         playlist_ids: &[String],
         convert: Option<&crate::convert::Preset>,
     ) -> Result<rb_model::conflict::Inspection> {
-        let database = self
-            .session
-            .as_ref()
-            .ok_or_else(|| crate::Error::Other("Library not open".into()))?
-            .database();
+        let database = self.session.as_ref().ok_or_else(|| crate::Error::Other("Library not open".into()))?.database();
         crate::sync::inspect_volume(database, volume, playlist_ids, convert)
     }
 
@@ -837,10 +675,7 @@ impl LibraryService {
     }
 
     fn source(&self) -> Option<PathBuf> {
-        self.session
-            .as_ref()
-            .map(|session| session.source().to_path_buf())
-            .or_else(Database::installed_path)
+        self.session.as_ref().map(|session| session.source().to_path_buf()).or_else(Database::installed_path)
     }
 
     pub fn backup_list(&self) -> Vec<Value> {
@@ -853,12 +688,7 @@ impl LibraryService {
         self.backups().settings()
     }
 
-    pub fn backup_set_settings(
-        &self,
-        auto: Option<bool>,
-        keep: Option<i64>,
-        interval: Option<i64>,
-    ) -> Result<Value> {
+    pub fn backup_set_settings(&self, auto: Option<bool>, keep: Option<i64>, interval: Option<i64>) -> Result<Value> {
         Ok(self.backups().set_settings(auto, keep, interval)?)
     }
 
@@ -868,19 +698,13 @@ impl LibraryService {
 
     /// A manual backup, to run without holding the service.
     pub fn backup_create_job(&self) -> Result<BackupJob> {
-        let source = self.source().ok_or_else(|| {
-            crate::Error::Other("No rekordbox library found on this computer".into())
-        })?;
+        let source =
+            self.source().ok_or_else(|| crate::Error::Other("No rekordbox library found on this computer".into()))?;
         Ok(self.job(source, "manual"))
     }
 
     fn job(&self, source: PathBuf, reason: &'static str) -> BackupJob {
-        BackupJob {
-            backups: Arc::clone(&self.backups),
-            gate: Arc::clone(&self.backup_gate),
-            source,
-            reason,
-        }
+        BackupJob { backups: Arc::clone(&self.backups), gate: Arc::clone(&self.backup_gate), source, reason }
     }
 
     pub fn backup_delete(&self, id: &str) -> Result<Vec<Value>> {
@@ -889,19 +713,14 @@ impl LibraryService {
     }
 
     pub fn backup_restore(&mut self, id: &str, emit: &impl Fn(ServiceEvent)) -> Result<Value> {
-        let source = self.source().ok_or_else(|| {
-            crate::Error::Other("No rekordbox library found on this computer".into())
-        })?;
+        let source =
+            self.source().ok_or_else(|| crate::Error::Other("No rekordbox library found on this computer".into()))?;
         let backed_up = self.session.as_ref().is_some_and(LibrarySession::backed_up);
         let gate = Arc::clone(&self.backup_gate);
         let _gate = lock_gate(&gate);
         self.close();
-        let restored = self.backups().restore(id, &source, &|progress| {
-            emit(ServiceEvent::BackupProgress(progress))
-        });
-        emit(ServiceEvent::BackupProgress(
-            json!({ "stage": "done", "reason": "restore" }),
-        ));
+        let restored = self.backups().restore(id, &source, &|progress| emit(ServiceEvent::BackupProgress(progress)));
+        emit(ServiceEvent::BackupProgress(json!({ "stage": "done", "reason": "restore" })));
         emit(ServiceEvent::BackupChanged);
         let _ = self.open(source, false, backed_up);
         emit(ServiceEvent::LibraryReloaded);
@@ -929,9 +748,7 @@ impl LibraryService {
         };
         if writable && !session.backed_up() && auto_enabled(self.backups()) {
             if rb_library::rekordbox_running() {
-                return Err(crate::Error::Other(
-                    "Close rekordbox before editing the library".into(),
-                ));
+                return Err(crate::Error::Other("Close rekordbox before editing the library".into()));
             }
             // Wait for a daily backup already running; it may make this one unnecessary.
             let gate = Arc::clone(&self.backup_gate);
@@ -939,15 +756,9 @@ impl LibraryService {
             if auto_due(self.backups()) {
                 back_up(self.backups(), session.source(), "before-edit", emit)?;
             }
-            self.session
-                .as_mut()
-                .expect("session checked above")
-                .mark_backed_up();
+            self.session.as_mut().expect("session checked above").mark_backed_up();
         }
-        self.session
-            .as_mut()
-            .expect("session checked above")
-            .set_writable(writable)
+        self.session.as_mut().expect("session checked above").set_writable(writable)
     }
 }
 
@@ -961,7 +772,11 @@ fn open_snapshot(source: &Path) -> rb_library::Result<Database> {
     let started = std::time::Instant::now();
     let result = Database::open_snapshot(source);
     if std::env::var_os("EXPORTSTUDIO_PROFILE_LIBRARY_OPEN").is_some() {
-        eprintln!("[library-profile] snapshot source={} total_ms={:.1}", source.display(), started.elapsed().as_secs_f64() * 1000.0);
+        eprintln!(
+            "[library-profile] snapshot source={} total_ms={:.1}",
+            source.display(),
+            started.elapsed().as_secs_f64() * 1000.0
+        );
     }
     result
 }
@@ -969,11 +784,7 @@ fn open_snapshot(source: &Path) -> rb_library::Result<Database> {
 impl LibrarySession {
     pub fn open(source: PathBuf, writable: bool, backed_up: bool) -> Result<Self> {
         let database = open_snapshot(&source)?;
-        let live = if writable {
-            Some(Database::open_live(&source, Guard::RefuseWhileRunning)?)
-        } else {
-            None
-        };
+        let live = if writable { Some(Database::open_live(&source, Guard::RefuseWhileRunning)?) } else { None };
         Ok(Self {
             database,
             live,
@@ -1044,9 +855,7 @@ impl LibrarySession {
     /// Run an edit against the guarded live database, then refresh the read snapshot.
     pub fn with_live<T>(&mut self, work: impl FnOnce(&mut Database) -> Result<T>) -> Result<T> {
         if !self.writable {
-            return Err(crate::Error::Other(
-                "Unlock editing to make changes to the library".into(),
-            ));
+            return Err(crate::Error::Other("Unlock editing to make changes to the library".into()));
         }
         if self.guard == Guard::RefuseWhileRunning && rb_library::rekordbox_running() {
             return Err(rb_library::Error::RekordboxRunning.into());
@@ -1067,10 +876,7 @@ pub struct LibraryRead<'a> {
 impl<'a> LibraryRead<'a> {
     #[must_use]
     pub fn new(database: &'a Database) -> Self {
-        Self {
-            database,
-            share: database.share_dir(),
-        }
+        Self { database, share: database.share_dir() }
     }
 
     pub fn tracks(&self) -> Result<Vec<es_index::TrackRow>> {
@@ -1106,11 +912,7 @@ impl<'a> LibraryRead<'a> {
     }
 
     pub fn track_detail(&self, id: &str) -> Result<es_index::detail::Detail> {
-        Ok(es_index::detail::track_detail(
-            self.database,
-            &self.share,
-            id,
-        )?)
+        Ok(es_index::detail::track_detail(self.database, &self.share, id)?)
     }
 
     pub fn cues(&self, id: &str) -> Result<Vec<es_index::detail::Cue>> {
@@ -1118,11 +920,7 @@ impl<'a> LibraryRead<'a> {
     }
 
     pub fn beatgrid(&self, id: &str) -> Result<Option<es_index::detail::Grid>> {
-        Ok(es_index::detail::beatgrid_for(
-            self.database,
-            &self.share,
-            id,
-        )?)
+        Ok(es_index::detail::beatgrid_for(self.database, &self.share, id)?)
     }
 
     pub fn previews(&self, ids: &[String]) -> Result<Vec<es_index::detail::Preview>> {
@@ -1130,13 +928,7 @@ impl<'a> LibraryRead<'a> {
     }
 
     pub fn resolve_media(&self, kind: &str, id: &str, size: &str) -> Result<Option<PathBuf>> {
-        Ok(es_index::media::resolve_media(
-            self.database,
-            &self.share,
-            kind,
-            id,
-            size,
-        )?)
+        Ok(es_index::media::resolve_media(self.database, &self.share, kind, id, size)?)
     }
 
     pub fn find_missing(&self, ids: &[String], directory: &Path) -> Result<crate::relocate::Found> {
@@ -1170,9 +962,7 @@ mod tests {
         {
             let connection = fixture::connect(&path).unwrap();
             Rows(&connection).track("track-1", "Test track").unwrap();
-            Rows(&connection)
-                .playlist("playlist-1", "Test playlist", 0)
-                .unwrap();
+            Rows(&connection).playlist("playlist-1", "Test playlist", 0).unwrap();
         }
 
         let mut service = LibraryService::with_backup_root(directory.path().join("backups"));
@@ -1197,10 +987,7 @@ mod tests {
 
         let error = session.with_live(|_| Ok(())).unwrap_err();
 
-        assert_eq!(
-            error.to_string(),
-            "Unlock editing to make changes to the library"
-        );
+        assert_eq!(error.to_string(), "Unlock editing to make changes to the library");
     }
 
     #[test]
@@ -1227,9 +1014,7 @@ mod tests {
         let mut service = LibraryService::with_backup_root(directory.path().join("backups"));
         service.open(path, false, false).unwrap();
 
-        assert!(service
-            .open(directory.path().join("missing.db"), false, false)
-            .is_err());
+        assert!(service.open(directory.path().join("missing.db"), false, false).is_err());
         assert!(service.session().is_none());
     }
 
@@ -1298,11 +1083,19 @@ mod tests {
 
         let stage = std::time::Instant::now();
         let playlists = service.playlists().unwrap();
-        eprintln!("[library-profile] playlists_ms={:.1} rows={}", stage.elapsed().as_secs_f64() * 1000.0, playlists.len());
+        eprintln!(
+            "[library-profile] playlists_ms={:.1} rows={}",
+            stage.elapsed().as_secs_f64() * 1000.0,
+            playlists.len()
+        );
 
         let stage = std::time::Instant::now();
         let histories = service.histories().unwrap();
-        eprintln!("[library-profile] histories_ms={:.1} rows={}", stage.elapsed().as_secs_f64() * 1000.0, histories.len());
+        eprintln!(
+            "[library-profile] histories_ms={:.1} rows={}",
+            stage.elapsed().as_secs_f64() * 1000.0,
+            histories.len()
+        );
 
         let stage = std::time::Instant::now();
         let tags = service.my_tags().unwrap();
@@ -1310,11 +1103,19 @@ mod tests {
 
         let stage = std::time::Instant::now();
         let members = service.playlist_members().unwrap();
-        eprintln!("[library-profile] playlist_members_ms={:.1} rows={}", stage.elapsed().as_secs_f64() * 1000.0, members.len());
+        eprintln!(
+            "[library-profile] playlist_members_ms={:.1} rows={}",
+            stage.elapsed().as_secs_f64() * 1000.0,
+            members.len()
+        );
 
         let stage = std::time::Instant::now();
         let volumes = rb_device::volumes::list(None);
-        eprintln!("[library-profile] usb_list_ms={:.1} volumes={}", stage.elapsed().as_secs_f64() * 1000.0, volumes.len());
+        eprintln!(
+            "[library-profile] usb_list_ms={:.1} volumes={}",
+            stage.elapsed().as_secs_f64() * 1000.0,
+            volumes.len()
+        );
 
         let stage = std::time::Instant::now();
         let backup_created = service.daily_backup(&|_| {}).unwrap();
@@ -1332,15 +1133,11 @@ mod tests {
         {
             let connection = fixture::connect(&path).unwrap();
             Rows(&connection).track("track-1", "Test track").unwrap();
-            Rows(&connection)
-                .playlist("playlist-1", "Test playlist", 0)
-                .unwrap();
+            Rows(&connection).playlist("playlist-1", "Test playlist", 0).unwrap();
         }
         let mut service = writable_fixture_service(directory.path(), &path);
 
-        let ids = service
-            .playlist_add("playlist-1", &["track-1".into()])
-            .unwrap();
+        let ids = service.playlist_add("playlist-1", &["track-1".into()]).unwrap();
 
         assert_eq!(ids, ["track-1"]);
         assert_eq!(service.playlist_tracks("playlist-1").unwrap(), ["track-1"]);
@@ -1371,14 +1168,9 @@ mod tests {
             Rows(&connection).track("track-1", "Original").unwrap();
         }
         let mut service = writable_fixture_service(directory.path(), &path);
-        let change = TrackEdit {
-            title: Some("Updated".into()),
-            ..TrackEdit::default()
-        };
+        let change = TrackEdit { title: Some("Updated".into()), ..TrackEdit::default() };
 
-        let result = service
-            .track_update(&["track-1".into()], &change, false)
-            .unwrap();
+        let result = service.track_update(&["track-1".into()], &change, false).unwrap();
 
         assert_eq!(result.tracks[0].title, "Updated");
         assert!(result.tag_errors.is_empty());
@@ -1390,9 +1182,7 @@ mod tests {
         let path = fixture::build(directory.path(), 1).unwrap();
         {
             let connection = fixture::connect(&path).unwrap();
-            let journal_mode: String = connection
-                .query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
-                .unwrap();
+            let journal_mode: String = connection.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0)).unwrap();
             assert_eq!(journal_mode.to_ascii_lowercase(), "wal");
             Rows(&connection).track("track-1", "Test track").unwrap();
         }
@@ -1423,15 +1213,9 @@ mod tests {
         service.cue_add_memory("track-1", 500, Some(2500)).unwrap();
         let cues = service.cue_set_hot("track-1", 1, 4000, Some(8000)).unwrap();
 
-        let mut ranges: Vec<_> = cues
-            .iter()
-            .map(|cue| (cue.kind, cue.slot, cue.start, cue.end))
-            .collect();
+        let mut ranges: Vec<_> = cues.iter().map(|cue| (cue.kind, cue.slot, cue.start, cue.end)).collect();
         ranges.sort_unstable();
-        assert_eq!(
-            ranges,
-            [("hot", 1, 4000, Some(8000)), ("memory", 0, 500, Some(2500))]
-        );
+        assert_eq!(ranges, [("hot", 1, 4000, Some(8000)), ("memory", 0, 500, Some(2500))]);
     }
 
     #[test]
@@ -1446,11 +1230,7 @@ mod tests {
         let missing_path = directory.path().join("temporarily-missing.db");
         service.session.as_mut().unwrap().source = missing_path;
 
-        assert!(service
-            .session_mut()
-            .unwrap()
-            .set_writable(false)
-            .is_err());
+        assert!(service.session_mut().unwrap().set_writable(false).is_err());
         assert!(service.session().unwrap().source_changed());
         assert!(!service.session().unwrap().is_writable());
 

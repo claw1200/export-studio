@@ -27,13 +27,7 @@ pub(crate) struct Feed {
 
 impl Feed {
     fn new(consumer: Consumer<Block>) -> Self {
-        Self {
-            consumer,
-            current: None,
-            offset: 0,
-            generation: 0,
-            backlog: VecDeque::with_capacity(POSITIONS),
-        }
+        Self { consumer, current: None, offset: 0, generation: 0, backlog: VecDeque::with_capacity(POSITIONS) }
     }
 
     /// Puts a frame back in front of everything else. Frames go back newest first. Never grows
@@ -55,11 +49,7 @@ impl Feed {
                 if self.offset < usize::from(block.frames) {
                     let i = self.offset * 2;
                     self.offset += 1;
-                    return Some((
-                        block.samples[i],
-                        block.samples[i + 1],
-                        block.position + self.offset as u64,
-                    ));
+                    return Some((block.samples[i], block.samples[i + 1], block.position + self.offset as u64));
                 }
                 self.current = None;
                 self.offset = 0;
@@ -87,19 +77,13 @@ impl Feed {
     /// Discards blocks of an earlier generation at the front of the ring. Only the front can hold
     /// them: once the decode thread moves on, everything it queues is the new generation's.
     fn drop_stale(&mut self) {
-        while self
-            .consumer
-            .peek()
-            .is_ok_and(|block| block.generation < self.generation)
-        {
+        while self.consumer.peek().is_ok_and(|block| block.generation < self.generation) {
             let _ = self.consumer.pop();
         }
     }
 
     fn left_in_block(&self) -> usize {
-        self.current
-            .as_ref()
-            .map_or(0, |b| usize::from(b.frames).saturating_sub(self.offset))
+        self.current.as_ref().map_or(0, |b| usize::from(b.frames).saturating_sub(self.offset))
     }
 
     fn drained(&self) -> bool {
@@ -111,11 +95,7 @@ impl Feed {
             self.backlog.clear();
         }
         self.generation = generation;
-        if self
-            .current
-            .as_ref()
-            .is_some_and(|b| b.generation < generation)
-        {
+        if self.current.as_ref().is_some_and(|b| b.generation < generation) {
             self.current = None;
             self.offset = 0;
         }
@@ -149,11 +129,7 @@ pub(crate) struct DeckReader {
 }
 
 impl DeckReader {
-    pub fn new(
-        consumer: Consumer<Block>,
-        clock: Arc<DeckClock>,
-        stretchers: Consumer<Box<Stretcher>>,
-    ) -> Self {
+    pub fn new(consumer: Consumer<Block>, clock: Arc<DeckClock>, stretchers: Consumer<Box<Stretcher>>) -> Self {
         Self {
             feed: Feed::new(consumer),
             clock,
@@ -381,10 +357,7 @@ impl DeckReader {
 
     /// Whether what is left is the last of the file and short enough that the fade must start.
     fn ending(&self) -> bool {
-        if !self.clock.end_of_stream()
-            || !self.feed.consumer.is_empty()
-            || !self.feed.backlog.is_empty()
-        {
+        if !self.clock.end_of_stream() || !self.feed.consumer.is_empty() || !self.feed.backlog.is_empty() {
             return false;
         }
         self.feed.left_in_block() <= usize::from(FADE_FRAMES)

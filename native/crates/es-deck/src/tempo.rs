@@ -19,9 +19,7 @@ pub const MAX_TEMPO: f64 = 2.0;
 pub(crate) fn catmull_rom(p: [f32; 4], t: f32) -> f32 {
     p[1] + 0.5
         * t
-        * (p[2] - p[0]
-            + t * (2.0 * p[0] - 5.0 * p[1] + 4.0 * p[2] - p[3]
-                + t * (3.0 * (p[1] - p[2]) + p[3] - p[0])))
+        * (p[2] - p[0] + t * (2.0 * p[0] - 5.0 * p[1] + 4.0 * p[2] - p[3] + t * (3.0 * (p[1] - p[2]) + p[3] - p[0])))
 }
 
 /// How the deck turns file frames into output frames.
@@ -46,11 +44,7 @@ pub(crate) struct Varispeed {
 
 impl Default for Varispeed {
     fn default() -> Self {
-        Self {
-            frames: [(0.0, 0.0); 4],
-            at: [0; 4],
-            phase: 3.0,
-        }
+        Self { frames: [(0.0, 0.0); 4], at: [0; 4], phase: 3.0 }
     }
 }
 
@@ -162,8 +156,7 @@ impl Stretcher {
         for rate in [MIN_TEMPO, 1.0, MAX_TEMPO] {
             let frames = ((CHUNK as f64 * rate) as usize).min(self.input.len() / 2);
             for _ in 0..64 {
-                self.stretch
-                    .process(&self.input[..frames * 2], &mut self.output[..]);
+                self.stretch.process(&self.input[..frames * 2], &mut self.output[..]);
             }
         }
         self.input.fill(0.0);
@@ -190,11 +183,7 @@ impl Stretcher {
         let from = self.last_heard.map_or(0, |heard| heard + 1);
         for index in (from..self.fed).rev() {
             let i = (index as usize) % POSITIONS;
-            feed.unread((
-                self.history[i * 2],
-                self.history[i * 2 + 1],
-                self.positions[i],
-            ));
+            feed.unread((self.history[i * 2], self.history[i * 2 + 1], self.positions[i]));
         }
         self.reset();
     }
@@ -235,8 +224,7 @@ impl Stretcher {
         self.fed = got as u64;
         let got = self.pull(feed, true, lead);
         let out = self.output_latency.min(self.scratch.len() / 2);
-        self.stretch
-            .process(&self.input[..got * 2], &mut self.scratch[..out * 2]);
+        self.stretch.process(&self.input[..got * 2], &mut self.scratch[..out * 2]);
         self.fed += got as u64;
         self.primed = true;
         true
@@ -251,13 +239,8 @@ impl Stretcher {
         if got == 0 {
             return;
         }
-        self.carry = if got == frames {
-            wanted - frames as f64
-        } else {
-            0.0
-        };
-        self.stretch
-            .process(&self.input[..got * 2], &mut self.output[..]);
+        self.carry = if got == frames { wanted - frames as f64 } else { 0.0 };
+        self.stretch.process(&self.input[..got * 2], &mut self.output[..]);
         self.chunk_start = self.fed;
         self.chunk_in = got;
         self.fed += got as u64;
@@ -266,11 +249,7 @@ impl Stretcher {
 
     /// Moves the pitch, as a multiple of the file's. Takes effect from the next chunk.
     fn set_pitch(&mut self, pitch: f32) {
-        let pitch = if pitch.is_finite() && pitch > 0.0 {
-            pitch
-        } else {
-            1.0
-        };
+        let pitch = if pitch.is_finite() && pitch > 0.0 { pitch } else { 1.0 };
         if pitch != self.pitch {
             self.pitch = pitch;
             self.stretch.set_transpose_factor(pitch, None);
@@ -301,10 +280,9 @@ impl Stretcher {
         let i = self.out_read;
         self.out_read += 1;
         // The input frame at the centre of what is heard now, behind the newest by the latency.
-        let fed_by_now =
-            self.chunk_start as f64 + (i + 1) as f64 * self.chunk_in as f64 / CHUNK as f64;
-        let heard = (fed_by_now - self.latency_frames(rate) as f64)
-            .clamp(0.0, self.fed.saturating_sub(1) as f64) as u64;
+        let fed_by_now = self.chunk_start as f64 + (i + 1) as f64 * self.chunk_in as f64 / CHUNK as f64;
+        let heard =
+            (fed_by_now - self.latency_frames(rate) as f64).clamp(0.0, self.fed.saturating_sub(1) as f64) as u64;
         self.last_heard = Some(heard);
         let at = self.positions[(heard as usize) % POSITIONS];
         Some((self.output[i * 2], self.output[i * 2 + 1], at))
