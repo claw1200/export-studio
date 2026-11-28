@@ -45,6 +45,27 @@ pub struct Grid {
     pub bpms: Vec<f64>,
 }
 
+impl From<decode::Grid> for Grid {
+    fn from(grid: decode::Grid) -> Self {
+        Self { times: grid.times, beats: grid.beats, bpms: grid.bpms }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Phrase {
+    /// 1-based, counting the beats of the grid.
+    pub first_beat: u16,
+    pub label: String,
+}
+
+/// The phrases in an analysis file, as rekordbox labels them.
+pub(crate) fn phrases(ext: Option<&Tags>) -> Vec<Phrase> {
+    let structure = ext.and_then(rb_anlz::phrase::song_structure);
+    let phrases = structure.map(|s| s.phrases).unwrap_or_default();
+    phrases.iter().map(|phrase| Phrase { first_beat: phrase.first_beat, label: phrase.to_string() }).collect()
+}
+
 #[derive(Debug, Serialize)]
 pub struct Colour {
     pub length: usize,
@@ -82,6 +103,7 @@ pub struct Detail {
     pub file_exists: bool,
     pub cues: Vec<Cue>,
     pub beatgrid: Option<Grid>,
+    pub phrases: Vec<Phrase>,
     pub waveform: Waveform,
 }
 
@@ -159,11 +181,8 @@ pub fn track_detail(lib: &Library, share: &Path, id: &str) -> Result<Detail> {
         id: id.to_owned(),
         file_exists: Path::new(&files.folder_path).is_file(),
         cues: cues(lib, id, ext.as_ref())?,
-        beatgrid: dat.as_ref().and_then(decode::beatgrid).map(|g| Grid {
-            times: g.times,
-            beats: g.beats,
-            bpms: g.bpms,
-        }),
+        beatgrid: dat.as_ref().and_then(decode::beatgrid).map(Grid::from),
+        phrases: phrases(ext.as_ref()),
         waveform,
     })
 }
@@ -172,7 +191,7 @@ pub fn track_detail(lib: &Library, share: &Path, id: &str) -> Result<Detail> {
 pub fn beatgrid_for(lib: &Library, share: &Path, id: &str) -> Result<Option<Grid>> {
     let files = lib.track_files(id)?.ok_or_else(|| Error::NotFound(format!("track {id}")))?;
     let dat = tags(share, files.analysis_path.as_deref(), "DAT");
-    Ok(dat.as_ref().and_then(decode::beatgrid).map(|g| Grid { times: g.times, beats: g.beats, bpms: g.bpms }))
+    Ok(dat.as_ref().and_then(decode::beatgrid).map(Grid::from))
 }
 
 /// A short waveform for a browser row.

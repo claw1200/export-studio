@@ -3,7 +3,7 @@
   import { cueSections, formatBars, type CueSection } from '$lib/deck/sections'
   import { formatClock } from '$lib/format'
   import { setupCanvas } from '$lib/waveform/canvas'
-  import { CUE_POINT_COLOR } from '$lib/waveform/colors'
+  import { CUE_POINT_COLOR, PHRASE_COLORS, UNKNOWN_PHRASE_COLOR } from '$lib/waveform/colors'
   import { drawOverview } from '$lib/waveform/overview'
   import WaveformMarks from './WaveformMarks.svelte'
 
@@ -32,6 +32,7 @@
       : []
   )
   const bandWidth = (band: { start: number; end: number }): number => ((pct(band.end) - pct(band.start)) / 100) * width
+  const phraseColor = (label: string): string => PHRASE_COLORS[label.split(' ')[0]] ?? UNKNOWN_PHRASE_COLOR
   /** Owns the hover line while a section is pointed at, apart from the waveform's own hover. */
   const SECTION_PREVIEW = 'section'
 
@@ -131,6 +132,17 @@
     }}
   >
     <canvas {@attach paint} class="absolute inset-0 h-full w-full"></canvas>
+    {#each player.phraseSections as phrase (phrase.start)}
+      <span
+        class="pointer-events-none absolute top-0 h-[11px] overflow-hidden border-l border-black/60 px-0.5 text-[8.5px] leading-[11px] font-semibold whitespace-nowrap text-black/80"
+        style:left="{pct(phrase.start)}%"
+        style:width="{pct(phrase.end) - pct(phrase.start)}%"
+        style:background={phraseColor(phrase.label)}
+        title={phrase.label}
+      >
+        {#if bandWidth(phrase) >= LABEL_MIN_WIDTH}{phrase.label}{/if}
+      </span>
+    {/each}
     <div class="pointer-events-none absolute inset-y-0 left-0 bg-black/50" style:width="{pct(player.position)}%"></div>
 
     <WaveformMarks

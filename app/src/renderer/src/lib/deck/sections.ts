@@ -1,5 +1,5 @@
 import { BEATS_PER_BAR, fractionalBeatIndex } from '../beat'
-import type { Beatgrid, Cue } from '../types'
+import type { Beatgrid, Cue, Phrase } from '../types'
 
 /** Cues closer together than this mark the same place, e.g. a hot cue on a memory cue. */
 const SAME_PLACE_SECONDS = 0.05
@@ -49,6 +49,21 @@ export function cueSections(cues: readonly Cue[], grid: Beatgrid | null, bpm: nu
     sections.push({ start: last, end: trackEnd, bars: barsBetween(last, trackEnd, grid, bpm), edge: 'out' })
   }
   return sections
+}
+
+/** A phrase's stretch of the track, in seconds. */
+export interface PhraseSection {
+  start: number
+  end: number
+  label: string
+}
+
+/** The phrases placed on the grid they count beats of, each running to the next or to `trackEnd`. */
+export function phraseSections(phrases: readonly Phrase[], grid: Beatgrid | null, trackEnd: number): PhraseSection[] {
+  const placed = phrases
+    .map((phrase) => ({ start: (grid?.times[phrase.firstBeat - 1] ?? NaN) / 1000, label: phrase.label }))
+    .filter((phrase) => Number.isFinite(phrase.start))
+  return placed.map((phrase, i) => ({ ...phrase, end: placed[i + 1]?.start ?? trackEnd }))
 }
 
 /** A bar count as a label: whole bars plainly, anything else to the nearest quarter. */

@@ -16,9 +16,12 @@ export const DEFAULT_DECK_PREFS = {
 export class DeckPrefs {
   quantise = $state(storedFlag('quantise', DEFAULT_DECK_PREFS.quantise))
   loadAtFirstCue = $state(storedFlag('loadAtFirstCue', DEFAULT_DECK_PREFS.loadAtFirstCue))
-  cuePlacement = $state(storedChoice<CuePlacement>('cuePlacement', ['playhead', 'cuePoint'], DEFAULT_DECK_PREFS.cuePlacement))
+  cuePlacement = $state(
+    storedChoice<CuePlacement>('cuePlacement', ['playhead', 'cuePoint'], DEFAULT_DECK_PREFS.cuePlacement)
+  )
   snapPlayhead = $state(storedFlag('snapPlayhead'))
   unlimitedMemoryCues = $state(storedFlag('unlimitedMemoryCues'))
+  showPhrases = $state(storedFlag('showPhrases'))
   tempoReadout = $state(
     storedChoice<TempoReadout>('tempoReadout', ['absolute', 'relative'], DEFAULT_DECK_PREFS.tempoReadout)
   )
@@ -44,13 +47,19 @@ export class DeckPrefs {
     storeFlag('unlimitedMemoryCues', on)
   }
 
+  setShowPhrases(on: boolean): void {
+    this.showPhrases = on
+    storeFlag('showPhrases', on)
+  }
+
   get developerOptionsAreDefault(): boolean {
-    return !this.snapPlayhead && !this.unlimitedMemoryCues && this.waveform.heightScalesAreDefault
+    return !this.snapPlayhead && !this.unlimitedMemoryCues && !this.showPhrases && this.waveform.heightScalesAreDefault
   }
 
   resetDeveloperOptions(): void {
     this.setSnapPlayhead(false)
     this.setUnlimitedMemoryCues(false)
+    this.setShowPhrases(false)
     this.waveform.resetHeightScales()
   }
 

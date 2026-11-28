@@ -7,6 +7,7 @@ import { GridEditor } from './deck/grid.svelte'
 import { TrackSession } from './deck/session.svelte'
 import { WaveformDisplay } from './deck/display.svelte'
 import type { CuePlacement, DeckPrefs } from './deck/prefs.svelte'
+import { phraseSections, type PhraseSection } from './deck/sections'
 import { TempoControl } from './deck/tempo.svelte'
 import { Listeners } from './listeners'
 import {
@@ -92,6 +93,11 @@ export class Player {
 
   get cuePlacement(): CuePlacement {
     return this.prefs.cuePlacement
+  }
+
+  get phraseSections(): PhraseSection[] {
+    if (!this.prefs.showPhrases || !this.detail) return []
+    return phraseSections(this.detail.phrases, this.displayGrid, this.duration)
   }
 
   get track(): Track | null {

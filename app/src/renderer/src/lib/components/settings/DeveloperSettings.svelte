@@ -56,6 +56,12 @@
       on={prefs.unlimitedMemoryCues}
       onflip={() => prefs.setUnlimitedMemoryCues(!prefs.unlimitedMemoryCues)}
     />
+    <SettingToggle
+      label="Show phrases"
+      description="Draw the track's phrases along the top of each deck's overview, from our analysis or rekordbox's."
+      on={prefs.showPhrases}
+      onflip={() => prefs.setShowPhrases(!prefs.showPhrases)}
+    />
     <SettingsGroup title="Waveform height">
       {@render heightScaleSlider('Player waveform', 'Height of the scrolling waveform on each deck.', 'detail')}
       {@render heightScaleSlider(

@@ -44,6 +44,7 @@ export class TrackSession {
         id: track.id,
         cues: [],
         beatgrid: null,
+        phrases: [],
         waveform: { rate: 1, rgb: null, threeBand: null, threeBandPreview: null, mono: null }
       }
       this.loading = false

@@ -4,9 +4,11 @@ import { describe, it } from 'node:test'
 
 register(new URL('./resolve-ts.mjs', import.meta.url).href)
 
-const { barsBetween, cueSections, formatBars } = await import('../src/renderer/src/lib/deck/sections.ts')
+const { barsBetween, cueSections, formatBars, phraseSections } =
+  await import('../src/renderer/src/lib/deck/sections.ts')
 type Beatgrid = import('../src/renderer/src/lib/types.ts').Beatgrid
 type Cue = import('../src/renderer/src/lib/types.ts').Cue
+type Phrase = import('../src/renderer/src/lib/types.ts').Phrase
 
 /** A steady grid at `bpm` from `firstMs`, `count` beats long. */
 function grid(bpm: number, count: number, firstMs = 0): Beatgrid {
@@ -119,5 +121,22 @@ describe('formatBars', () => {
   it('rounds anything else to the nearest quarter bar', () => {
     assert.equal(formatBars(7.5), '7.5')
     assert.equal(formatBars(3.26), '3.25')
+  })
+})
+
+describe('phraseSections', () => {
+  const phrase = (firstBeat: number, label: string): Phrase => ({ firstBeat, label })
+
+  it('places each phrase on its beat and runs it to the next', () => {
+    const sections = phraseSections([phrase(1, 'INTRO 1'), phrase(65, 'CHORUS 1')], grid(120, 128), 70)
+    assert.deepEqual(sections, [
+      { start: 0, end: 32, label: 'INTRO 1' },
+      { start: 32, end: 70, label: 'CHORUS 1' }
+    ])
+  })
+
+  it('leaves out phrases past the end of the grid, and draws none without one', () => {
+    assert.equal(phraseSections([phrase(1, 'INTRO 1'), phrase(500, 'OUTRO 1')], grid(120, 128), 70).length, 1)
+    assert.deepEqual(phraseSections([phrase(1, 'INTRO 1')], null, 70), [])
   })
 })

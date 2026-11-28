@@ -177,10 +177,18 @@ export interface TrackPreview {
   } | null
 }
 
+export interface Phrase {
+  /** 1-based, counting the beats of the grid. */
+  firstBeat: number
+  /** As rekordbox shows it, such as `CHORUS 1`. */
+  label: string
+}
+
 export interface TrackDetail {
   id: string
   cues: Cue[]
   beatgrid: Beatgrid | null
+  phrases: Phrase[]
   waveform: WaveformPayload
 }
 

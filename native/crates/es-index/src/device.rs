@@ -249,11 +249,8 @@ pub fn detail(volume: &Path, key: &str, track: &Track) -> Detail {
         id: key.to_owned(),
         file_exists: audio.as_ref().is_some_and(|p| p.is_file()),
         cues: device_cues(track, ext.as_ref()),
-        beatgrid: dat.as_ref().and_then(decode::beatgrid).map(|g| Grid {
-            times: g.times,
-            beats: g.beats,
-            bpms: g.bpms,
-        }),
+        beatgrid: dat.as_ref().and_then(decode::beatgrid).map(Grid::from),
+        phrases: crate::detail::phrases(ext.as_ref()),
         waveform: Waveform {
             rate: 150,
             three_band: bands("PWV7"),
