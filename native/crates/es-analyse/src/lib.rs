@@ -2,6 +2,7 @@
 //! from. Our own algorithm, written from published methods; it is not rekordbox's.
 
 mod attack;
+pub mod cue_style;
 pub mod downbeat;
 pub mod key;
 pub mod onset;

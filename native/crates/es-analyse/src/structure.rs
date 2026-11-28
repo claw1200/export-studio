@@ -32,7 +32,7 @@ const FLAT_SPREAD: f64 = 1e-9;
 const QUIET_PERCENTILE: f64 = 0.1;
 const LOUD_PERCENTILE: f64 = 0.95;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SectionKind {
     Intro,
     Build,

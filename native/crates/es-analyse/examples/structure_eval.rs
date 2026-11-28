@@ -12,14 +12,15 @@ use std::path::Path;
 use es_analyse::structure::{
     bar_phase, bar_phase_votes, segment, BeatFeatures, BeatIndex, Section, SectionKind, Tuning,
 };
-use es_analyse::{analyse_samples, decode_mono, Beat, Options, SAMPLE_RATE};
+use es_analyse::{analyse_samples, decode_mono, Options, SAMPLE_RATE};
 use rayon::prelude::*;
 use serde_json::Value;
 
-const SURVEY_ON_BEAT_MS: f64 = 15.0;
+#[path = "survey/mod.rs"]
+mod survey;
+use survey::{nearest_beat, share, survey_grid, Score, BEATS_PER_BAR, SURVEY_ON_BEAT_MS};
+
 const OUR_GRID_ON_BEAT_SHARE: f64 = 0.25;
-const NEAR_MISS_BEATS: usize = 8;
-const BEATS_PER_BAR: usize = 4;
 
 struct Track {
     title: String,
@@ -33,63 +34,11 @@ struct Track {
     downbeat_offset: Option<usize>,
 }
 
-#[derive(Default, Clone, Copy)]
-struct Score {
-    cues: usize,
-    starts: usize,
-    hits: usize,
-    near_misses: usize,
-    tracks: usize,
-}
-
-impl Score {
-    fn add(&mut self, cues: &HashSet<BeatIndex>, starts: &HashSet<BeatIndex>) {
-        self.cues += cues.len();
-        self.starts += starts.len();
-        self.hits += cues.intersection(starts).count();
-        self.near_misses += cues
-            .iter()
-            .filter(|&&cue| {
-                !starts.contains(&cue) && starts.iter().any(|&start| start.abs_diff(cue) <= NEAR_MISS_BEATS)
-            })
-            .count();
-        self.tracks += 1;
-    }
-
-    fn recall(&self) -> f64 {
-        self.hits as f64 / self.cues.max(1) as f64
-    }
-
-    fn precision(&self) -> f64 {
-        self.hits as f64 / self.starts.max(1) as f64
-    }
-
-    fn f1(&self) -> f64 {
-        let (p, r) = (self.precision(), self.recall());
-        if p + r == 0.0 {
-            0.0
-        } else {
-            2.0 * p * r / (p + r)
-        }
-    }
-
-    fn line(&self, name: &str) -> String {
-        format!(
-            "{name:<34} recall {:>5.1}%  precision {:>5.1}%  F1 {:.3}  near misses {:>4.1}%  starts/track {:>5.1}",
-            100.0 * self.recall(),
-            100.0 * self.precision(),
-            self.f1(),
-            100.0 * self.near_misses as f64 / self.cues.max(1) as f64,
-            self.starts as f64 / self.tracks.max(1) as f64,
-        )
-    }
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let path = args.next().ok_or("pass the survey JSON from cue_survey")?;
     let our_grid = args.any(|arg| arg == "--our-grid");
-    let survey: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(path)?)?;
+    let survey = survey::load(&path)?;
     let tracks: Vec<Track> = survey.par_iter().filter_map(|entry| measure(entry, our_grid)).collect();
     println!("measured {} of {} tracks{}\n", tracks.len(), survey.len(), if our_grid { " on our grid" } else { "" });
 
@@ -111,31 +60,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nbest {best:?}");
     report_anchors(&tracks, &best);
     Ok(())
-}
-
-fn numbers(value: &Value) -> Vec<u64> {
-    value.as_array().map(|all| all.iter().filter_map(Value::as_u64).collect()).unwrap_or_default()
-}
-
-fn survey_grid(entry: &Value) -> Vec<Beat> {
-    let times = numbers(&entry["grid"]["times"]);
-    let beat_numbers = numbers(&entry["grid"]["beats"]);
-    times
-        .iter()
-        .zip(&beat_numbers)
-        .map(|(&time_ms, &number)| Beat { number: number as u8, tempo_x100: 0, time_ms: time_ms as u32 })
-        .collect()
-}
-
-fn nearest_beat(beats: &[Beat], ms: f64, tolerance_ms: f64) -> Option<BeatIndex> {
-    let after = beats.partition_point(|beat| f64::from(beat.time_ms) < ms);
-    let distance = |index: usize| (f64::from(beats[index].time_ms) - ms).abs();
-    [after.checked_sub(1), Some(after)]
-        .into_iter()
-        .flatten()
-        .filter(|&index| index < beats.len())
-        .min_by(|&a, &b| distance(a).total_cmp(&distance(b)))
-        .filter(|&index| distance(index) <= tolerance_ms)
 }
 
 fn measure(entry: &Value, our_grid: bool) -> Option<Track> {
@@ -363,10 +287,6 @@ fn label_agreement(tracks: &[Track], tuning: &Tuning) -> LabelAgreement {
         }
     }
     agreement
-}
-
-fn share(agreed: usize, total: usize) -> f64 {
-    100.0 * agreed as f64 / total.max(1) as f64
 }
 
 fn report_labels(tracks: &[Track], tuning: &Tuning) {
