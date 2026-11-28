@@ -70,7 +70,8 @@
         loop: player.loop,
         gridEditing: player.grid.editing,
         hotGridIndex,
-        tempoFlags: player.grid.flagMarks
+        tempoFlags: player.grid.flagMarks,
+        phrases: player.phraseSections
       },
       canvas.width,
       canvas.height,

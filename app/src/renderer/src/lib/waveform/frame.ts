@@ -1,3 +1,4 @@
+import type { PhraseSection } from '../deck/sections'
 import type { Beatgrid, Cue } from '../types'
 import type { Waveform } from './data'
 
@@ -23,6 +24,7 @@ export interface DetailView {
   /** Beat under the pointer while editing, or -1. Dragging its handle shifts the grid. */
   hotGridIndex: number
   tempoFlags?: TempoFlagMark[]
+  phrases?: PhraseSection[]
 }
 
 /** One draw of the detail view: the canvas in device pixels and the entries it spans. */

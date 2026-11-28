@@ -3,7 +3,7 @@
   import { cueSections, formatBars, type CueSection } from '$lib/deck/sections'
   import { formatClock } from '$lib/format'
   import { setupCanvas } from '$lib/waveform/canvas'
-  import { CUE_POINT_COLOR, PHRASE_COLORS, UNKNOWN_PHRASE_COLOR } from '$lib/waveform/colors'
+  import { CUE_POINT_COLOR, phraseColor } from '$lib/waveform/colors'
   import { drawOverview } from '$lib/waveform/overview'
   import WaveformMarks from './WaveformMarks.svelte'
 
@@ -32,7 +32,6 @@
       : []
   )
   const bandWidth = (band: { start: number; end: number }): number => ((pct(band.end) - pct(band.start)) / 100) * width
-  const phraseColor = (label: string): string => PHRASE_COLORS[label.split(' ')[0]] ?? UNKNOWN_PHRASE_COLOR
   /** Owns the hover line while a section is pointed at, apart from the waveform's own hover. */
   const SECTION_PREVIEW = 'section'
 

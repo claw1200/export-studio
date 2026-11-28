@@ -12,6 +12,7 @@ import {
   paintGridHandles,
   paintLoopEdges,
   paintLoops,
+  paintPhrases,
   paintPlayhead
 } from './markers'
 import { drawSampleWave, waveStride } from './samples'
@@ -78,6 +79,7 @@ export function drawDetail(
     toX: (seconds) => ((seconds * wf.rate - from) / (to - from)) * pw
   }
   paintLoops(frame)
+  paintPhrases(frame)
   paintWave(frame, mode, samples, quality, fallBlocks, rgbColors, heightScale)
   paintLoopEdges(frame)
   paintBeatGrid(frame)

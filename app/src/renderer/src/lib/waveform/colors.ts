@@ -1,7 +1,7 @@
 export const CUE_POINT_COLOR = '#ff8a1f'
 
 /** Keyed by the first word of a rekordbox phrase label, in rekordbox's own colours. */
-export const PHRASE_COLORS: Record<string, string> = {
+const PHRASE_COLORS: Record<string, string> = {
   INTRO: '#e0464a',
   VERSE: '#3d7cf0',
   UP: '#9b5cf0',
@@ -10,7 +10,11 @@ export const PHRASE_COLORS: Record<string, string> = {
   CHORUS: '#3fbf5a',
   OUTRO: '#5a6ee0'
 }
-export const UNKNOWN_PHRASE_COLOR = '#888888'
+const UNKNOWN_PHRASE_COLOR = '#888888'
+
+export function phraseColor(label: string): string {
+  return PHRASE_COLORS[label.split(' ')[0]] ?? UNKNOWN_PHRASE_COLOR
+}
 export const LOOP_ACTIVE_COLOR = '#ffb020'
 
 export const TEMPO_FLAG_COLOR = '#b48cff'

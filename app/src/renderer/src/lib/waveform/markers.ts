@@ -2,7 +2,7 @@
 import { barBeatAt, countdownTo, firstIndexAtOrAfter } from '../beat'
 import { cueColor, hotCueLetter } from '../format'
 import type { Beatgrid, Cue } from '../types'
-import { CUE_POINT_COLOR, LOOP_ACTIVE_COLOR, TEMPO_FLAG_COLOR } from './colors'
+import { CUE_POINT_COLOR, LOOP_ACTIVE_COLOR, phraseColor, TEMPO_FLAG_COLOR } from './colors'
 import type { Waveform } from './data'
 import type { Frame, WidthFraction } from './frame'
 
@@ -11,6 +11,37 @@ const HANDLE_W = 6
 const HANDLE_H = 30
 const HANDLE_HIT_X = 10
 const HANDLE_HIT_Y = 18
+/** The phrase strip fills the clear band above the waveform, in CSS pixels. */
+const PHRASE_STRIP_H = 9
+const PHRASE_TINT_ALPHA = '1a'
+const PHRASE_EDGE_ALPHA = '99'
+
+/** Each phrase as a faint tint over its stretch, a line where it starts, and a labelled strip along the top. */
+export function paintPhrases(frame: Frame): void {
+  const { ctx, view, pw, ph, dpr, toX } = frame
+  const strip = Math.round(PHRASE_STRIP_H * dpr)
+  const edge = Math.max(1, Math.round(dpr))
+  ctx.font = `600 ${Math.round(7.5 * dpr)}px system-ui, sans-serif`
+  ctx.textBaseline = 'middle'
+  ctx.textAlign = 'left'
+  for (const phrase of view.phrases ?? []) {
+    const x0 = Math.round(toX(phrase.start))
+    const x1 = Math.round(toX(phrase.end))
+    if (x1 < 0 || x0 > pw) continue
+    const color = phraseColor(phrase.label)
+    ctx.fillStyle = color + PHRASE_TINT_ALPHA
+    ctx.fillRect(x0, strip, x1 - x0, ph - strip)
+    ctx.fillStyle = color + PHRASE_EDGE_ALPHA
+    ctx.fillRect(x0, 0, edge, ph)
+    ctx.fillStyle = color
+    ctx.fillRect(x0, 0, x1 - x0, strip)
+    const textX = Math.max(x0, 0) + 3 * dpr
+    if (x1 - textX > ctx.measureText(phrase.label).width) {
+      ctx.fillStyle = '#000000cc'
+      ctx.fillText(phrase.label, textX, strip / 2 + 0.5 * dpr)
+    }
+  }
+}
 
 export function paintLoops(frame: Frame): void {
   const { ctx, view, pw, ph, toX } = frame
