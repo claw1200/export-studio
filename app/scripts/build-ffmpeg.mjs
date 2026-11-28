@@ -4,7 +4,7 @@
 // Windows needs an MSYS2 UCRT64 shell with make, nasm, the mingw toolchain and lame.
 // Usage: node scripts/build-ffmpeg.mjs [--version 7.1]
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,14 +23,17 @@ const source = join(work, `ffmpeg-${version}`)
 run('curl', ['-fsSL', '-o', join(work, 'ffmpeg.tar.xz'), `https://ffmpeg.org/releases/ffmpeg-${version}.tar.xz`], work)
 run('tar', ['-xf', 'ffmpeg.tar.xz'], work)
 
+// Homebrew's and MSYS2's lame decode with mpg123, which configure's lame check doesn't link.
+// Static mpg123 on Windows also needs shlwapi.
+const lameDependencies = isWindows ? '--extra-libs=-lmpg123 -lshlwapi' : '--extra-libs=-lmpg123'
+
 function staticLinkFlags() {
-  if (isWindows) return ['--extra-ldflags=-static']
+  if (isWindows) return ['--extra-ldflags=-static', lameDependencies]
   if (!isMac) return []
   const brewPrefix = (formula) => output('brew', ['--prefix', formula]).trim()
   // ld prefers a .dylib over a .a in the same directory, so the archives get a directory of their own.
   const archivesOnly = join(work, 'static-libs')
   mkdirSync(archivesOnly)
-  // Homebrew's lame decodes with mpg123, which configure's lame check doesn't link.
   for (const [formula, archive] of [
     ['lame', 'libmp3lame.a'],
     ['mpg123', 'libmpg123.a']
@@ -40,7 +43,7 @@ function staticLinkFlags() {
   return [
     `--extra-cflags=-I${join(brewPrefix('lame'), 'include')}`,
     `--extra-ldflags=-L${archivesOnly}`,
-    '--extra-libs=-lmpg123'
+    lameDependencies
   ]
 }
 
@@ -62,31 +65,41 @@ const demuxers = ['mp3', 'mov', 'flac', 'wav', 'aiff', 'ogg', 'image2']
 const muxers = ['mp3', 'ipod', 'flac', 'wav', 'aiff', 'image2']
 const list = (flag, names) => names.map((name) => `--enable-${flag}=${name}`)
 
+function showConfigureFailure() {
+  const log = join(source, 'ffbuild', 'config.log')
+  if (existsSync(log)) console.error(readFileSync(log, 'utf8').split('\n').slice(-60).join('\n'))
+}
+
 const [configure, ...configureArgs] = isWindows ? ['sh', './configure'] : ['./configure']
-run(
-  configure,
-  [
-    ...configureArgs,
-    '--disable-everything',
-    '--disable-autodetect',
-    '--disable-doc',
-    '--disable-ffplay',
-    '--disable-ffprobe',
-    '--enable-static',
-    '--disable-shared',
-    '--enable-libmp3lame',
-    ...staticLinkFlags(),
-    ...list('decoder', decoders),
-    ...list('encoder', encoders),
-    ...list('demuxer', demuxers),
-    ...list('muxer', muxers),
-    ...list('parser', ['mpegaudio', 'aac', 'flac']),
-    ...list('protocol', ['file']),
-    ...list('filter', ['aresample', 'aformat', 'anull', 'copy']),
-    '--enable-bsf=aac_adtstoasc'
-  ],
-  source
-)
+try {
+  run(
+    configure,
+    [
+      ...configureArgs,
+      '--disable-everything',
+      '--disable-autodetect',
+      '--disable-doc',
+      '--disable-ffplay',
+      '--disable-ffprobe',
+      '--enable-static',
+      '--disable-shared',
+      '--enable-libmp3lame',
+      ...staticLinkFlags(),
+      ...list('decoder', decoders),
+      ...list('encoder', encoders),
+      ...list('demuxer', demuxers),
+      ...list('muxer', muxers),
+      ...list('parser', ['mpegaudio', 'aac', 'flac']),
+      ...list('protocol', ['file']),
+      ...list('filter', ['aresample', 'aformat', 'anull', 'copy']),
+      '--enable-bsf=aac_adtstoasc'
+    ],
+    source
+  )
+} catch (error) {
+  showConfigureFailure()
+  throw error
+}
 run('make', ['-j4', 'ffmpeg'], source)
 
 const name = isWindows ? 'ffmpeg.exe' : 'ffmpeg'

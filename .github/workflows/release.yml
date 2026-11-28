@@ -209,7 +209,7 @@ jobs:
           msystem: UCRT64
           path-type: inherit
           install: make diffutils tar xz
-          pacboy: toolchain:p nasm:p lame:p
+          pacboy: toolchain:p nasm:p lame:p mpg123:p
 
       - name: Build ffmpeg
         working-directory: app
