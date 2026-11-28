@@ -100,9 +100,9 @@ try {
   showConfigureFailure()
   throw error
 }
-run('make', ['-j4', 'ffmpeg'], source)
-
 const name = isWindows ? 'ffmpeg.exe' : 'ffmpeg'
+run('make', ['-j4', name], source)
+
 const built = join(source, name)
 if (!existsSync(built)) throw new Error(`ffmpeg was not built at ${built}`)
 
