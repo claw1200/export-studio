@@ -336,15 +336,15 @@ fn name_sections(features: &BeatFeatures, starts: &[BeatIndex], tuning: &Tuning)
         starts.iter().zip(starts.iter().skip(1).copied().chain([features.beats()])).map(|(&a, b)| (a, b)).collect();
     let energies: Vec<f64> = spans.iter().map(|&(a, b)| mean(&energy[a..b])).collect();
     let last = spans.len() - 1;
-    let frames_the_track = |index: usize| last > 0 && (index == 0 || index == last);
+    let opens_the_track = |index: usize| last > 0 && index == 0;
     let mut is_drop: Vec<bool> = energies
         .iter()
         .enumerate()
-        .map(|(index, &energy)| !frames_the_track(index) && energy >= tuning.drop_energy)
+        .map(|(index, &energy)| !opens_the_track(index) && energy >= tuning.drop_energy)
         .collect();
     if !is_drop.contains(&true) {
         let loudest_inside =
-            (0..=last).filter(|&index| !frames_the_track(index)).max_by(|&a, &b| energies[a].total_cmp(&energies[b]));
+            (0..=last).filter(|&index| !opens_the_track(index)).max_by(|&a, &b| energies[a].total_cmp(&energies[b]));
         if let Some(index) = loudest_inside {
             is_drop[index] = true;
         }
@@ -357,10 +357,8 @@ fn name_sections(features: &BeatFeatures, starts: &[BeatIndex], tuning: &Tuning)
         .enumerate()
         .map(|(index, &(first_beat, end_beat))| {
             let leads_into_drop = is_drop.get(index + 1).copied().unwrap_or(false);
-            let kind = if last > 0 && index == 0 {
+            let kind = if opens_the_track(index) {
                 SectionKind::Intro
-            } else if last > 0 && index == last {
-                SectionKind::Outro
             } else if is_drop[index] {
                 SectionKind::Drop
             } else if index > last_drop {
@@ -552,6 +550,16 @@ mod tests {
         let parts = [bars(16, INTRO), bars(7, BREAKDOWN), bars(16, DROP), bars(16, BREAKDOWN), bars(16, OUTRO)];
         let starts: Vec<BeatIndex> = found(&parts, 0).iter().map(|&(beat, _)| beat).collect();
         assert_eq!(starts, [0, 64, 92, 156, 220]);
+    }
+
+    #[test]
+    fn a_last_drop_that_runs_to_the_end_keeps_the_sections_before_it_out_of_the_outro() {
+        let parts = [bars(16, INTRO), bars(16, DROP), bars(16, BREAKDOWN), bars(8, BUILD), bars(32, DROP)];
+        let kinds: Vec<SectionKind> = found(&parts, 0).iter().map(|&(_, kind)| kind).collect();
+        assert_eq!(
+            kinds,
+            [SectionKind::Intro, SectionKind::Drop, SectionKind::Breakdown, SectionKind::Build, SectionKind::Drop]
+        );
     }
 
     #[test]
